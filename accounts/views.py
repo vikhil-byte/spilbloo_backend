@@ -9,15 +9,24 @@ from .serializers import UserSerializer, RegisterSerializer, CustomTokenObtainPa
 from .models import HaLogins
 from core.models import (
     ContactForm, LoginHistory, Symptom, UserSymptom, AgeGroup, 
-    AssignedTherapist, PushNotification, VideoPlan
+    AssignedTherapist, PushNotification, VideoPlan, Page, Faq
 )
-from core.serializers import SymptomSerializer
+from core.serializers import SymptomSerializer, PageSerializer, FaqSerializer, TherapistEarningSerializer
 from django.db import transaction
 from django.db.models import Case, When, F
 import random
+import logging
 from django.utils import timezone
 
+logger = logging.getLogger(__name__)
+
 User = get_user_model()
+
+def send_otp_via_email(email, otp):
+    # This is a placeholder for real email service (SendGrid/SES)
+    logger.info(f"Sending OTP {otp} to email {email}")
+    # In production: send_mail(subject, message, from, [email])
+    pass
 
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -37,11 +46,9 @@ class RegisterView(generics.CreateAPIView):
         user.otp = otp
         user.otp_verified = 0 # User.OTP_NOT_VERIFIED mapping
         user.role_id = User.ROLE_PATIENT # Default role from PHP signup
-        user.state_id = User.STATE_INACTIVE # Will be active after OTP
-        # email_verified logic...
         user.save()
 
-        # TODO: Implement `user.sendOtpMailtoUser()` logic here (e.g. celery task)
+        send_otp_via_email(user.email, otp)
         
         return Response({
             "message": "User registered successfully. Please verify your OTP.",
@@ -99,11 +106,9 @@ class ResendOtpView(APIView):
         try:
             user = User.objects.get(email=email)
             otp = str(random.randint(1000, 9999))
-            user.otp = otp
-            # PHP logic also sets `last_action_time` which we can just map to updated_on
             user.save()
 
-            # TODO: Send Email
+            send_otp_via_email(user.email, otp)
             
             return Response({
                 "message": "Verification code sent successfully"
@@ -231,14 +236,15 @@ class DetailView(generics.RetrieveAPIView):
 class GetPageView(APIView):
     permission_classes = (AllowAny,)
 
-    def get(self, request, type_id):
-        return Response({
-            "detail": {
-                "id": type_id,
-                "title": "Mock Page Title",
-                "description": "Mock Page Description. Awaiting Page model implementation."
-            }
-        }, status=status.HTTP_200_OK)
+    def get(self, request):
+        type_id = request.query_params.get('type_id')
+        if not type_id:
+             return Response({"error": "type_id required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        page = Page.objects.filter(type_id=type_id, state_id=1).first()
+        if page:
+            return Response({"detail": PageSerializer(page).data}, status=status.HTTP_200_OK)
+        return Response({"error": "Page not found"}, status=status.HTTP_404_NOT_FOUND)
 
 class ForgotPasswordView(APIView):
     permission_classes = (AllowAny,)
@@ -326,13 +332,15 @@ class MatchesListView(APIView):
         }, status=status.HTTP_200_OK)
 
 class FaqView(APIView):
-    # Depending on how Category / FAQ models are mapped. The PHP uses `app\modules\faq\models\Category`
-    # Let's mock a simple response based on type_id (ROLE) for now, until FAQ models are fully mirrored.
     permission_classes = (AllowAny,)
     
-    def get(self, request, type_id):
-        # Return empty list or implement FAQ retrieval once the FAQ model is ready
-        return Response([{"id": 1, "question": "Example?", "answer": "Answer"}], status=status.HTTP_200_OK)
+    def get(self, request):
+        type_id = request.query_params.get('type_id') # e.g. User Role
+        faqs = Faq.objects.filter(state_id=1)
+        if type_id:
+            faqs = faqs.filter(type_id=type_id)
+            
+        return Response({"list": FaqSerializer(faqs, many=True).data}, status=status.HTTP_200_OK)
 
 class AssignDoctorView(APIView):
     permission_classes = (IsAuthenticated,)
@@ -510,12 +518,17 @@ class EarningsView(APIView):
 
     def get(self, request):
         user = request.user
-        page = request.query_params.get('page', 0)
-        # Mock earnings computation for now
-        total_earning = 0.00
+        if int(user.role_id) != User.ROLE_DOCTER:
+             return Response({"error": "Only therapists have earnings."}, status=status.HTTP_403_FORBIDDEN)
+             
+        earnings = TherapistEarning.objects.filter(therapist=user, state_id=1).order_by('-date')
+        
+        total_earning = sum([float(e.amount or 0) for e in earnings])
+        
+        # Pagination simplified
         return Response({
             "total_earning": "{:.2f}".format(total_earning),
-            "list": []
+            "list": TherapistEarningSerializer(earnings[:50], many=True).data
         }, status=status.HTTP_200_OK)
 
 

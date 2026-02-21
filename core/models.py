@@ -859,3 +859,89 @@ class LoginHistory(models.Model):
 
     def __str__(self):
         return f"Logged-in : {self.user_id} : {self.get_state_id_display()}"
+
+class Page(models.Model):
+    # States
+    STATE_INACTIVE = 0
+    STATE_ACTIVE = 1
+    STATE_DELETED = 2
+
+    STATE_CHOICES = (
+        (STATE_INACTIVE, 'New'),
+        (STATE_ACTIVE, 'Active'),
+        (STATE_DELETED, 'Deleted'),
+    )
+
+    title = models.CharField(max_length=256)
+    description = models.TextField()
+    slug = models.SlugField(max_length=255, unique=True, null=True, blank=True)
+    
+    state_id = models.SmallIntegerField(choices=STATE_CHOICES, default=STATE_ACTIVE)
+    type_id = models.SmallIntegerField(default=0)
+
+    # Tracking fields
+    created_on = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='pages_created')
+
+    class Meta:
+        db_table = 'tbl_page'
+
+    def __str__(self):
+        return self.title
+
+class Category(models.Model):
+    # States
+    STATE_INACTIVE = 0
+    STATE_ACTIVE = 1
+    STATE_DELETED = 2
+
+    STATE_CHOICES = (
+        (STATE_INACTIVE, 'New'),
+        (STATE_ACTIVE, 'Active'),
+        (STATE_DELETED, 'Deleted'),
+    )
+
+    title = models.CharField(max_length=256)
+    
+    state_id = models.SmallIntegerField(choices=STATE_CHOICES, default=STATE_ACTIVE)
+    type_id = models.SmallIntegerField(default=0)
+
+    # Tracking fields
+    created_on = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='categories_created')
+
+    class Meta:
+        db_table = 'tbl_category'
+
+    def __str__(self):
+        return self.title
+
+class Faq(models.Model):
+    # States
+    STATE_INACTIVE = 0
+    STATE_ACTIVE = 1
+    STATE_DELETED = 2
+
+    STATE_CHOICES = (
+        (STATE_INACTIVE, 'New'),
+        (STATE_ACTIVE, 'Active'),
+        (STATE_DELETED, 'Deleted'),
+    )
+
+    question = models.TextField()
+    answer = models.TextField()
+    category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='faqs')
+    
+    state_id = models.SmallIntegerField(choices=STATE_CHOICES, default=STATE_ACTIVE)
+    # type_id often maps to User Role in this project
+    type_id = models.SmallIntegerField(default=0)
+
+    # Tracking fields
+    created_on = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='faqs_created')
+
+    class Meta:
+        db_table = 'tbl_faq'
+
+    def __str__(self):
+        return self.question[:50]

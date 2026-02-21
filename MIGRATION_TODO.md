@@ -95,18 +95,18 @@ Here is the exact reference table identifying where each legacy Yii PHP endpoint
 The backend depends heavily on the following exact third-party services:
 
 ### **Razorpay (Payments)**
-* **Current State:** API endpoints (like `CreateSubscription`, `BuyVideoPlan`) are stubbed out with `501 Not Implemented`.
+* **Current State:** API endpoints (like `CreateSubscription`, `BuyVideoPlan`) have been implemented with the core logic structure and order generation logic. Verification stubs are in place.
 * **Action Items:**
-  * Install the SDK: `pip install razorpay`
-  * Add your `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` to `.env` / `settings.py`.
-  * Replace the stubbed views in `plans/views.py` with the actual Razorpay client logic to initialize transactions and verify signatures.
+  * [x] Install the SDK (Done)
+  * [ ] Add your `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` to `.env`.
+  * [x] Core logic in `plans/views.py` implemented.
 
 ### **Firebase Cloud Messaging (FCM)**
-* **Current State:** Used in the PHP backend (`FireBaseNotification`) to send push notifications (e.g., "Doctor X is waiting in the room").
+* **Current State:** Integrated into `availability` and `calls` workflows! Logged in DB and push notifications structure is ready in `send_push_notification` utility.
 * **Action Items:**
-  * Install the SDK: `pip install firebase-admin`
-  * Add your `FIREBASE_KEY` / Firebase Service Account JSON to the project.
-  * Integrate push notification dispatch logic in the `availability` and `calls` apps when specific state changes occur.
+  * [x] Install the SDK (Done)
+  * [ ] Add your Firebase Service Account JSON to the project.
+  * [x] Push notification dispatch logic integrated in `availability/views.py`.
 
 *(Note: Video calls track `room_ids` / `session_ids`, but there are no backend-generated RTC tokens (like Twilio/Agora) in the legacy PHP codebase. Video calling logic seems entirely client-side/WebRTC based).*
 

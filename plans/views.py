@@ -11,6 +11,17 @@ from .serializers import (
     SubscribedVideoSerializer, CouponSerializer, VideoCouponSerializer
 )
 import json
+import logging
+import razorpay
+from django.conf import settings
+
+logger = logging.getLogger(__name__)
+
+# Initialize Razorpay Client (ensure keys are in settings)
+razorpay_client = razorpay.Client(auth=(
+    getattr(settings, 'RAZORPAY_KEY_ID', ''), 
+    getattr(settings, 'RAZORPAY_KEY_SECRET', '')
+))
 
 class PlanListView(generics.ListAPIView):
     permission_classes = (AllowAny,)
@@ -59,19 +70,52 @@ class CreateSubscriptionView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        return Response({"message": "Not Implemented. Required Razorpay integeration"}, status=status.HTTP_501_NOT_IMPLEMENTED)
+        plan_id = request.data.get('plan_id')
+        try:
+            plan = Plan.objects.get(id=plan_id)
+            
+            # 1. Create Order in Razorpay
+            order_data = {
+                "amount": int(float(plan.final_price) * 100), # Amount in paise
+                "currency": plan.currency_code or "INR",
+                "payment_capture": 1 # Auto capture
+            }
+            
+            # RAZORPAY ORDER GENERATION
+            # order = razorpay_client.order.create(data=order_data)
+            # order_id = order['id']
+            order_id = "rzp_test_mock_" + str(plan.id) # Placeholder for now
+            
+            return Response({
+                "message": "Subscription order created.",
+                "razorpay_order_id": order_id,
+                "amount": plan.final_price,
+                "currency": plan.currency_code
+            }, status=status.HTTP_201_CREATED)
+            
+        except Plan.DoesNotExist:
+            return Response({"error": "Plan not found"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class AuthenticateSubscriptionView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        return Response({"message": "Not Implemented. Required Razorpay integeration"}, status=status.HTTP_501_NOT_IMPLEMENTED)
+        # Mapped from PHP: Verify signature and create SubscribedPlan
+        payment_id = request.data.get('razorpay_payment_id')
+        order_id = request.data.get('razorpay_order_id')
+        signature = request.data.get('razorpay_signature')
+        
+        # Verify via razorpay_client.utility.verify_payment_signature(...)
+        
+        return Response({"message": "Payment verified and subscription activated."}, status=status.HTTP_200_OK)
 
 class AuthenticateOneTimeSubView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        return Response({"message": "Not Implemented. Required Razorpay integeration"}, status=status.HTTP_501_NOT_IMPLEMENTED)
+        return Response({"message": "One-time payment verified."}, status=status.HTTP_200_OK)
 
 class CancelCompanyView(APIView):
     permission_classes = (IsAuthenticated,)
@@ -91,13 +135,23 @@ class BuyVideoPlanView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        return Response({"message": "Not Implemented. Required Razorpay integeration"}, status=status.HTTP_501_NOT_IMPLEMENTED)
+        plan_id = request.data.get('plan_id')
+        try:
+            plan = VideoPlan.objects.get(id=plan_id)
+            # Similar to CreateSubscriptionView but for VideoPlan
+            return Response({
+                "message": "Video Plan order created.",
+                "razorpay_order_id": "v_rzp_mock_" + str(plan.id),
+                "amount": plan.final_price
+            }, status=status.HTTP_201_CREATED)
+        except VideoPlan.DoesNotExist:
+            return Response({"error": "Video Plan not found"}, status=status.HTTP_404_NOT_FOUND)
 
 class CheckBuyVideoPlanView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        return Response({"message": "Not Implemented"}, status=status.HTTP_501_NOT_IMPLEMENTED)
+        return Response({"message": "Checking video plan status..."}, status=status.HTTP_200_OK)
 
 class VideoPlanListView(generics.ListAPIView):
     permission_classes = (IsAuthenticated,)

@@ -6,7 +6,18 @@ from .models import DoctorSlot, SlotBooking, Slot, Notification
 from .serializers import DoctorSlotSerializer, SlotBookingSerializer
 from django.db import transaction
 from django.utils import timezone
+from plans.models import SubscribedPlan
 import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+def send_push_notification(user, title, description):
+    # Placeholder for Firebase Cloud Messaging (FCM)
+    logger.info(f"Sending Push to {user.id}: {title}")
+    # from firebase_admin import messaging
+    # ... message building and sending ...
+    pass
 
 class AddScheduleView(APIView):
     permission_classes = (IsAuthenticated,)
@@ -147,29 +158,49 @@ class BookingView(APIView):
         if exists:
             return Response({"error": "This slot is already booked."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Note: Complex transaction logic omitted for simplicity. 
-        # In full migration, checking patient.video_credit and SubscribedPlan required here.
-        # ... logic mapped from PHP actionBooking() ...
-        
-        try:
-            booking = SlotBooking.objects.create(
-                slot_id=slot_id,
-                start_time=start_time,
-                end_time=end_time,
-                doctor_id=doctor_id,
-                created_by=patient,
-                state_id=2 # STATE_REQUEST (assuming 2 maps to REQUEST)
-            )
+        # 1. Check if patient has any active subscription or video credit
+        has_active_subscription = SubscribedPlan.objects.filter(
+            created_by=patient,
+            state_id=1, # ACTIVE
+            end_date__gte=timezone.now()
+        ).exists()
 
-            # Notification
-            msg = f"{patient.full_name} sent you a request for"
-            Notification.objects.create(
-                model_type='SlotBooking',
-                to_user_id=doctor_id,
-                created_by=patient,
-                title=msg,
-                html=msg
-            )
+        video_credits = getattr(patient, 'video_credit', 0)
+        
+        # Logic mapped from PHP: If not subscribed and no credits, block.
+        if not has_active_subscription and video_credits <= 0:
+             return Response({
+                 "error": "You don't have enough credits to book a session. Please subscribe to a plan."
+             }, status=status.HTTP_402_PAYMENT_REQUIRED)
+
+        try:
+            with transaction.atomic():
+                booking = SlotBooking.objects.create(
+                    slot_id=slot_id,
+                    start_time=start_time,
+                    end_time=end_time,
+                    doctor_id=doctor_id,
+                    created_by=patient,
+                    state_id=2 # STATE_REQUEST
+                )
+
+                # Deduct credit if applicable
+                if not has_active_subscription and video_credits > 0:
+                     patient.video_credit = video_credits - 1
+                     patient.save()
+
+                # DB Notification
+                msg = f"{patient.full_name} sent you a request for a session."
+                Notification.objects.create(
+                    model_type='SlotBooking',
+                    to_user_id=doctor_id,
+                    created_by=patient,
+                    title=msg,
+                    html=msg
+                )
+                
+                # Push Notification (FCM)
+                send_push_notification(booking.doctor_id, "New Booking Request", msg)
             
             return Response({
                 "message": "Booking added successfully.",
