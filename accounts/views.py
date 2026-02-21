@@ -35,21 +35,34 @@ class RegisterView(generics.CreateAPIView):
 
     def create(self, request, *args, **kwargs):
         # 1. Custom logic: Generate OTP
-        otp = str(random.randint(1000, 9999))
-        
+
         # 2. Extract basic validation and saving via DRF serializer
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        device_type = int(request.data.get('device_type', 0))
+        version = float(request.headers.get('version', 0))
+
+        # PHP logic: (deviceType == 1 && version >= 30) || (deviceType == 2 && version >= 2.7)
+        # device_type 1 = Android, 2 = iOS (or vice versa depending on mapping, let's assume 1=Android, 2=iOS)
+        # However, looking at UserController.php lines 278, it checks device_type 1 and 2.
+        # Let's mirror exactly:
+        if (device_type == 1 and version >= 30) or (device_type == 2 and version >= 2.7):
+             # Generate random password if it's a newer app version
+             password = User.objects.make_random_password()
+        else:
+             password = request.data.get('password')
+
         user = serializer.save()
-        
-        # 3. Add custom PHP fields to the newly created user
+        user.set_password(password)
+
+        otp = str(random.randint(1000, 9999))
         user.otp = otp
         user.otp_verified = 0 # User.OTP_NOT_VERIFIED mapping
         user.role_id = User.ROLE_PATIENT # Default role from PHP signup
         user.save()
 
         send_otp_via_email(user.email, otp)
-        
+
         return Response({
             "message": "User registered successfully. Please verify your OTP.",
             "detail": UserSerializer(user).data
@@ -61,7 +74,7 @@ class VerifyOtpView(APIView):
     def post(self, request):
         email = request.data.get('email')
         otp = request.data.get('otp')
-        
+
         if not email or not otp:
             return Response({"error": "Email and OTP are required."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -78,10 +91,10 @@ class VerifyOtpView(APIView):
 
             # Generate JWT Token (like PHP's create AccessToken / generateAuthKey)
             refresh = RefreshToken.for_user(user)
-            
+
             # Log history
             LoginHistory.objects.create(
-                user=user, 
+                user=user,
                 state_id=1, # STATE_SUCCESS
                 type_id=1 # TYPE_API
             )
@@ -109,7 +122,7 @@ class ResendOtpView(APIView):
             user.save()
 
             send_otp_via_email(user.email, otp)
-            
+
             return Response({
                 "message": "Verification code sent successfully"
             }, status=status.HTTP_200_OK)
@@ -125,7 +138,7 @@ class DoctorContactView(APIView):
         email = request.data.get('email')
         if ContactForm.objects.filter(email=email).exists():
              return Response({"error": "Email already exists."}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         # Serialize and save using DRF core serializer (we will need to import it here or create manually)
         # For simplicity of custom logic view, creating manually:
         form = ContactForm.objects.create(
@@ -148,14 +161,82 @@ class DoctorContactView(APIView):
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
 
+    def post(self, request, *args, **kwargs):
+        email = request.data.get('email') or request.data.get('username')
+        role_id = int(request.data.get('role_id', 0))
+        device_type = int(request.data.get('device_type', 0))
+        version = float(request.headers.get('version', 0))
+
+        try:
+            if email:
+                user = User.objects.get(email=email)
+                
+                # 1. Role Check (Mirroring actionLogin lines 384-391)
+                if int(user.role_id) != role_id:
+                    if role_id == User.ROLE_DOCTER:
+                        return Response({"error": "You are not allowed to login in therapist section with user credentials."}, status=status.HTTP_400_BAD_REQUEST)
+                    else:
+                        return Response({"error": "You are not allowed to login in user section with therapist credentials."}, status=status.HTTP_400_BAD_REQUEST)
+
+                 # 2. Version Check for iOS (Mirroring actionLogin lines 371-383)
+                if device_type == User.DEVICE_IOS and version < 3.0:
+                     if int(user.role_id) != User.ROLE_DOCTER:
+                          has_plan = SubscribedPlan.objects.filter(created_by=user, state_id=1).exists()
+                          if not has_plan:
+                               return Response({"error": "A new version of app is available please update your app."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # 3. Handle Regular JWT Logic
+            response = super().post(request, *args, **kwargs)
+            
+            # 4. PHP Logic for OTP on Login (lines 403-413)
+            # if ((deviceType == 1 && version >= 30) || (deviceType == 2 && version >= 2.7))
+            if response.status_code == 200:
+                if (device_type == 1 and version >= 30) or (device_type == 2 and version >= 2.7):
+                    user_id = response.data.get('id') or (user.id if 'user' in locals() else None)
+                    if not user_id and email:
+                         user_id = User.objects.get(email=email).id
+                    
+                    if user_id:
+                        user_obj = User.objects.get(id=user_id)
+                        otp = str(random.randint(1000, 9999))
+                        user_obj.otp = otp
+                        user_obj.otp_verified = 0 # OTP_NOT_VERIFIED
+                        user_obj.save()
+                        send_otp_via_email(user_obj.email, otp)
+                        
+                        # Return user detail as well to match PHP's asJson(true)
+                        response.data['detail'] = UserSerializer(user_obj).data
+                        response.data['message'] = "Please verify your OTP."
+            
+            return response
+
+        except User.DoesNotExist:
+            return Response({"error": "Incorrect Email"}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 class CheckView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request):
         user = request.user
-        # PHP has iOS version checking here, skipping for now unless needed.
-        # Log active/last_action_time if we had those fields exactly.
-        
+        device_type = int(request.headers.get('device-type', 0)) # Mapped from headers or token info
+        version = float(request.headers.get('version', 0))
+
+        # PHP logic: actionCheck (login verification and version enforcement)
+        if device_type == User.DEVICE_IOS:
+             # In PHP: if (!User::checkIsIosLatestVersion())
+             # To simulate, let's assume a latest version (e.g. 3.0)
+             if version < 3.0:
+                  if user.role_id != User.ROLE_DOCTER:
+                       # Check if patient has plan
+                       has_plan = SubscribedPlan.objects.filter(created_by=user, state_id=1).exists()
+                       if not has_plan:
+                            return Response({
+                                "error": "A new version of app is available please update your app."
+                            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # user.setUserActive() logic
         return Response({
             "detail": UserSerializer(user).data
         }, status=status.HTTP_200_OK)
@@ -166,7 +247,7 @@ class LogoutView(APIView):
 
     def post(self, request):
         user = request.user
-        
+
         # PHP: update tbl_login_history logout_time
         latest_login = LoginHistory.objects.filter(user=user, state_id=1).order_by('-created_on').first()
         if latest_login:
@@ -188,7 +269,7 @@ class ChangePasswordView(APIView):
 
         if not user.check_password(old_password):
             return Response({"error": "Old password is incorrect"}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         user.set_password(new_password)
         user.save()
 
@@ -210,7 +291,7 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
-        
+
         return Response({
             "detail": serializer.data
         }, status=status.HTTP_200_OK)
@@ -240,7 +321,7 @@ class GetPageView(APIView):
         type_id = request.query_params.get('type_id')
         if not type_id:
              return Response({"error": "type_id required"}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         page = Page.objects.filter(type_id=type_id, state_id=1).first()
         if page:
             return Response({"detail": PageSerializer(page).data}, status=status.HTTP_200_OK)
@@ -255,7 +336,7 @@ class ForgotPasswordView(APIView):
 
         if not email:
             return Response({"error": "Email cannot be blank"}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         try:
             user = User.objects.get(email=email)
             if str(user.role_id) != str(role_id):
@@ -263,7 +344,7 @@ class ForgotPasswordView(APIView):
                     return Response({"message": "You cannot reset password with patient email."}, status=status.HTTP_200_OK)
                 else:
                     return Response({"message": "You cannot reset password with therapist email."}, status=status.HTTP_200_OK)
-            
+
             # PHP logic uses `generatePasswordResetToken`. We could generate a secure token here.
             # user.activation_key = generate_secure_token()
             # user.save()
@@ -284,51 +365,59 @@ class SymptomListView(generics.ListAPIView):
 
 
 class MatchesListView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (AllowAny,) # PHP roles allow ?, *, @
 
     def post(self, request):
-        symptom_str = request.data.get('symptom')
-        if not symptom_str:
+        symptom_ids_str = request.data.get('symptom', '')
+        if not symptom_ids_str:
             return Response({"error": "No data posted."}, status=status.HTTP_400_BAD_REQUEST)
 
-        symptom_ids =symptom_str.split(',')
+        symptom_ids = [sid.strip() for sid in symptom_ids_str.split(',') if sid.strip()]
         user = request.user
 
-        with transaction.atomic():
-            # Delete old ones
-            UserSymptom.objects.filter(created_by_id=user.id).delete()
-            
-            # Create new ones
-            for s_id in symptom_ids:
-                UserSymptom.objects.create(
-                    symptom_id=s_id.strip(),
-                    created_by_id=user.id
-                )
+        # 1. Update User Symptoms if authenticated (actionMatchesList 676-687)
+        if user.is_authenticated:
+            with transaction.atomic():
+                UserSymptom.objects.filter(created_by_id=user.id).delete()
+                for s_id in symptom_ids:
+                    UserSymptom.objects.create(
+                        symptom_id=s_id,
+                        created_by_id=user.id
+                    )
         
-        # Find matching doctors
+        # 2. Find matching doctors
         matching_doctor_ids = UserSymptom.objects.filter(
-            symptom_id__in=symptom_ids,
-            state_id=1 # assuming active
+            symptom_id__in=symptom_ids
         ).values_list('created_by_id', flat=True).distinct()
 
-        # Build Doctor Query
+        # 3. Build Doctor Query
         doctors = User.objects.filter(
             state_id=User.STATE_ACTIVE,
             role_id=User.ROLE_DOCTER,
-            id__in=matching_doctor_ids
+            id__in=matching_doctor_ids,
+            is_available=1 # IS_AVAILABLE_YES
         )
 
-        # Remove currently assigned doctor
-        if user.doctor_id:
+        # 4. Remove currently assigned doctor
+        if user.is_authenticated and user.doctor_id:
             doctors = doctors.exclude(id=user.doctor_id)
 
-        # Sort Logic (Simplified for now, randomly grab 3 to emulate PHP rand() limit 3)
-        doctors = list(doctors)
-        random.shuffle(doctors)
-        selected_doctors = doctors[:3]
+        # 5. Sorting (actionMatchesList 711-730)
+        # Priority 1: User's Gender Preference
+        if user.is_authenticated and user.therapist_gender:
+            doctors = doctors.order_by(
+                Case(When(gender=user.therapist_gender, then=0), default=1)
+            )
+
+        # Priority 2: Age Group Matching (Simplified equivalent)
+        # Note: PHP uses FIELD() on group_id. 
+        # Here we just ensure we get doctors.
+
+        # Priority 3: Random
+        doctors = doctors.order_by('?')
 
         return Response({
-            "detail": UserSerializer(selected_doctors, many=True).data
+            "list": UserSerializer(doctors[:3], many=True).data
         }, status=status.HTTP_200_OK)
 
 class FaqView(APIView):

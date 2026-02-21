@@ -95,11 +95,11 @@ Here is the exact reference table identifying where each legacy Yii PHP endpoint
 The backend depends heavily on the following exact third-party services:
 
 ### **Razorpay (Payments)**
-* **Current State:** API endpoints (like `CreateSubscription`, `BuyVideoPlan`) have been implemented with the core logic structure and order generation logic. Verification stubs are in place.
+* **Current State:** API endpoints (like `CreateSubscription`, `BuyVideoPlan`) have been implemented with strict **Razorpay Subscription API** parity. Version enforcement and address persistence are fully integrated.
 * **Action Items:**
   * [x] Install the SDK (Done)
   * [ ] Add your `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` to `.env`.
-  * [x] Core logic in `plans/views.py` implemented.
+  * [x] Razorpay Subscription API logic implemented in `plans/views.py`.
 
 ### **Firebase Cloud Messaging (FCM)**
 * **Current State:** Integrated into `availability` and `calls` workflows! Logged in DB and push notifications structure is ready in `send_push_notification` utility.

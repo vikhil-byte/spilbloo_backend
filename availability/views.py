@@ -6,7 +6,11 @@ from .models import DoctorSlot, SlotBooking, Slot, Notification
 from .serializers import DoctorSlotSerializer, SlotBookingSerializer
 from django.db import transaction
 from django.utils import timezone
+from core.models import RefundLog
+from django.contrib.auth import get_user_model
 from plans.models import SubscribedPlan
+
+User = get_user_model()
 import json
 import logging
 
@@ -175,32 +179,54 @@ class BookingView(APIView):
 
         try:
             with transaction.atomic():
+                # Deduction Logic (SlotController.php 370-399)
+                deducted = False
+                type_id = 0
+                
+                # Priority 1: User's video_credit
+                if patient.video_credit > 0:
+                     patient.video_credit -= 1 # User::ONE_VIDEO_CREDIT
+                     patient.save(update_fields=['video_credit'])
+                     type_id = 1 # SlotBooking::TYPE_BY_VIDEO_PLAN (assumed mapping)
+                     deducted = True
+                
+                # Priority 2: SubscribedPlan's video session
+                if not deducted:
+                     plan = SubscribedPlan.objects.filter(
+                         created_by=patient,
+                         state_id=1 # STATE_ACTIVE
+                     ).first()
+                     if plan and plan.no_of_video_session > 0:
+                          plan.no_of_video_session -= 1
+                          plan.save(update_fields=['no_of_video_session'])
+                          type_id = 2 # SlotBooking::TYPE_BY_TEXT_SUBSCRIPTION
+                          deducted = True
+                
+                if not deducted:
+                     return Response({"error": "Not enough video credits for booking."}, status=status.HTTP_400_BAD_REQUEST)
+
                 booking = SlotBooking.objects.create(
                     slot_id=slot_id,
                     start_time=start_time,
                     end_time=end_time,
                     doctor_id=doctor_id,
                     created_by=patient,
-                    state_id=2 # STATE_REQUEST
+                    state_id=2, # STATE_REQUEST
+                    type_id=type_id,
+                    is_active=0 # IS_ROOM_ACTIVE_NO
                 )
 
-                # Deduct credit if applicable
-                if not has_active_subscription and video_credits > 0:
-                     patient.video_credit = video_credits - 1
-                     patient.save()
-
-                # DB Notification
+                # Notifications...
                 msg = f"{patient.full_name} sent you a request for a session."
                 Notification.objects.create(
-                    model_type='SlotBooking',
                     to_user_id=doctor_id,
                     created_by=patient,
                     title=msg,
                     html=msg
                 )
                 
-                # Push Notification (FCM)
-                send_push_notification(booking.doctor_id, "New Booking Request", msg)
+                # booking.sendBookingRequestmailtoDoctor() Placeholder logic
+                send_push_notification(booking.doctor, "New Booking Request", msg)
             
             return Response({
                 "message": "Booking added successfully.",
@@ -276,18 +302,90 @@ class DoctorRescheduleView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, booking_id):
-        # Awaiting implementation logic similar to AcceptBooking
-        return Response({"message": "Booking reschedule successfully."}, status=status.HTTP_200_OK)
+        doctor = request.user
+        try:
+            booking = SlotBooking.objects.get(id=booking_id, doctor_id=doctor.id)
+            if booking.doctor_reschedule == 1: # YES
+                return Response({"error": "You have already rescheduled the booking once."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Save old times (actionDoctorReschedule 652-653)
+            booking.old_start_time = booking.start_time
+            booking.old_end_time = booking.end_time
+            
+            # Load new times from post
+            booking.start_time = request.data.get('start_time', booking.start_time)
+            booking.end_time = request.data.get('end_time', booking.end_time)
+            booking.state_id = 3 # STATE_ACCEPT
+            booking.doctor_reschedule = 1 # YES
+            
+            booking.save()
+            
+            msg = f"{doctor.full_name} has rescheduled your video session."
+            Notification.objects.create(
+                to_user_id=booking.created_by_id,
+                created_by=doctor,
+                title=msg,
+                html=msg
+            )
+            return Response({
+                "message": "Booking reschedule successfully.",
+                "details": SlotBookingSerializer(booking).data
+            }, status=status.HTTP_200_OK)
+        except SlotBooking.DoesNotExist:
+            return Response({"error": "No booking found."}, status=status.HTTP_400_BAD_REQUEST)
 
 class DoctorCancelView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, booking_id):
+        doctor = request.user
         try:
-            booking = SlotBooking.objects.get(id=booking_id, doctor_id=request.user.id)
-            booking.state_id = 4 # CANCELED
-            booking.save()
-            return Response({"message": "Booking canceled successfully."}, status=status.HTTP_200_OK)
+            with transaction.atomic():
+                booking = SlotBooking.objects.select_for_update().get(id=booking_id, doctor_id=doctor.id)
+                if booking.state_id == 4: # STATE_CANCELED
+                     return Response({"error": "Booking is already canceled."}, status=status.HTTP_400_BAD_REQUEST)
+                
+                booking.state_id = 4 # CANCELED
+                booking.is_refunded = 1 # YES
+                booking.cancel_reason = "Therapist canceled the video session"
+                booking.save()
+
+                # Refund Logic (SlotController.php 714-736)
+                patient = booking.created_by
+                if booking.type_id == 2: # TYPE_BY_TEXT_SUBSCRIPTION
+                     plan = SubscribedPlan.objects.filter(created_by=patient, state_id=1).first()
+                     if plan:
+                          plan.no_of_video_session += 1
+                          plan.save(update_fields=['no_of_video_session'])
+                     else:
+                          patient.video_credit += 1
+                          patient.save(update_fields=['video_credit'])
+                else:
+                     patient.video_credit += 1
+                     patient.save(update_fields=['video_credit'])
+
+                # Create RefundLog
+                RefundLog.objects.create(
+                    reason=f"Therapist {doctor.full_name} canceled the video session",
+                    doctor=doctor,
+                    created_by=patient,
+                    credit=1,
+                    booking_id=booking.id,
+                    state_id=1
+                )
+
+                msg = f"{doctor.full_name} has cancelled your video session."
+                Notification.objects.create(
+                    to_user_id=patient.id,
+                    created_by=doctor,
+                    title=msg,
+                    html=msg
+                )
+
+                return Response({
+                    "message": "Booking canceled successfully.",
+                    "details": SlotBookingSerializer(booking).data
+                }, status=status.HTTP_200_OK)
         except SlotBooking.DoesNotExist:
             return Response({"error": "No booking found."}, status=status.HTTP_400_BAD_REQUEST)
 

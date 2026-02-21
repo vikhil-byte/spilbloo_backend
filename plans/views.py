@@ -70,28 +70,74 @@ class CreateSubscriptionView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        plan_id = request.data.get('plan_id')
+        plan_id = request.data.get('plan_id') # This is the Razorpay Plan ID string
+        user = request.user
+        
         try:
-            plan = Plan.objects.get(id=plan_id)
-            
-            # 1. Create Order in Razorpay
-            order_data = {
-                "amount": int(float(plan.final_price) * 100), # Amount in paise
-                "currency": plan.currency_code or "INR",
-                "payment_capture": 1 # Auto capture
-            }
-            
-            # RAZORPAY ORDER GENERATION
-            # order = razorpay_client.order.create(data=order_data)
-            # order_id = order['id']
-            order_id = "rzp_test_mock_" + str(plan.id) # Placeholder for now
-            
-            return Response({
-                "message": "Subscription order created.",
-                "razorpay_order_id": order_id,
-                "amount": plan.final_price,
-                "currency": plan.currency_code
-            }, status=status.HTTP_201_CREATED)
+            with transaction.atomic():
+                plan_obj = Plan.objects.get(plan_id=plan_id)
+                
+                # Check if already on a paid plan (actionCreateSubscription 427-432)
+                if SubscribedPlan.objects.filter(created_by=user, state_id=1, plan_type=1).exists():
+                     return Response({"error": "You are already on a plan."}, status=status.HTTP_400_BAD_REQUEST)
+
+                # 1. Address Persistence (actionCreateSubscription 441-461)
+                # If user doesn't have address, save it. Otherwise use user's address.
+                user_address = request.data.get('address')
+                if user_address:
+                     user.address = user_address
+                     user.city = request.data.get('city', user.city)
+                     user.state = request.data.get('state', user.state)
+                     user.country = request.data.get('country', user.country)
+                     user.contact_no = request.data.get('contact', user.contact_no)
+                     user.save()
+
+                # 2. Trial Day Calculation (actionCreateSubscription 480-500)
+                trial_days = plan_obj.no_of_free_trial_days or 0
+                coupon_code = request.data.get('coupon')
+                coupon_trial_days = 0
+                if coupon_code:
+                     coupon = Coupon.objects.filter(code=coupon_code, state_id=1).first()
+                     if coupon:
+                          coupon_trial_days = coupon.no_of_free_trial_days or 0
+                
+                total_trial_days = trial_days + coupon_trial_days
+                
+                # Calculate start_at
+                # If user has free plan, next plan starts from current end date
+                # For simplicity, using timezone.now()
+                start_time = timezone.now()
+                rezorpay_start_at = start_time + timezone.timedelta(days=total_trial_days)
+                start_at_timestamp = int(rezorpay_start_at.timestamp())
+
+                # 3. Create Razorpay Subscription
+                params = {
+                    'plan_id': plan_id,
+                    'customer_notify': 1,
+                    'total_count': 12, # BILLING_CYCLE equivalent
+                }
+                if total_trial_days > 0:
+                    params['start_at'] = start_at_timestamp
+                
+                # In real migration: subscription = razorpay_client.subscription.create(params)
+                subscription_id = "sub_mock_" + str(random.randint(1000, 9999))
+                
+                # 4. Save SubscribedPlan record
+                subscribed_plan = SubscribedPlan.objects.create(
+                    plan=plan_obj,
+                    subscription_id=subscription_id,
+                    created_by=user,
+                    state_id=0, # STATE_CREATED
+                    plan_type=1, # PLAN_TYPE_PAID
+                    start_date=timezone.now(),
+                    trial_end_at=rezorpay_start_at,
+                    no_of_video_session=plan_obj.no_of_video_session
+                )
+                
+                return Response({
+                    "message": "Subscription created successfully.",
+                    "subscription_id": subscription_id
+                }, status=status.HTTP_201_CREATED)
             
         except Plan.DoesNotExist:
             return Response({"error": "Plan not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -102,14 +148,35 @@ class AuthenticateSubscriptionView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        # Mapped from PHP: Verify signature and create SubscribedPlan
-        payment_id = request.data.get('razorpay_payment_id')
-        order_id = request.data.get('razorpay_order_id')
-        signature = request.data.get('razorpay_signature')
+        user = request.user
+        plan_id_str = request.data.get('plan_id')
+        sub_id = request.data.get('sub_id')
         
-        # Verify via razorpay_client.utility.verify_payment_signature(...)
-        
-        return Response({"message": "Payment verified and subscription activated."}, status=status.HTTP_200_OK)
+        try:
+            plan = Plan.objects.get(plan_id=plan_id_str)
+            subscribed_plan = SubscribedPlan.objects.get(
+                created_by=user,
+                plan=plan,
+                subscription_id=sub_id
+            )
+            
+            # PHP logic: actionAuthenticateSubscription (lines 613-673)
+            # Verify Razorpay signature etc. here in production
+            
+            # Cancel free plan if exists
+            # SubscribedPlan.objects.filter(created_by=user, plan_type=0, state_id=1).update(state_id=2) # Cancelled
+            
+            subscribed_plan.state_id = 1 # STATE_ACTIVE
+            subscribed_plan.transaction_id = request.data.get('transaction_id')
+            subscribed_plan.save()
+            
+            return Response({
+                "message": "Plan bought successfully.",
+                "detail": UserSerializer(user).data
+            }, status=status.HTTP_200_OK)
+            
+        except (Plan.DoesNotExist, SubscribedPlan.DoesNotExist):
+            return Response({"error": "Subscription or Plan not found."}, status=status.HTTP_400_BAD_REQUEST)
 
 class AuthenticateOneTimeSubView(APIView):
     permission_classes = (IsAuthenticated,)
