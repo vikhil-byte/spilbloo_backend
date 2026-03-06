@@ -1,5 +1,7 @@
 from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticatedOrReadOnly
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticatedOrReadOnly
+from rest_framework.response import Response
 from .models import (
     TherapistEarning, ContactForm, DoctorReason, Symptom, DoctorRequest,
     Feed, EmergencyResource, AgeGroup, AssignedTherapist, BestDoctor,
@@ -137,3 +139,22 @@ class LoginHistoryViewSet(viewsets.ModelViewSet):
     queryset = LoginHistory.objects.all()
     serializer_class = LoginHistorySerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
+
+
+# Simple test API with mock data (no DB required)
+MOCK_TEST_DATA = [
+    {"id": 1, "name": "Test Item One", "active": True},
+    {"id": 2, "name": "Test Item Two", "active": True},
+    {"id": 3, "name": "Test Item Three", "active": False},
+]
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def test_api(request):
+    """Test endpoint with mock data to verify API is working."""
+    return Response({
+        "status": "ok",
+        "message": "Test API is working!",
+        "data": MOCK_TEST_DATA,
+    })

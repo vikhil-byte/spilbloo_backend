@@ -1,11 +1,12 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
-    RegisterView, CustomTokenObtainPairView, UserProfileView,
+    RegisterView, CustomTokenObtainPairView, AdminLoginView, UserProfileView,
     VerifyOtpView, ResendOtpView, DoctorContactView,
     CheckView, LogoutView, ChangePasswordView, DetailView, GetPageView,
     ForgotPasswordView, SymptomListView, MatchesListView, FaqView, AssignDoctorView,
-    AssignVideoDoctorView, SocialLoginView, EarningsView, AcceptConsentView, SendMessageView
+    AssignVideoDoctorView, SocialLoginView, EarningsView, AcceptConsentView, SendMessageView,
+    UserListView, UserDetailView, UserUpdateView
 )
 from .views_notification import NotificationOnOffView
 
@@ -30,7 +31,11 @@ urlpatterns = [
     path('earnings/', EarningsView.as_view(), name='earnings'),
     path('accept-consent/', AcceptConsentView.as_view(), name='accept_consent'),
     path('send-message/', SendMessageView.as_view(), name='send_message'),
+    path('users/', UserListView.as_view(), name='user_list'),
+    path('users/<int:pk>/', UserDetailView.as_view(), name='user_detail'),
+    path('users/<int:pk>/update/', UserUpdateView.as_view(), name='user_update'),
     path('login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('admin-login/', AdminLoginView.as_view(), name='admin_login'),
     path('login/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('update-profile/', UserProfileView.as_view(), name='user_profile'),
 ]
