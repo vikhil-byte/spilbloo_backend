@@ -3,6 +3,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticatedOrReadOnly
 from accounts.permissions import IsAdminUser
 from rest_framework.response import Response
+from .mixins import StandardizedResponseMixin
 from .models import (
     TherapistEarning, ContactForm, DoctorReason, Symptom, DoctorRequest,
     Feed, EmergencyResource, AgeGroup, AssignedTherapist, BestDoctor,
@@ -21,122 +22,149 @@ from .serializers import (
     HomeContentSerializer, LoginHistorySerializer
 )
 
-class TherapistEarningViewSet(viewsets.ModelViewSet):
+class StandardizedModelViewSet(StandardizedResponseMixin, viewsets.ModelViewSet):
+    """Base ViewSet that returns standardized responses for all CRUD actions."""
+    
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return self.success_response(data=response.data, message="Data retrieved successfully")
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        return self.success_response(data=response.data, message="Details retrieved successfully")
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        return self.success_response(data=response.data, message="Created successfully", status_code=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        response = super().update(request, *args, **kwargs)
+        return self.success_response(data=response.data, message="Updated successfully")
+
+    def partial_update(self, request, *args, **kwargs):
+        response = super().partial_update(request, *args, **kwargs)
+        return self.success_response(data=response.data, message="Updated successfully")
+
+    def destroy(self, request, *args, **kwargs):
+        super().destroy(request, *args, **kwargs)
+        return self.success_response(message="Deleted successfully", status_code=status.HTTP_204_NO_CONTENT)
+
+class TherapistEarningViewSet(StandardizedModelViewSet):
     queryset = TherapistEarning.objects.all()
     serializer_class = TherapistEarningSerializer
     permission_classes = [IsAdminUser]
 
-class ContactFormViewSet(viewsets.ModelViewSet):
+class ContactFormViewSet(StandardizedModelViewSet):
     queryset = ContactForm.objects.all()
     serializer_class = ContactFormSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser] # Hardened: Admin only for viewing apps
 
-class DoctorReasonViewSet(viewsets.ModelViewSet):
+class DoctorReasonViewSet(StandardizedModelViewSet):
     queryset = DoctorReason.objects.all()
     serializer_class = DoctorReasonSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class SymptomViewSet(viewsets.ModelViewSet):
+class SymptomViewSet(StandardizedModelViewSet):
     queryset = Symptom.objects.all()
     serializer_class = SymptomSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class DoctorRequestViewSet(viewsets.ModelViewSet):
+class DoctorRequestViewSet(StandardizedModelViewSet):
     queryset = DoctorRequest.objects.all()
     serializer_class = DoctorRequestSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class FeedViewSet(viewsets.ModelViewSet):
+class FeedViewSet(StandardizedModelViewSet):
     queryset = Feed.objects.all()
     serializer_class = FeedSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class EmergencyResourceViewSet(viewsets.ModelViewSet):
+class EmergencyResourceViewSet(StandardizedModelViewSet):
     queryset = EmergencyResource.objects.all()
     serializer_class = EmergencyResourceSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class AgeGroupViewSet(viewsets.ModelViewSet):
+class AgeGroupViewSet(StandardizedModelViewSet):
     queryset = AgeGroup.objects.all()
     serializer_class = AgeGroupSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class AssignedTherapistViewSet(viewsets.ModelViewSet):
+class AssignedTherapistViewSet(StandardizedModelViewSet):
     queryset = AssignedTherapist.objects.all()
     serializer_class = AssignedTherapistSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class BestDoctorViewSet(viewsets.ModelViewSet):
+class BestDoctorViewSet(StandardizedModelViewSet):
     queryset = BestDoctor.objects.all()
     serializer_class = BestDoctorSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class VideoPlanViewSet(viewsets.ModelViewSet):
+class VideoPlanViewSet(StandardizedModelViewSet):
     queryset = VideoPlan.objects.all()
     serializer_class = VideoPlanSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class VideoCouponViewSet(viewsets.ModelViewSet):
+class VideoCouponViewSet(StandardizedModelViewSet):
     queryset = VideoCoupon.objects.all()
     serializer_class = VideoCouponSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class CouponUserViewSet(viewsets.ModelViewSet):
+class CouponUserViewSet(StandardizedModelViewSet):
     queryset = CouponUser.objects.all()
     serializer_class = CouponUserSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class SubscribedVideoViewSet(viewsets.ModelViewSet):
+class SubscribedVideoViewSet(StandardizedModelViewSet):
     queryset = SubscribedVideo.objects.all()
     serializer_class = SubscribedVideoSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class UserSymptomViewSet(viewsets.ModelViewSet):
+class UserSymptomViewSet(StandardizedModelViewSet):
     queryset = UserSymptom.objects.all()
     serializer_class = UserSymptomSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class SettingViewSet(viewsets.ModelViewSet):
+class SettingViewSet(StandardizedModelViewSet):
     queryset = Setting.objects.all()
     serializer_class = SettingSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class DisclaimerViewSet(viewsets.ModelViewSet):
+class DisclaimerViewSet(StandardizedModelViewSet):
     queryset = Disclaimer.objects.all()
     serializer_class = DisclaimerSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class PushNotificationViewSet(viewsets.ModelViewSet):
+class PushNotificationViewSet(StandardizedModelViewSet):
     queryset = PushNotification.objects.all()
     serializer_class = PushNotificationSerializer
     permission_classes = [IsAdminUser]
 
-class FileViewSet(viewsets.ModelViewSet):
+class FileViewSet(StandardizedModelViewSet):
     queryset = File.objects.all()
     serializer_class = FileSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class CurrencyViewSet(viewsets.ModelViewSet):
+class CurrencyViewSet(StandardizedModelViewSet):
     queryset = Currency.objects.all()
     serializer_class = CurrencySerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class RefundLogViewSet(viewsets.ModelViewSet):
+class RefundLogViewSet(StandardizedModelViewSet):
     queryset = RefundLog.objects.all()
     serializer_class = RefundLogSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class InvoiceViewSet(viewsets.ModelViewSet):
+class InvoiceViewSet(StandardizedModelViewSet):
     queryset = Invoice.objects.all()
     serializer_class = InvoiceSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class HomeContentViewSet(viewsets.ModelViewSet):
+class HomeContentViewSet(StandardizedModelViewSet):
     queryset = HomeContent.objects.all()
     serializer_class = HomeContentSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
-class LoginHistoryViewSet(viewsets.ModelViewSet):
+class LoginHistoryViewSet(StandardizedModelViewSet):
     queryset = LoginHistory.objects.all()
     serializer_class = LoginHistorySerializer
     permission_classes = [IsAdminUser]
