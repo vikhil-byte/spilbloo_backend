@@ -1,6 +1,7 @@
 from rest_framework import viewsets
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticatedOrReadOnly
+from accounts.permissions import IsAdminUser
 from rest_framework.response import Response
 from .models import (
     TherapistEarning, ContactForm, DoctorReason, Symptom, DoctorRequest,
@@ -23,7 +24,7 @@ from .serializers import (
 class TherapistEarningViewSet(viewsets.ModelViewSet):
     queryset = TherapistEarning.objects.all()
     serializer_class = TherapistEarningSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
 class ContactFormViewSet(viewsets.ModelViewSet):
     queryset = ContactForm.objects.all()
@@ -108,7 +109,7 @@ class DisclaimerViewSet(viewsets.ModelViewSet):
 class PushNotificationViewSet(viewsets.ModelViewSet):
     queryset = PushNotification.objects.all()
     serializer_class = PushNotificationSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
 class FileViewSet(viewsets.ModelViewSet):
     queryset = File.objects.all()
@@ -138,7 +139,7 @@ class HomeContentViewSet(viewsets.ModelViewSet):
 class LoginHistoryViewSet(viewsets.ModelViewSet):
     queryset = LoginHistory.objects.all()
     serializer_class = LoginHistorySerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminUser]
 
 
 # Simple test API with mock data (no DB required)

@@ -945,3 +945,21 @@ class Faq(models.Model):
 
     def __str__(self):
         return self.question[:50]
+
+class AuditLog(models.Model):
+    action_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='audit_logs')
+    action_type = models.CharField(max_length=16) # CREATE, UPDATE, DELETE
+    model_name = models.CharField(max_length=128)
+    object_id = models.CharField(max_length=64, null=True, blank=True)
+    object_repr = models.CharField(max_length=255, null=True, blank=True)
+    changes = models.JSONField(null=True, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'tbl_audit_log'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.action_type} on {self.model_name} by {self.action_user}"

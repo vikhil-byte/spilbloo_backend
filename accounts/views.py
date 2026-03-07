@@ -1,6 +1,8 @@
-from rest_framework import generics, status
+from rest_framework import generics, status, pagination
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
+from core.mixins import StandardizedResponseMixin
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from .permissions import IsAdminUser
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
@@ -9,9 +11,13 @@ from .serializers import UserSerializer, RegisterSerializer, CustomTokenObtainPa
 from .models import HaLogins
 from core.models import (
     ContactForm, LoginHistory, Symptom, UserSymptom, AgeGroup, 
-    AssignedTherapist, PushNotification, VideoPlan, Page, Faq
+    AssignedTherapist, PushNotification, VideoPlan, Page, Faq, AuditLog
 )
-from core.serializers import SymptomSerializer, PageSerializer, FaqSerializer, TherapistEarningSerializer
+from core.serializers import (
+    SymptomSerializer, PageSerializer, FaqSerializer, 
+    TherapistEarningSerializer, AuditLogSerializer, LoginHistorySerializer
+)
+from rest_framework.generics import ListAPIView
 from django.db import transaction
 from django.db.models import Case, When, F, Q
 import random
@@ -244,6 +250,28 @@ class AdminLoginView(APIView):
             )
 
         refresh = RefreshToken.for_user(user)
+        
+        # Record Login History
+        try:
+            from django.contrib.gis.geoip2 import GeoIP2
+            # Simple IP extraction (might need adjustment for proxies)
+            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+            if x_forwarded_for:
+                ip = x_forwarded_for.split(',')[0]
+            else:
+                ip = request.META.get('REMOTE_ADDR')
+
+            LoginHistory.objects.create(
+                user=user,
+                user_ip=ip or 'unknown',
+                user_agent=request.META.get('HTTP_USER_AGENT', 'unknown')[:255],
+                state_id=LoginHistory.STATE_SUCCESS,
+                type_id=LoginHistory.TYPE_API,
+                login_time=timezone.now()
+            )
+        except Exception as e:
+            print(f"Error recording login history: {e}")
+
         return Response({
             "access-token": str(refresh.access_token),
             "refresh-token": str(refresh),
@@ -695,9 +723,9 @@ class SendMessageView(APIView):
         return Response({"message": "sent"}, status=status.HTTP_200_OK)
 
 
-class UserListView(generics.ListAPIView):
+class UserListView(generics.ListAPIView, StandardizedResponseMixin):
     """API endpoint for admin users table"""
-    permission_classes = (AllowAny,)  # Changed from IsAuthenticated to AllowAny for testing
+    permission_classes = (IsAdminUser,)
     serializer_class = UserSerializer
     
     def get_queryset(self):
@@ -734,30 +762,22 @@ class UserListView(generics.ListAPIView):
         users = queryset[start:end]
         serializer = self.get_serializer(users, many=True)
         
-        return Response({
+        return self.success_response({
             'count': queryset.count(),
             'results': serializer.data
-        }, status=status.HTTP_200_OK)
+        })
 
 
-class UserDetailView(generics.RetrieveAPIView):
-    """API endpoint for individual user details"""
-    permission_classes = (AllowAny,)  # Changed from IsAuthenticated to AllowAny for testing
+class UserDetailView(generics.RetrieveUpdateAPIView, StandardizedResponseMixin):
+    """API endpoint for individual user details and updates"""
+    permission_classes = (IsAdminUser,)
     serializer_class = UserSerializer
     queryset = User.objects.all()
-    
-    def retrieve(self, request, *args, **kwargs):
-        try:
-            instance = self.get_object()
-            serializer = self.get_serializer(instance)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except Exception:
-            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
 
-class UserUpdateView(generics.UpdateAPIView):
+class UserUpdateView(generics.UpdateAPIView, StandardizedResponseMixin):
     """API endpoint for updating user details"""
-    permission_classes = (AllowAny,)  # Changed from IsAuthenticated to AllowAny for testing
+    permission_classes = (IsAdminUser,)
     serializer_class = UserSerializer
     queryset = User.objects.all()
     
@@ -767,7 +787,42 @@ class UserUpdateView(generics.UpdateAPIView):
             serializer = self.get_serializer(instance, data=request.data, partial=True)
             serializer.is_valid(raise_exception=True)
             serializer.save()
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            return self.success_response(serializer.data, message="User updated successfully")
         except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return self.error_response(message=str(e))
 
+
+class StandardPagination(pagination.PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+class AuditLogListView(StandardizedResponseMixin, ListAPIView):
+    permission_classes = (IsAdminUser,)
+    serializer_class = AuditLogSerializer
+    queryset = AuditLog.objects.all().order_by('-created_at')
+    pagination_class = StandardPagination
+
+    def get(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return self.success_response(data=serializer.data)
+
+class LoginHistoryListView(StandardizedResponseMixin, ListAPIView):
+    permission_classes = (IsAdminUser,)
+    serializer_class = LoginHistorySerializer
+    queryset = LoginHistory.objects.all().order_by('-created_on')
+    pagination_class = StandardPagination
+
+    def get(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return self.success_response(data=serializer.data)

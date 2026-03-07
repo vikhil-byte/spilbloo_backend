@@ -4,7 +4,7 @@ from .models import (
     Feed, EmergencyResource, AgeGroup, AssignedTherapist, BestDoctor,
     VideoPlan, VideoCoupon, CouponUser, SubscribedVideo, UserSymptom,
     Setting, Disclaimer, PushNotification, File, Currency, RefundLog, 
-    Invoice, HomeContent, LoginHistory, Page, Category, Faq
+    Invoice, HomeContent, LoginHistory, Page, Category, Faq, AuditLog
 )
 
 class TherapistEarningSerializer(serializers.ModelSerializer):
@@ -141,4 +141,12 @@ class FaqSerializer(serializers.ModelSerializer):
     category_name = serializers.ReadOnlyField(source='category.title')
     class Meta:
         model = Faq
+        fields = '__all__'
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    user_name = serializers.ReadOnlyField(source='action_user.full_name')
+    user_email = serializers.ReadOnlyField(source='action_user.email')
+    
+    class Meta:
+        model = AuditLog
         fields = '__all__'
