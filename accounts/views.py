@@ -723,10 +723,17 @@ class SendMessageView(APIView):
         return Response({"message": "sent"}, status=status.HTTP_200_OK)
 
 
+class StandardPagination(pagination.PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
 class UserListView(generics.ListAPIView, StandardizedResponseMixin):
     """API endpoint for admin users table"""
     permission_classes = (IsAdminUser,)
     serializer_class = UserSerializer
+    pagination_class = StandardPagination
     
     def get_queryset(self):
         queryset = User.objects.all().order_by('-created_on')
@@ -751,21 +758,10 @@ class UserListView(generics.ListAPIView, StandardizedResponseMixin):
         return queryset
 
     def list(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
-        
-        # Pagination
-        page = int(request.query_params.get('page', 1))
-        page_size = int(request.query_params.get('page_size', 50))  # Changed from 10 to 50
-        start = (page - 1) * page_size
-        end = start + page_size
-        
-        users = queryset[start:end]
-        serializer = self.get_serializer(users, many=True)
-        
-        return self.success_response({
-            'count': queryset.count(),
-            'results': serializer.data
-        })
+        response = super().list(request, *args, **kwargs)
+        if isinstance(response.data, dict) and 'status' in response.data:
+            return response
+        return self.success_response(response.data)
 
 
 class UserDetailView(generics.RetrieveUpdateAPIView, StandardizedResponseMixin):
@@ -792,10 +788,6 @@ class UserUpdateView(generics.UpdateAPIView, StandardizedResponseMixin):
             return self.error_response(message=str(e))
 
 
-class StandardPagination(pagination.PageNumberPagination):
-    page_size = 10
-    page_size_query_param = 'page_size'
-    max_page_size = 100
 
 class AuditLogListView(StandardizedResponseMixin, ListAPIView):
     permission_classes = (IsAdminUser,)
@@ -804,13 +796,7 @@ class AuditLogListView(StandardizedResponseMixin, ListAPIView):
     pagination_class = StandardPagination
 
     def get(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset())
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-        serializer = self.get_serializer(queryset, many=True)
-        return self.success_response(data=serializer.data)
+        return self.list(request, *args, **kwargs)
 
 class LoginHistoryListView(StandardizedResponseMixin, ListAPIView):
     permission_classes = (IsAdminUser,)
@@ -819,10 +805,4 @@ class LoginHistoryListView(StandardizedResponseMixin, ListAPIView):
     pagination_class = StandardPagination
 
     def get(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset())
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-        serializer = self.get_serializer(queryset, many=True)
-        return self.success_response(data=serializer.data)
+        return self.list(request, *args, **kwargs)

@@ -23,6 +23,8 @@ class DoctorReasonSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class SymptomSerializer(serializers.ModelSerializer):
+    created_by_email = serializers.ReadOnlyField(source='created_by.email')
+    
     class Meta:
         model = Symptom
         fields = '__all__'
@@ -33,6 +35,8 @@ class DoctorRequestSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class FeedSerializer(serializers.ModelSerializer):
+    created_by_email = serializers.ReadOnlyField(source='created_by.email')
+    
     class Meta:
         model = Feed
         fields = '__all__'

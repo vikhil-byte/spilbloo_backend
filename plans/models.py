@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 
 User = settings.AUTH_USER_MODEL
 
@@ -55,6 +56,7 @@ class SubscribedPlan(models.Model):
     upcoming_plan_id = models.IntegerField(null=True, blank=True)
     upcoming_state = models.IntegerField(default=0)
 
+    created_on = models.DateTimeField(default=timezone.now)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='subscribed_plans')
 
     class Meta:

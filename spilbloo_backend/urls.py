@@ -29,4 +29,5 @@ urlpatterns = [
     path("api/doctor-request/", include("doctor_requests.urls")),
     path("api/call/", include("calls.urls")),
     path("api/notification/", include("accounts.urls_notification")),
+    path("api/core/", include("core.urls")),
 ]

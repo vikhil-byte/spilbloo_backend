@@ -19,3 +19,15 @@ class StandardizedResponseMixin:
             "message": message,
             "data": data
         }, status=status_code)
+
+    def get_paginated_response(self, data):
+        """Standardizes DRF paginated response."""
+        return self.success_response(
+            data={
+                'count': self.paginator.page.paginator.count,
+                'next': self.paginator.get_next_link(),
+                'previous': self.paginator.get_previous_link(),
+                'results': data
+            },
+            message="Data retrieved successfully"
+        )

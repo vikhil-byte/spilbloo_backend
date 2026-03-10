@@ -27,6 +27,9 @@ class StandardizedModelViewSet(StandardizedResponseMixin, viewsets.ModelViewSet)
     
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
+        # If response is already standardized (from get_paginated_response), return it as is
+        if isinstance(response.data, dict) and 'status' in response.data:
+            return response
         return self.success_response(data=response.data, message="Data retrieved successfully")
 
     def retrieve(self, request, *args, **kwargs):
@@ -65,9 +68,27 @@ class DoctorReasonViewSet(StandardizedModelViewSet):
     permission_classes = [IsAdminUser]
 
 class SymptomViewSet(StandardizedModelViewSet):
-    queryset = Symptom.objects.all()
+    queryset = Symptom.objects.all().order_by('-id')
     serializer_class = SymptomSerializer
     permission_classes = [IsAdminUser]
+
+    def perform_create(self, serializer):
+        instance = serializer.save(created_by=self.request.user)
+        Feed.objects.create(
+            content=f"Created symptom: {instance.title}",
+            model_type="Symptom",
+            model_id=instance.id,
+            created_by=self.request.user
+        )
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        Feed.objects.create(
+            content=f"Updated symptom: {instance.title}",
+            model_type="Symptom",
+            model_id=instance.id,
+            created_by=self.request.user
+        )
 
 class DoctorRequestViewSet(StandardizedModelViewSet):
     queryset = DoctorRequest.objects.all()
@@ -75,9 +96,19 @@ class DoctorRequestViewSet(StandardizedModelViewSet):
     permission_classes = [IsAdminUser]
 
 class FeedViewSet(StandardizedModelViewSet):
-    queryset = Feed.objects.all()
+    queryset = Feed.objects.all().order_by('-id')
     serializer_class = FeedSerializer
     permission_classes = [IsAdminUser]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        model_type = self.request.query_params.get('model_type')
+        model_id = self.request.query_params.get('model_id')
+        if model_type:
+            queryset = queryset.filter(model_type=model_type)
+        if model_id:
+            queryset = queryset.filter(model_id=model_id)
+        return queryset
 
 class EmergencyResourceViewSet(StandardizedModelViewSet):
     queryset = EmergencyResource.objects.all()

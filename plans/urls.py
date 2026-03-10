@@ -4,10 +4,16 @@ from .views import (
     AuthenticateSubscriptionView, AuthenticateOneTimeSubView, CancelCompanyView,
     CancelView, BuyVideoPlanView, CheckBuyVideoPlanView, VideoPlanListView,
     ApplyCouponView, ApplyVideoCouponView, UpdateSubscriptionView,
-    FreeSubscriptionView, OneTimeSubscriptionView
+    FreeSubscriptionView, OneTimeSubscriptionView, AdminSubscribedPlanListView,
+    AdminSubscribedPlanDetailView, AdminSubscribedPlanCancelView,
+    AdminSubscribedPlanExtendView
 )
 
 urlpatterns = [
+    path('admin/list/', AdminSubscribedPlanListView.as_view(), name='admin_plan_list'),
+    path('admin/detail/<int:pk>/cancel/', AdminSubscribedPlanCancelView.as_view(), name='admin_plan_cancel'),
+    path('admin/detail/<int:pk>/extend/', AdminSubscribedPlanExtendView.as_view(), name='admin_plan_extend'),
+    path('admin/detail/<int:pk>/', AdminSubscribedPlanDetailView.as_view(), name='admin_plan_detail'),
     path('list/', PlanListView.as_view(), name='plan_list'),
     path('company-user-plan-list/', CompanyUserPlanListView.as_view(), name='company_user_plan_list'),
     path('my-plans/', MyPlansView.as_view(), name='my_plans'),

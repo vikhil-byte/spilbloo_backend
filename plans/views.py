@@ -1,6 +1,8 @@
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from accounts.permissions import IsAdminUser
+from core.mixins import StandardizedResponseMixin
 from rest_framework.views import APIView
 from django.db import transaction
 from django.utils import timezone
@@ -271,3 +273,63 @@ class OneTimeSubscriptionView(APIView):
 
     def post(self, request, plan_id):
         return Response({"message": "Subscription created successfully."}, status=status.HTTP_200_OK)
+
+class AdminSubscribedPlanListView(generics.ListAPIView, StandardizedResponseMixin):
+    permission_classes = (IsAdminUser,)
+    serializer_class = SubscribedPlanSerializer
+    queryset = SubscribedPlan.objects.all().order_by('-id')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        return self.success_response(serializer.data)
+
+class AdminSubscribedPlanDetailView(generics.RetrieveAPIView, StandardizedResponseMixin):
+    permission_classes = (IsAdminUser,)
+    queryset = SubscribedPlan.objects.all()
+    serializer_class = SubscribedPlanSerializer
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return self.success_response(serializer.data)
+
+class AdminSubscribedPlanCancelView(APIView, StandardizedResponseMixin):
+    permission_classes = (IsAdminUser,)
+
+    def post(self, request, pk):
+        try:
+            sub = SubscribedPlan.objects.get(pk=pk)
+            reason = request.data.get('reason', 'Cancelled by Admin')
+            sub.state_id = 2 # Cancelled
+            sub.cancel_reason = reason
+            sub.save()
+            return self.success_response({"message": "Subscription cancelled successfully."})
+        except SubscribedPlan.DoesNotExist:
+            return self.error_response("Subscription not found.", status_code=404)
+
+class AdminSubscribedPlanExtendView(APIView, StandardizedResponseMixin):
+    permission_classes = (IsAdminUser,)
+
+    def post(self, request, pk):
+        try:
+            sub = SubscribedPlan.objects.get(pk=pk)
+            days = int(request.data.get('days', 0))
+            if days <= 0:
+                return self.error_response("Invalid number of days.")
+            
+            # If current end_date is in past, start from now
+            current_end = sub.end_date or timezone.now()
+            if current_end < timezone.now():
+                current_end = timezone.now()
+            
+            new_end = current_end + timezone.timedelta(days=days)
+            sub.end_date = new_end
+            sub.renewal_date = new_end # Sync renewal date
+            sub.save()
+            
+            return self.success_response({"message": f"Subscription extended by {days} days."})
+        except (SubscribedPlan.DoesNotExist):
+            return self.error_response("Subscription not found.", status_code=404)
+        except ValueError:
+            return self.error_response("Days must be a valid integer.")
