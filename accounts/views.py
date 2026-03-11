@@ -787,9 +787,75 @@ class UserUpdateView(generics.UpdateAPIView, StandardizedResponseMixin):
             serializer = self.get_serializer(instance, data=request.data, partial=True)
             serializer.is_valid(raise_exception=True)
             serializer.save()
-            return self.success_response(serializer.data, message="User updated successfully")
+            
+            return self.success_response(
+                data=serializer.data,
+                message='User updated successfully',
+                status_code=status.HTTP_200_OK
+            )
         except Exception as e:
-            return self.error_response(message=str(e))
+            return self.error_response(
+                message=str(e),
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+
+class ProfilePhotoUploadView(APIView, StandardizedResponseMixin):
+    """API endpoint for uploading profile photos"""
+    permission_classes = (IsAdminUser,)
+    
+    def post(self, request, *args, **kwargs):
+        try:
+            if 'profile_photo' not in request.FILES:
+                return self.error_response(
+                    message='No photo file provided',
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+            
+            photo_file = request.FILES['profile_photo']
+            
+            # Validate file type
+            if not photo_file.content_type.startswith('image/'):
+                return self.error_response(
+                    message='File must be an image',
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Validate file size (5MB max)
+            if photo_file.size > 5 * 1024 * 1024:
+                return self.error_response(
+                    message='File size must be less than 5MB',
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Generate unique filename
+            import uuid
+            import os
+            
+            file_extension = os.path.splitext(photo_file.name)[1]
+            unique_filename = f"profile_photos/{uuid.uuid4()}{file_extension}"
+            
+            # Save file using Django's default storage
+            from django.core.files.storage import default_storage
+            
+            file_path = default_storage.save(unique_filename, photo_file)
+            file_url = default_storage.url(file_path)
+            
+            # Ensure we return the full URL for frontend
+            if not file_url.startswith('http'):
+                file_url = request.build_absolute_uri(file_url)
+            
+            return self.success_response(
+                data={'url': file_url},
+                message='Photo uploaded successfully',
+                status_code=status.HTTP_200_OK
+            )
+            
+        except Exception as e:
+            return self.error_response(
+                message=f'Upload failed: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class StandardPagination(pagination.PageNumberPagination):

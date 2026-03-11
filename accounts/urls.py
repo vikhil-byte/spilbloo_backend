@@ -6,7 +6,7 @@ from .views import (
     CheckView, LogoutView, ChangePasswordView, DetailView, GetPageView,
     ForgotPasswordView, SymptomListView, MatchesListView, FaqView, AssignDoctorView,
     AssignVideoDoctorView, SocialLoginView, EarningsView, AcceptConsentView, SendMessageView,
-    UserListView, UserDetailView, UserUpdateView,
+    UserListView, UserDetailView, UserUpdateView, ProfilePhotoUploadView,  # Add the new view
     AuditLogListView, LoginHistoryListView
 )
 from .views_notification import NotificationOnOffView
@@ -35,6 +35,7 @@ urlpatterns = [
     path('users/', UserListView.as_view(), name='user_list'),
     path('users/<int:pk>/', UserDetailView.as_view(), name='user_detail'),
     path('users/<int:pk>/update/', UserUpdateView.as_view(), name='user_update'),
+    path('upload-profile-photo/', ProfilePhotoUploadView.as_view(), name='upload_profile_photo'),
     path('login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('admin-login/', AdminLoginView.as_view(), name='admin_login'),
     path('login/refresh/', TokenRefreshView.as_view(), name='token_refresh'),

@@ -208,7 +208,8 @@ STATIC_URL = "static/"
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+# Point media to the project root (one level up from BASE_DIR)
+MEDIA_ROOT = os.path.join(BASE_DIR.parent, 'media')
 
 # Custom User Model
 AUTH_USER_MODEL = "accounts.User"
