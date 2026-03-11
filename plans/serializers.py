@@ -8,9 +8,24 @@ class PlanSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class SubscribedPlanSerializer(serializers.ModelSerializer):
+    plan_title = serializers.CharField(source='plan.title', read_only=True)
+    state = serializers.SerializerMethodField()
+    readable_plan_type = serializers.SerializerMethodField()
+    created_by_email = serializers.EmailField(source='created_by.email', read_only=True)
+
     class Meta:
         model = SubscribedPlan
         fields = '__all__'
+
+    def get_state(self, obj):
+        # 0=Created, 1=Active, 2=Cancelled, 3=Trial, etc. (Matching SubscriptionsPage.jsx expectations)
+        mapping = {0: 'Created', 1: 'Active', 2: 'Cancelled', 3: 'Trial'}
+        return mapping.get(obj.state_id, 'Unknown')
+
+    def get_readable_plan_type(self, obj):
+        # 0=Free, 1=Paid
+        mapping = {0: 'Free', 1: 'Paid'}
+        return mapping.get(obj.plan_type, 'Unknown')
 
 class VideoPlanSerializer(serializers.ModelSerializer):
     class Meta:
