@@ -1,0 +1,4 @@
+encryptionsalt: v1:Cmg+hgYN1X4=:v1:xJ06tud09OHgj7MP:MAFjNBbPRB1feKlKcdUdyCleFM3Iyw==
+config:
+  aws:region: ap-south-1
+  spilbloo-infra:keyName: vikhil-dev-key
