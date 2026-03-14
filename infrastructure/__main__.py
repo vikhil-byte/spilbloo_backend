@@ -38,7 +38,10 @@ sg = aws.ec2.SecurityGroup("spilbloo-sg",
 
 # 3. Persistent EBS Volume
 # Pick the first subnet to get its AZ
-first_subnet = subnets.ids.apply(lambda ids: aws.ec2.get_subnet(id=ids[0]))
+if not subnets.ids:
+    raise Exception("No subnets found in the default VPC")
+
+first_subnet = aws.ec2.get_subnet(id=subnets.ids[0])
 
 volume = aws.ebs.Volume("spilbloo-db-data",
     availability_zone=first_subnet.availability_zone,
