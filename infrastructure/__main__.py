@@ -83,6 +83,12 @@ policy = aws.iam.RolePolicy("spilbloo-ebs-policy",
     }"""
 )
 
+# Attach SSM Managed Instance Core policy to allow browser-based login (no .pem needed)
+ssm_policy_attachment = aws.iam.RolePolicyAttachment("spilbloo-ssm-policy",
+    role=role.name,
+    policy_arn="arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+)
+
 instance_profile = aws.iam.InstanceProfile("spilbloo-profile", role=role.name)
 
 # 5. User Data Script for Auto-Recovery
@@ -123,6 +129,9 @@ git pull origin develop
 
 # Start Application
 # docker-compose up -d
+
+# Restart SSM Agent to ensure it picks up the IAM role credentials
+systemctl restart amazon-ssm-agent
 """)
 
 # 6. Spot Instance
