@@ -106,9 +106,17 @@ fi
 mount /dev/xvdf /mnt/ebs_data
 echo "/dev/xvdf /mnt/ebs_data xfs defaults,nofail 0 2" >> /etc/fstab
 
-# Symlink docker volume data to EBS
-mkdir -p /mnt/ebs_data/postgres
-# This would be used by docker-compose
+# Setup Application
+cd /home/ec2-user
+if [ ! -d "spilbloo-backend" ]; then
+    git clone https://github.com/vikhil-byte/spilbloo_backend.git
+fi
+cd spilbloo-backend
+git checkout develop
+git pull origin develop
+
+# Start Application
+# docker-compose up -d
 """)
 
 # 6. Spot Instance
