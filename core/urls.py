@@ -1,18 +1,19 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    TherapistEarningViewSet, ContactFormViewSet, DoctorReasonViewSet, 
-    SymptomViewSet, DoctorRequestViewSet, FeedViewSet, 
-    EmergencyResourceViewSet, AgeGroupViewSet, AssignedTherapistViewSet, 
-    BestDoctorViewSet, VideoPlanViewSet, VideoCouponViewSet, 
+    TherapistEarningViewSet, SlotBookingViewSet, ContactFormViewSet, DoctorReasonViewSet,
+    SymptomViewSet, DoctorRequestViewSet, FeedViewSet,
+    EmergencyResourceViewSet, AgeGroupViewSet, AssignedTherapistViewSet,
+    BestDoctorViewSet, VideoPlanViewSet, VideoCouponViewSet,
     CouponUserViewSet, SubscribedVideoViewSet, UserSymptomViewSet,
-    SettingViewSet, DisclaimerViewSet, PushNotificationViewSet, 
-    FileViewSet, CurrencyViewSet, RefundLogViewSet, InvoiceViewSet, 
+    SettingViewSet, DisclaimerViewSet, PushNotificationViewSet,
+    FileViewSet, CurrencyViewSet, RefundLogViewSet, InvoiceViewSet,
     HomeContentViewSet, LoginHistoryViewSet
 )
 
 router = DefaultRouter()
 router.register(r'therapist-earnings', TherapistEarningViewSet)
+router.register(r'slot-bookings', SlotBookingViewSet)
 router.register(r'contact-forms', ContactFormViewSet)
 router.register(r'doctor-reasons', DoctorReasonViewSet)
 router.register(r'symptoms', SymptomViewSet)

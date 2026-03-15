@@ -737,24 +737,101 @@ class UserListView(generics.ListAPIView, StandardizedResponseMixin):
     
     def get_queryset(self):
         queryset = User.objects.all().order_by('-created_on')
-        
+        params = self.request.query_params
+
         # Filter by role
-        role_id = self.request.query_params.get('role_id')
-        if role_id:
+        role_id = params.get('role_id')
+        if role_id not in (None, ''):
             queryset = queryset.filter(role_id=role_id)
-            
-        # Filter by state
-        state_id = self.request.query_params.get('state_id')
-        if state_id:
+
+        # Filter by state (frontend sends state_id)
+        state_id = params.get('state_id')
+        if state_id not in (None, ''):
             queryset = queryset.filter(state_id=state_id)
-            
-        # Search by name or email
-        search = self.request.query_params.get('search')
-        if search:
+
+        # Individual field filters (frontend filter row)
+        id_val = params.get('id')
+        if id_val not in (None, '') and str(id_val).strip().isdigit():
+            queryset = queryset.filter(id=int(id_val))
+
+        full_name = params.get('full_name')
+        if full_name not in (None, ''):
+            queryset = queryset.filter(full_name__icontains=full_name)
+
+        email = params.get('email')
+        if email not in (None, ''):
+            queryset = queryset.filter(email__icontains=email)
+
+        gender = params.get('gender')
+        if gender not in (None, ''):
+            try:
+                queryset = queryset.filter(gender=int(gender))
+            except (ValueError, TypeError):
+                pass
+
+        # Doctor filter: by assigned doctor's name (doctor_id points to User)
+        doctor = params.get('doctor')
+        if doctor not in (None, ''):
+            if str(doctor).isdigit():
+                queryset = queryset.filter(doctor_id=int(doctor))
+            else:
+                doctor_ids = User.objects.filter(
+                    role_id=User.ROLE_DOCTER,
+                    full_name__icontains=doctor
+                ).values_list('id', flat=True)
+                queryset = queryset.filter(doctor_id__in=list(doctor_ids))
+
+        # Created on: optional date filter (YYYY-MM-DD or partial)
+        created_on = params.get('created_on')
+        if created_on not in (None, ''):
+            try:
+                # Allow partial date (e.g. "2025" or "2025-03")
+                if len(created_on) == 4 and created_on.isdigit():
+                    queryset = queryset.filter(created_on__year=int(created_on))
+                elif len(created_on) == 7 and created_on[4] == '-':
+                    y, m = int(created_on[:4]), int(created_on[5:7])
+                    queryset = queryset.filter(created_on__year=y, created_on__month=m)
+                else:
+                    from datetime import datetime
+                    dt = datetime.strptime(created_on.strip()[:10], '%Y-%m-%d')
+                    queryset = queryset.filter(created_on__date=dt.date())
+            except (ValueError, TypeError):
+                pass
+
+        # Subscription state: filter by related SubscribedPlan (Active/Trial/None/Expired)
+        subscription_state = params.get('subscription_state')
+        if subscription_state not in (None, ''):
+            from plans.models import SubscribedPlan
+            if subscription_state == 'None':
+                # No active plan
+                active_user_ids = SubscribedPlan.objects.filter(
+                    state_id=1
+                ).values_list('created_by_id', flat=True).distinct()
+                queryset = queryset.exclude(id__in=active_user_ids)
+            elif subscription_state == 'Trial':
+                active_trial = SubscribedPlan.objects.filter(
+                    state_id=1, plan_type=0
+                ).values_list('created_by_id', flat=True).distinct()
+                queryset = queryset.filter(id__in=active_trial)
+            elif subscription_state == 'Active':
+                active_paid = SubscribedPlan.objects.filter(
+                    state_id=1, plan_type=1
+                ).values_list('created_by_id', flat=True).distinct()
+                queryset = queryset.filter(id__in=active_paid)
+            elif subscription_state == 'Expired':
+                # Users who have at least one plan that is not active (e.g. state_id != 1)
+                expired = SubscribedPlan.objects.exclude(state_id=1).values_list(
+                    'created_by_id', flat=True
+                ).distinct()
+                queryset = queryset.filter(id__in=expired)
+
+        # Combined search (legacy) by name or email
+        search = params.get('search')
+        if search not in (None, ''):
             queryset = queryset.filter(
                 Q(full_name__icontains=search) | Q(email__icontains=search)
             )
-            
+
         return queryset
 
     def list(self, request, *args, **kwargs):

@@ -13,6 +13,10 @@ class Command(BaseCommand):
             ('seed_symptoms', "Seeding symptoms..."),
             ('seed_doctor_reasons', "Seeding doctor reasons..."),
             ('seed_doctor_requests', "Seeding doctor change requests..."),
+            ('seed_emergency_resources', "Seeding emergency resources..."),
+            ('seed_contact_forms', "Seeding therapist applications (contact forms)..."),
+            ('seed_bookings', "Seeding bookings..."),
+            ('seed_therapist_earnings', "Seeding therapist earnings..."),
         ]
 
         for cmd, message in commands:

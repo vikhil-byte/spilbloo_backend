@@ -13,11 +13,15 @@ class TherapistEarningSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class ContactFormSerializer(serializers.ModelSerializer):
+    created_by_full_name = serializers.ReadOnlyField(source='created_by.full_name')
+
     class Meta:
         model = ContactForm
         fields = '__all__'
 
 class DoctorReasonSerializer(serializers.ModelSerializer):
+    created_by_full_name = serializers.ReadOnlyField(source='created_by.full_name')
+
     class Meta:
         model = DoctorReason
         fields = '__all__'
@@ -30,6 +34,8 @@ class SymptomSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class DoctorRequestSerializer(serializers.ModelSerializer):
+    created_by_full_name = serializers.ReadOnlyField(source='created_by.full_name')
+
     class Meta:
         model = DoctorRequest
         fields = '__all__'
@@ -42,6 +48,8 @@ class FeedSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class EmergencyResourceSerializer(serializers.ModelSerializer):
+    created_by_full_name = serializers.ReadOnlyField(source='created_by.full_name')
+
     class Meta:
         model = EmergencyResource
         fields = '__all__'

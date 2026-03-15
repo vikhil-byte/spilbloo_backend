@@ -1,4 +1,4 @@
-from rest_framework import viewsets
+from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticatedOrReadOnly
 from accounts.permissions import IsAdminUser
@@ -8,9 +8,11 @@ from .models import (
     TherapistEarning, ContactForm, DoctorReason, Symptom, DoctorRequest,
     Feed, EmergencyResource, AgeGroup, AssignedTherapist, BestDoctor,
     VideoPlan, VideoCoupon, CouponUser, SubscribedVideo, UserSymptom,
-    Setting, Disclaimer, PushNotification, File, Currency, RefundLog, 
+    Setting, Disclaimer, PushNotification, File, Currency, RefundLog,
     Invoice, HomeContent, LoginHistory
 )
+from availability.models import SlotBooking
+from availability.serializers import SlotBookingSerializer
 from .serializers import (
     TherapistEarningSerializer, ContactFormSerializer, DoctorReasonSerializer, 
     SymptomSerializer, DoctorRequestSerializer, FeedSerializer, 
@@ -57,6 +59,14 @@ class TherapistEarningViewSet(StandardizedModelViewSet):
     serializer_class = TherapistEarningSerializer
     permission_classes = [IsAdminUser]
 
+
+class SlotBookingViewSet(StandardizedModelViewSet):
+    """Admin list/detail for slot bookings (Bookings page)."""
+    queryset = SlotBooking.objects.all().order_by('-created_on')
+    serializer_class = SlotBookingSerializer
+    permission_classes = [IsAdminUser]
+
+
 class ContactFormViewSet(StandardizedModelViewSet):
     queryset = ContactForm.objects.all()
     serializer_class = ContactFormSerializer
@@ -66,6 +76,14 @@ class DoctorReasonViewSet(StandardizedModelViewSet):
     queryset = DoctorReason.objects.all()
     serializer_class = DoctorReasonSerializer
     permission_classes = [IsAdminUser]
+
+    def perform_create(self, serializer):
+        """
+        When creating a new DoctorReason from the admin API, automatically
+        set created_by to the authenticated user so Reason views can
+        display who created it.
+        """
+        serializer.save(created_by=self.request.user)
 
 class SymptomViewSet(StandardizedModelViewSet):
     queryset = Symptom.objects.all().order_by('-id')
@@ -114,6 +132,9 @@ class EmergencyResourceViewSet(StandardizedModelViewSet):
     queryset = EmergencyResource.objects.all()
     serializer_class = EmergencyResourceSerializer
     permission_classes = [IsAdminUser]
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
 
 class AgeGroupViewSet(StandardizedModelViewSet):
     queryset = AgeGroup.objects.all()
