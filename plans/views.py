@@ -12,18 +12,13 @@ from .serializers import (
     PlanSerializer, SubscribedPlanSerializer, VideoPlanSerializer, 
     SubscribedVideoSerializer, CouponSerializer, VideoCouponSerializer
 )
-import json
+import random
 import logging
-import razorpay
+import json
 from django.conf import settings
+from .utils import razorpay_service
 
 logger = logging.getLogger(__name__)
-
-# Initialize Razorpay Client (ensure keys are in settings)
-razorpay_client = razorpay.Client(auth=(
-    getattr(settings, 'RAZORPAY_KEY_ID', ''), 
-    getattr(settings, 'RAZORPAY_KEY_SECRET', '')
-))
 
 class PlanListView(generics.ListAPIView):
     permission_classes = (AllowAny,)
@@ -113,16 +108,16 @@ class CreateSubscriptionView(APIView):
                 start_at_timestamp = int(rezorpay_start_at.timestamp())
 
                 # 3. Create Razorpay Subscription
-                params = {
-                    'plan_id': plan_id,
-                    'customer_notify': 1,
-                    'total_count': 12, # BILLING_CYCLE equivalent
-                }
-                if total_trial_days > 0:
-                    params['start_at'] = start_at_timestamp
-                
-                # In real migration: subscription = razorpay_client.subscription.create(params)
-                subscription_id = "sub_mock_" + str(random.randint(1000, 9999))
+                try:
+                    razorpay_sub = razorpay_service.create_subscription(
+                        plan_id=plan_id,
+                        total_count=12,
+                        start_at=start_at_timestamp if total_trial_days > 0 else None
+                    )
+                    subscription_id = razorpay_sub['id']
+                except Exception as e:
+                    logger.error(f"Razorpay subscription creation failed: {str(e)}")
+                    return Response({"error": "Failed to create subscription with Razorpay"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                 
                 # 4. Save SubscribedPlan record
                 subscribed_plan = SubscribedPlan.objects.create(
@@ -133,12 +128,19 @@ class CreateSubscriptionView(APIView):
                     plan_type=1, # PLAN_TYPE_PAID
                     start_date=timezone.now(),
                     trial_end_at=rezorpay_start_at,
-                    no_of_video_session=plan_obj.no_of_video_session
+                    no_of_video_session=plan_obj.no_of_video_session,
+                    address=user_address,
+                    city=request.data.get('city'),
+                    state=request.data.get('state'),
+                    country=request.data.get('country'),
+                    zipcode=request.data.get('zipcode'),
+                    contact=request.data.get('contact')
                 )
                 
                 return Response({
                     "message": "Subscription created successfully.",
-                    "subscription_id": subscription_id
+                    "subscription_id": subscription_id,
+                    "razorpay_key": settings.RAZORPAY_KEY_ID
                 }, status=status.HTTP_201_CREATED)
             
         except Plan.DoesNotExist:
@@ -153,6 +155,8 @@ class AuthenticateSubscriptionView(APIView):
         user = request.user
         plan_id_str = request.data.get('plan_id')
         sub_id = request.data.get('sub_id')
+        payment_id = request.data.get('payment_id')
+        signature = request.data.get('signature')
         
         try:
             plan = Plan.objects.get(plan_id=plan_id_str)
@@ -162,23 +166,42 @@ class AuthenticateSubscriptionView(APIView):
                 subscription_id=sub_id
             )
             
-            # PHP logic: actionAuthenticateSubscription (lines 613-673)
-            # Verify Razorpay signature etc. here in production
+            # 1. Verify Razorpay signature
+            signature_data = {
+                'razorpay_subscription_id': sub_id,
+                'razorpay_payment_id': payment_id,
+                'razorpay_signature': signature
+            }
             
-            # Cancel free plan if exists
-            # SubscribedPlan.objects.filter(created_by=user, plan_type=0, state_id=1).update(state_id=2) # Cancelled
+            if not razorpay_service.verify_payment_signature(signature_data):
+                return Response({"error": "Invalid signature provided."}, status=status.HTTP_400_BAD_REQUEST)
             
+            # 2. Activate the plan
             subscribed_plan.state_id = 1 # STATE_ACTIVE
-            subscribed_plan.transaction_id = request.data.get('transaction_id')
-            subscribed_plan.save()
+            subscribed_plan.transaction_id = payment_id
+            subscribed_plan.signature = signature
             
+            # Set end_date based on plan duration
+            subscribed_plan.start_date = timezone.now()
+            subscribed_plan.end_date = subscribed_plan.start_date + timezone.timedelta(days=plan.duration)
+            subscribed_plan.save()
+
+            # 3. Update User role to PATIENT if they are not already (ROLE_PATIENT = 4)
+            if user.role_id != 4:
+                user.role_id = 4
+                user.save()
+            
+            from accounts.serializers import UserSerializer
             return Response({
-                "message": "Plan bought successfully.",
+                "message": "Plan activated successfully.",
                 "detail": UserSerializer(user).data
             }, status=status.HTTP_200_OK)
             
         except (Plan.DoesNotExist, SubscribedPlan.DoesNotExist):
             return Response({"error": "Subscription or Plan not found."}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Authentication failed: {str(e)}")
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class AuthenticateOneTimeSubView(APIView):
     permission_classes = (IsAuthenticated,)
@@ -205,22 +228,105 @@ class BuyVideoPlanView(APIView):
 
     def post(self, request):
         plan_id = request.data.get('plan_id')
+        user = request.user
+        
+        # Billing info
+        address = request.data.get('address')
+        city = request.data.get('city')
+        country = request.data.get('country')
+        contact = request.data.get('contact')
+
         try:
             plan = VideoPlan.objects.get(id=plan_id)
-            # Similar to CreateSubscriptionView but for VideoPlan
+            
+            # 1. Create Razorpay Order
+            # Amount in VideoPlan is stored as CharField in current model, need to convert to float/decimal
+            try:
+                amount = float(plan.final_price)
+            except (ValueError, TypeError):
+                amount = 0
+
+            razorpay_order = razorpay_service.create_order(
+                amount=amount,
+                currency=plan.currency_code or "INR",
+                receipt=f"vid_receipt_{user.id}_{int(timezone.now().timestamp())}"
+            )
+            
+            # 2. Create SubscribedVideo record (STATE_INACTIVE = 0)
+            subscribed_video = SubscribedVideo.objects.create(
+                plan=plan,
+                order_id=razorpay_order['id'],
+                created_by=user,
+                state_id=0, # STATE_INACTIVE/New
+                plan_price=float(plan.total_price) if plan.total_price else 0,
+                gst_price=float(plan.tax_price) if plan.tax_price else 0,
+                final_price=amount,
+                address=address or user.address,
+                city=city or user.city,
+                country=country or user.country,
+                contact=contact or user.contact_no
+            )
+
             return Response({
                 "message": "Video Plan order created.",
-                "razorpay_order_id": "v_rzp_mock_" + str(plan.id),
-                "amount": plan.final_price
+                "razorpay_order_id": razorpay_order['id'],
+                "amount": amount,
+                "razorpay_key": settings.RAZORPAY_KEY_ID,
+                "subscribed_video_id": subscribed_video.id
             }, status=status.HTTP_201_CREATED)
+            
         except VideoPlan.DoesNotExist:
             return Response({"error": "Video Plan not found"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Failed to create video plan order: {str(e)}")
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class CheckBuyVideoPlanView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        return Response({"message": "Checking video plan status..."}, status=status.HTTP_200_OK)
+        user = request.user
+        order_id = request.data.get('order_id')
+        payment_id = request.data.get('payment_id')
+        signature = request.data.get('signature')
+
+        try:
+            subscribed_video = SubscribedVideo.objects.get(
+                created_by=user,
+                order_id=order_id,
+                state_id=0 # Must be in New state
+            )
+
+            # 1. Verify Signature
+            params = {
+                'razorpay_order_id': order_id,
+                'razorpay_payment_id': payment_id,
+                'razorpay_signature': signature
+            }
+            
+            if not razorpay_service.verify_payment_signature(params):
+                return Response({"error": "Invalid signature provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # 2. Activate Subscription
+            subscribed_video.state_id = 1 # ACTIVE
+            subscribed_video.transaction_id = payment_id
+            subscribed_video.signature = signature
+            subscribed_video.save()
+
+            # 3. Add Credits to User
+            user.video_credit = (user.video_credit or 0) + subscribed_video.plan.credit
+            user.save()
+
+            return Response({
+                "message": "Video Plan activated successfully.",
+                "video_credits": user.video_credit
+            }, status=status.HTTP_200_OK)
+
+        except SubscribedVideo.DoesNotExist:
+            return Response({"error": "Video subscription record not found."}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Video plan activation failed: {str(e)}")
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class VideoPlanListView(generics.ListAPIView):
     permission_classes = (IsAuthenticated,)
@@ -333,3 +439,60 @@ class AdminSubscribedPlanExtendView(APIView, StandardizedResponseMixin):
             return self.error_response("Subscription not found.", status_code=404)
         except ValueError:
             return self.error_response("Days must be a valid integer.")
+
+class RazorpayWebhookView(APIView):
+    permission_classes = (AllowAny,) # Webhooks should be accessible
+
+    def post(self, request):
+        payload = request.body.decode('utf-8')
+        signature = request.META.get('HTTP_X_RAZORPAY_SIGNATURE')
+        
+        if not signature:
+            return Response({"error": "No signature"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Verify webhook signature
+        try:
+            razorpay_service.client.utility.verify_webhook_signature(payload, signature, settings.RAZORPAY_WEBHOOK_SECRET)
+        except Exception as e:
+            logger.error(f"Webhook signature verification failed: {str(e)}")
+            return Response({"error": "Invalid signature"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            event_data = json.loads(payload)
+        except json.JSONDecodeError:
+            return Response({"error": "Invalid JSON"}, status=status.HTTP_400_BAD_REQUEST)
+
+        event_type = event_data.get('event')
+        
+        logger.info(f"Received Razorpay Webhook Event: {event_type}")
+
+        # Handle events
+        if event_type == 'subscription.charged':
+            self.handle_subscription_charged(event_data)
+        elif event_type in ['subscription.cancelled', 'subscription.halted', 'subscription.expired']:
+            self.handle_subscription_status_change(event_data, event_type)
+        
+        return Response({"status": "ok"}, status=status.HTTP_200_OK)
+
+    def handle_subscription_charged(self, data):
+        sub_id = data['payload']['subscription']['entity']['id']
+        try:
+            sub = SubscribedPlan.objects.get(subscription_id=sub_id)
+            sub.state_id = 1 # Active
+            sub.save()
+            logger.info(f"Subscription {sub_id} activated via webhook")
+        except SubscribedPlan.DoesNotExist:
+            logger.error(f"Subscription {sub_id} not found in database for charged event")
+
+    def handle_subscription_status_change(self, data, event_type):
+        sub_id = data['payload']['subscription']['entity']['id']
+        try:
+            sub = SubscribedPlan.objects.get(subscription_id=sub_id)
+            if event_type == 'subscription.cancelled':
+                sub.state_id = 2 # Cancelled
+            else:
+                sub.state_id = 3 # Expired/Halted
+            sub.save()
+            logger.info(f"Subscription {sub_id} status updated to {event_type} via webhook")
+        except SubscribedPlan.DoesNotExist:
+            logger.error(f"Subscription {sub_id} not found in database for event {event_type}")

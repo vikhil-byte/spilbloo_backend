@@ -6,10 +6,11 @@ from .views import (
     ApplyCouponView, ApplyVideoCouponView, UpdateSubscriptionView,
     FreeSubscriptionView, OneTimeSubscriptionView, AdminSubscribedPlanListView,
     AdminSubscribedPlanDetailView, AdminSubscribedPlanCancelView,
-    AdminSubscribedPlanExtendView
+    AdminSubscribedPlanExtendView, RazorpayWebhookView
 )
 
 urlpatterns = [
+    path('webhook/', RazorpayWebhookView.as_view(), name='razorpay_webhook'),
     path('admin/list/', AdminSubscribedPlanListView.as_view(), name='admin_plan_list'),
     path('admin/detail/<int:pk>/cancel/', AdminSubscribedPlanCancelView.as_view(), name='admin_plan_cancel'),
     path('admin/detail/<int:pk>/extend/', AdminSubscribedPlanExtendView.as_view(), name='admin_plan_extend'),

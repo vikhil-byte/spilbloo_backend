@@ -31,11 +31,13 @@ class SubscribedPlan(models.Model):
     
     start_date = models.DateTimeField(null=True, blank=True)
     end_date = models.DateTimeField(null=True, blank=True)
-    renewal_date = models.DateTimeField(null=True, blank=True)
+    trial_end_at = models.DateTimeField(null=True, blank=True)
     
     subscription_id = models.CharField(max_length=255, null=True, blank=True)
     transaction_id = models.CharField(max_length=255, null=True, blank=True)
     customer_id = models.CharField(max_length=255, null=True, blank=True)
+    signature = models.CharField(max_length=255, null=True, blank=True)
+    offer_id = models.CharField(max_length=255, null=True, blank=True)
     
     plan_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     gst_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -44,11 +46,15 @@ class SubscribedPlan(models.Model):
     coupon = models.CharField(max_length=255, null=True, blank=True)
     coupon_free_trial_days = models.IntegerField(default=0)
     type_id = models.IntegerField(default=0) # Coupon applied/not applied
+    incentive_days = models.IntegerField(default=0)
+    no_of_video_session = models.IntegerField(default=0)
+    value = models.JSONField(null=True, blank=True)
 
     address = models.CharField(max_length=255, null=True, blank=True)
     city = models.CharField(max_length=255, null=True, blank=True)
     state = models.CharField(max_length=255, null=True, blank=True)
     country = models.CharField(max_length=255, null=True, blank=True)
+    zipcode = models.CharField(max_length=255, null=True, blank=True)
     contact = models.CharField(max_length=255, null=True, blank=True)
 
     cancel_reason = models.CharField(max_length=255, null=True, blank=True)

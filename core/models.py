@@ -461,7 +461,9 @@ class SubscribedVideo(models.Model):
     )
 
     plan = models.ForeignKey(VideoPlan, on_delete=models.CASCADE, related_name='subscribed_videos')
-    transaction_id = models.CharField(max_length=32, blank=True, null=True)
+    transaction_id = models.CharField(max_length=255, blank=True, null=True)
+    order_id = models.CharField(max_length=255, blank=True, null=True)
+    signature = models.CharField(max_length=255, blank=True, null=True)
     
     doctor_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     coupon = models.CharField(max_length=255, blank=True, null=True)

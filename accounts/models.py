@@ -94,6 +94,8 @@ class User(AbstractUser):
     state_id = models.SmallIntegerField(choices=STATE_CHOICES, default=STATE_ACTIVE)
     type_id = models.SmallIntegerField(default=0)
     doctor_id = models.IntegerField(blank=True, null=True)
+    video_credit = models.IntegerField(default=0)
+    is_notify = models.SmallIntegerField(default=1) # 1=On, 0=Off
 
     last_visit_time = models.DateTimeField(blank=True, null=True)
     last_action_time = models.DateTimeField(blank=True, null=True)
