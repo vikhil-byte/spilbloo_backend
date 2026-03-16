@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 import os
 from pathlib import Path
+import dj_database_url
 
 # Load environment variables from .env file if it exists
 try:
@@ -65,6 +66,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -99,14 +101,10 @@ WSGI_APPLICATION = "spilbloo_backend.wsgi.application"
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("POSTGRES_DB", "therapy_app_db"),
-        "USER": os.environ.get("POSTGRES_USER", "dev_user"),
-        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "Devusersmrt2@"),
-        "HOST": os.environ.get("DB_HOST", "127.0.0.1"),
-        "PORT": os.environ.get("DB_PORT", "5432"),
-    }
+    "default": dj_database_url.config(
+        default=f"postgres://{os.environ.get('POSTGRES_USER', 'dev_user')}:{os.environ.get('POSTGRES_PASSWORD', 'Devusersmrt2@')}@{os.environ.get('DB_HOST', '127.0.0.1')}:{os.environ.get('DB_PORT', '5432')}/{os.environ.get('POSTGRES_DB', 'therapy_app_db')}",
+        conn_max_age=600,
+    )
 }
 
 
@@ -208,6 +206,7 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 MEDIA_URL = '/media/'
 # Point media to the project root (one level up from BASE_DIR)

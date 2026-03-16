@@ -15,3 +15,6 @@ gunicorn==21.2.0
 razorpay==1.4.2
 firebase-admin==6.3.0
 faker==20.1.0
+whitenoise==6.6.0
+gunicorn==21.2.0
+dj-database-url==2.1.0
