@@ -17,7 +17,7 @@ from core.serializers import (
     SymptomSerializer, PageSerializer, FaqSerializer, 
     TherapistEarningSerializer, AuditLogSerializer, LoginHistorySerializer
 )
-from rest_framework.generics import ListAPIView
+from rest_framework.generics import ListAPIView, RetrieveDestroyAPIView
 from django.db import transaction
 from django.db.models import Case, When, F, Q
 import random
@@ -947,5 +947,46 @@ class LoginHistoryListView(StandardizedResponseMixin, ListAPIView):
     queryset = LoginHistory.objects.all().order_by('-created_on')
     pagination_class = StandardPagination
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+
+        id_val = params.get('id')
+        if id_val and id_val.isdigit():
+            qs = qs.filter(id=int(id_val))
+
+        user_ip = params.get('user_ip')
+        if user_ip:
+            qs = qs.filter(user_ip__icontains=user_ip)
+
+        user_agent = params.get('user_agent')
+        if user_agent:
+            qs = qs.filter(user_agent__icontains=user_agent)
+
+        state_id = params.get('state_id')
+        if state_id and state_id.isdigit():
+            qs = qs.filter(state_id=int(state_id))
+
+        type_id = params.get('type_id')
+        if type_id and type_id.isdigit():
+            qs = qs.filter(type_id=int(type_id))
+
+        login_time = params.get('login_time')
+        if login_time:
+            qs = qs.filter(login_time__date=login_time[:10])
+
+        created_on = params.get('created_on')
+        if created_on:
+            qs = qs.filter(created_on__date=created_on[:10])
+
+        return qs
+
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
+
+
+class LoginHistoryDetailView(StandardizedResponseMixin, RetrieveDestroyAPIView):
+    permission_classes = (IsAdminUser,)
+    serializer_class = LoginHistorySerializer
+    queryset = LoginHistory.objects.all()
+
