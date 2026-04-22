@@ -98,7 +98,7 @@ The backend depends heavily on the following exact third-party services:
 * **Current State:** API endpoints (like `CreateSubscription`, `BuyVideoPlan`) have been implemented with strict **Razorpay Subscription API** parity. Version enforcement and address persistence are fully integrated.
 * **Action Items:**
   * [x] Install the SDK (Done)
-  * [ ] Add your `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` to `.env`.
+  * [x] Add your `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` to `.env`.
   * [x] Razorpay Subscription API logic implemented in `plans/views.py`.
 
 ### **Firebase Cloud Messaging (FCM)**
@@ -119,7 +119,7 @@ The backend depends heavily on the following exact third-party services:
   * The `docker-compose.yml` handles linking PostgreSQL and Django automatically.
 * **Action Items:**
   * Ensure Docker Desktop is running on your machine.
-  * Create or update the `.env` file in the root directory (ensure `DEBUG=False` for production).
+  * [x] Create or update the `.env` file in the root directory (ensure `DEBUG=False` for production).
   * Run `docker-compose up -d --build` from the root directory.
   * The `entrypoint.sh` script will automatically wait for the DB, create the tables via `makemigrations`/`migrate`, collect static files for Nginx, and start the Gunicorn server at `http://localhost:80`.
   * *Next Phase*: Export data from the old PHP database and import it into Django.

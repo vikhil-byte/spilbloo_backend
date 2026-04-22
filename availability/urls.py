@@ -22,6 +22,13 @@ urlpatterns = [
     path('check-session/', BookingView.as_view(), name='check_session'), # Placeholder
     path('check-video-link/', BookingView.as_view(), name='check_video_link'), # Placeholder
     path('notification-count/', NotificationCountView.as_view(), name='notification_count'),
+    # iOS legacy compatibility aliases.
+    path('list/', GetDoctorSlotView.as_view(), name='slot_list_legacy'),
+    path('get-doctor-slot/', GetDoctorSlotView.as_view(), name='get_doctor_slot_legacy'),
+    path('booking/', BookingView.as_view(), name='booking_legacy'),
+    path('patient-booking-list/', PatientBookingListView.as_view(), name='patient_booking_list_legacy'),
+    path('doctor-booking-list/', DoctorBookingListView.as_view(), name='doctor_booking_list_legacy'),
+    path('doctor-booking-req/', DoctorBookingReqView.as_view(), name='doctor_booking_req_legacy'),
     path('accept-booking/', AcceptBookingView.as_view(), name='accept_booking'),
     path('doctor-reschedule/', DoctorRescheduleView.as_view(), name='doctor_reschedule'),
     path('doctor-cancel/', DoctorCancelView.as_view(), name='doctor_cancel'),

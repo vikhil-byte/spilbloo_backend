@@ -17,13 +17,20 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import path, include
+from accounts.views import LogoutView
+from accounts.views import CardDeleteView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    # iOS legacy compatibility alias (historical typo in client path).
+    path("api/users/logout/", LogoutView.as_view()),
+    # iOS legacy compatibility alias.
+    path("api/transactions/card-delete/", CardDeleteView.as_view()),
     path("api/user/", include("accounts.urls")),
     path("api/slot/", include("availability.urls")),
     path("api/plan/", include("plans.urls")),
     path("api/doctor-request/", include("doctor_requests.urls")),
     path("api/call/", include("calls.urls")),
     path("api/notification/", include("accounts.urls_notification")),
+    path("node/", include("core.urls_node")),
 ]

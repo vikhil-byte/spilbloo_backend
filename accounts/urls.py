@@ -5,7 +5,8 @@ from .views import (
     VerifyOtpView, ResendOtpView, DoctorContactView,
     CheckView, LogoutView, ChangePasswordView, DetailView, GetPageView,
     ForgotPasswordView, SymptomListView, MatchesListView, FaqView, AssignDoctorView,
-    AssignVideoDoctorView, SocialLoginView, EarningsView, AcceptConsentView, SendMessageView
+    AssignVideoDoctorView, SocialLoginView, EarningsView, AcceptConsentView, SendMessageView,
+    GetCountryView, GetCityView, UserSearchView, DefaultAddressView, CardDeleteView
 )
 from .views_notification import NotificationOnOffView
 
@@ -14,12 +15,20 @@ urlpatterns = [
     path('verify-otp/', VerifyOtpView.as_view(), name='verify_otp'),
     path('resend-otp/', ResendOtpView.as_view(), name='resend_otp'),
     path('doctor-contact/', DoctorContactView.as_view(), name='doctor_contact'),
+    # iOS legacy compatibility alias.
+    path('contact-us/', DoctorContactView.as_view(), name='contact_us_legacy'),
     path('check/', CheckView.as_view(), name='check'),
     path('logout/', LogoutView.as_view(), name='logout'),
+    # iOS legacy compatibility alias.
+    path('notification/', NotificationOnOffView.as_view(), name='user_notification_legacy'),
     path('change-password/', ChangePasswordView.as_view(), name='change_password'),
     path('detail/', DetailView.as_view(), name='user_detail'),
     path('detail/<int:pk>/', DetailView.as_view(), name='user_detail_pk'),
     path('get-page/', GetPageView.as_view(), name='get_page'),
+    path('get-country/', GetCountryView.as_view(), name='get_country'),
+    path('get-city/', GetCityView.as_view(), name='get_city'),
+    path('search/', UserSearchView.as_view(), name='user_search'),
+    path('default-address/', DefaultAddressView.as_view(), name='default_address'),
     path('forgot-password/', ForgotPasswordView.as_view(), name='forgot_password'),
     path('symptom-list/', SymptomListView.as_view(), name='symptom_list'),
     path('matches-list/', MatchesListView.as_view(), name='matches_list'),

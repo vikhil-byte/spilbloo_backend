@@ -13,6 +13,7 @@ class Plan(models.Model):
     total_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     tax_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     final_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    doctor_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     duration = models.IntegerField(default=30) # in days
     plan_type = models.IntegerField(default=1) # 1=Paid, 0=Free
     type_id = models.IntegerField(default=1) # Visibility
@@ -42,6 +43,7 @@ class SubscribedPlan(models.Model):
     
     coupon = models.CharField(max_length=255, null=True, blank=True)
     coupon_free_trial_days = models.IntegerField(default=0)
+    company_coupon = models.ForeignKey('company.CompanyCoupon', on_delete=models.SET_NULL, null=True, blank=True, related_name='subscriptions')
     type_id = models.IntegerField(default=0) # Coupon applied/not applied
 
     address = models.CharField(max_length=255, null=True, blank=True)
@@ -68,6 +70,7 @@ class Coupon(models.Model):
     no_of_free_trial_days = models.IntegerField(default=0)
     limit = models.IntegerField(default=0)
     user_limit = models.IntegerField(default=1)
+    valid_till = models.DateTimeField(null=True, blank=True)
     state_id = models.IntegerField(default=1)
 
     class Meta:

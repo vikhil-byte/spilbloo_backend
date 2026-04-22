@@ -945,3 +945,39 @@ class Faq(models.Model):
 
     def __str__(self):
         return self.question[:50]
+
+
+class NodeSubscriptionPlan(models.Model):
+    """
+    Unmanaged compatibility model for legacy StarterNode table.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    plan_name = models.TextField(blank=True, null=True)
+    plan_description = models.TextField(blank=True, null=True)
+    plan_weekly_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    plan_duration = models.IntegerField(blank=True, null=True)
+    total_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    doctor_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    no_of_free_trial_days = models.IntegerField(blank=True, null=True)
+    plan_type = models.TextField(blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = "tbl_subscription_plan"
+
+
+class NodeUserSelectedTherapistPlan(models.Model):
+    """
+    Unmanaged compatibility model for legacy StarterNode table.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    user_id = models.BigIntegerField()
+    therapist_id = models.BigIntegerField()
+    plan_id = models.BigIntegerField()
+    selected_on = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = "tbl_user_selected_therapist_plan"

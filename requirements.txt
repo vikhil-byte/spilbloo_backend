@@ -11,5 +11,9 @@ sqlparse==0.5.5
 typing_extensions==4.15.0
 python-dotenv==1.0.1
 gunicorn==21.2.0
-razorpay==1.5.0
+razorpay==2.0.1
 firebase-admin==6.3.0
+celery==5.4.0
+redis==5.0.3
+pymysql==1.1.0
+bcrypt==4.1.2

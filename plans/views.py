@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from django.db import transaction
 from django.utils import timezone
 from .models import Plan, SubscribedPlan, Coupon
-from core.models import VideoPlan, SubscribedVideo, VideoCoupon, CouponUser
+from core.models import VideoPlan, SubscribedVideo, VideoCoupon, CouponUser, Currency
 from .serializers import (
     PlanSerializer, SubscribedPlanSerializer, VideoPlanSerializer, 
     SubscribedVideoSerializer, CouponSerializer, VideoCouponSerializer
@@ -257,17 +257,27 @@ class ApplyVideoCouponView(APIView):
 class UpdateSubscriptionView(APIView):
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request, plan_id):
+    def post(self, request):
         return Response({"message": "Subscription updated successfully."}, status=status.HTTP_200_OK)
 
 class FreeSubscriptionView(APIView):
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request, plan_id):
+    def post(self, request):
         return Response({"message": "Subscription created successfully."}, status=status.HTTP_200_OK)
 
 class OneTimeSubscriptionView(APIView):
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request, plan_id):
+    def post(self, request):
         return Response({"message": "Subscription created successfully."}, status=status.HTTP_200_OK)
+
+
+class CurrencyListView(APIView):
+    permission_classes = (AllowAny,)
+
+    def get(self, request):
+        currencies = Currency.objects.filter(state_id=Currency.STATE_ACTIVE).values(
+            "country", "code", "symbol", "conversion_rate"
+        )
+        return Response({"list": list(currencies)}, status=status.HTTP_200_OK)

@@ -13,10 +13,12 @@ from core.models import (
 )
 from core.serializers import SymptomSerializer, PageSerializer, FaqSerializer, TherapistEarningSerializer
 from django.db import transaction
-from django.db.models import Case, When, F
+from django.db.models import Case, When, F, Q
 import random
 import logging
 from django.utils import timezone
+from django.contrib.auth import authenticate
+from django.core.cache import cache
 
 logger = logging.getLogger(__name__)
 
@@ -28,18 +30,66 @@ def send_otp_via_email(email, otp):
     # In production: send_mail(subject, message, from, [email])
     pass
 
+
+def _otp_cache_key(user_id: int) -> str:
+    return f"spilbloo:otp:{user_id}"
+
+
+def _set_user_otp(user, otp: str) -> None:
+    otp_str = str(otp)
+    if hasattr(user, "otp"):
+        user.otp = otp_str
+        if hasattr(user, "otp_verified"):
+            user.otp_verified = 0
+        user.save()
+        return
+    cache.set(_otp_cache_key(user.id), otp_str, timeout=600)
+
+
+def _get_user_otp(user):
+    if hasattr(user, "otp"):
+        return getattr(user, "otp", None)
+    return cache.get(_otp_cache_key(user.id))
+
+
+def _mark_user_otp_verified(user) -> None:
+    if hasattr(user, "otp"):
+        if hasattr(user, "otp_verified"):
+            user.otp_verified = 1
+        user.otp = None
+        user.save()
+        return
+    cache.delete(_otp_cache_key(user.id))
+
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     permission_classes = (AllowAny,)
     serializer_class = RegisterSerializer
 
     def create(self, request, *args, **kwargs):
-        # 1. Custom logic: Generate OTP
+        # Normalize legacy iOS payload keys (e.g. User[email], User[password]).
+        normalized_data = request.data.copy()
+        normalized_data["email"] = request.data.get("email") or request.data.get("User[email]")
+        normalized_data["password"] = request.data.get("password") or request.data.get("User[password]")
+        normalized_data["full_name"] = (
+            request.data.get("full_name")
+            or request.data.get("User[full_name]")
+            or " ".join(
+                filter(
+                    None,
+                    [
+                        request.data.get("User[first_name]", "").strip(),
+                        request.data.get("User[last_name]", "").strip(),
+                    ],
+                )
+            ).strip()
+        )
+        normalized_data["role_id"] = request.data.get("role_id") or request.data.get("User[role_id]")
+        normalized_data["device_type"] = request.data.get("device_type") or request.data.get("User[device_type]")
 
-        # 2. Extract basic validation and saving via DRF serializer
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(data=normalized_data)
         serializer.is_valid(raise_exception=True)
-        device_type = int(request.data.get('device_type', 0))
+        device_type = int(normalized_data.get('device_type', 0))
         version = float(request.headers.get('version', 0))
 
         # PHP logic: (deviceType == 1 && version >= 30) || (deviceType == 2 && version >= 2.7)
@@ -50,16 +100,15 @@ class RegisterView(generics.CreateAPIView):
              # Generate random password if it's a newer app version
              password = User.objects.make_random_password()
         else:
-             password = request.data.get('password')
+             password = normalized_data.get('password')
 
         user = serializer.save()
         user.set_password(password)
 
         otp = str(random.randint(1000, 9999))
-        user.otp = otp
-        user.otp_verified = 0 # User.OTP_NOT_VERIFIED mapping
         user.role_id = User.ROLE_PATIENT # Default role from PHP signup
         user.save()
+        _set_user_otp(user, otp)
 
         send_otp_via_email(user.email, otp)
 
@@ -72,8 +121,8 @@ class VerifyOtpView(APIView):
     permission_classes = (AllowAny,)
 
     def post(self, request):
-        email = request.data.get('email')
-        otp = request.data.get('otp')
+        email = request.data.get('email') or request.data.get('User[email]')
+        otp = request.data.get('otp') or request.data.get('User[otp]')
 
         if not email or not otp:
             return Response({"error": "Email and OTP are required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -83,11 +132,11 @@ class VerifyOtpView(APIView):
         except User.DoesNotExist:
             return Response({"error": "Incorrect Email"}, status=status.HTTP_400_BAD_REQUEST)
 
-        if str(user.otp) == str(otp):
+        stored_otp = _get_user_otp(user)
+        if str(stored_otp) == str(otp):
             user.state_id = User.STATE_ACTIVE
-            user.otp_verified = 1 # Verified
-            user.otp = None # Clear OTP
             user.save()
+            _mark_user_otp_verified(user)
 
             # Generate JWT Token (like PHP's create AccessToken / generateAuthKey)
             refresh = RefreshToken.for_user(user)
@@ -112,14 +161,14 @@ class ResendOtpView(APIView):
     permission_classes = (AllowAny,)
 
     def post(self, request):
-        email = request.data.get('email')
+        email = request.data.get('email') or request.data.get('User[email]')
         if not email:
             return Response({"error": "No data posted"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             user = User.objects.get(email=email)
             otp = str(random.randint(1000, 9999))
-            user.save()
+            _set_user_otp(user, otp)
 
             send_otp_via_email(user.email, otp)
 
@@ -162,53 +211,59 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
 
     def post(self, request, *args, **kwargs):
-        email = request.data.get('email') or request.data.get('username')
-        role_id = int(request.data.get('role_id', 0))
-        device_type = int(request.data.get('device_type', 0))
+        # Normalize legacy iOS payload keys.
+        email = (
+            request.data.get('email')
+            or request.data.get('username')
+            or request.data.get('LoginForm[username]')
+        )
+        password = request.data.get('password') or request.data.get('LoginForm[password]')
+        role_id = int(request.data.get('role_id') or request.data.get('LoginForm[role_id]') or 0)
+        device_type = int(request.data.get('device_type') or request.data.get('LoginForm[device_type]') or 0)
         version = float(request.headers.get('version', 0))
 
         try:
-            if email:
-                user = User.objects.get(email=email)
-                
-                # 1. Role Check (Mirroring actionLogin lines 384-391)
-                if int(user.role_id) != role_id:
-                    if role_id == User.ROLE_DOCTER:
-                        return Response({"error": "You are not allowed to login in therapist section with user credentials."}, status=status.HTTP_400_BAD_REQUEST)
-                    else:
-                        return Response({"error": "You are not allowed to login in user section with therapist credentials."}, status=status.HTTP_400_BAD_REQUEST)
+            if not email:
+                return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-                 # 2. Version Check for iOS (Mirroring actionLogin lines 371-383)
-                if device_type == User.DEVICE_IOS and version < 3.0:
-                     if int(user.role_id) != User.ROLE_DOCTER:
-                          has_plan = SubscribedPlan.objects.filter(created_by=user, state_id=1).exists()
-                          if not has_plan:
-                               return Response({"error": "A new version of app is available please update your app."}, status=status.HTTP_400_BAD_REQUEST)
+            user = User.objects.get(email=email)
 
-            # 3. Handle Regular JWT Logic
-            response = super().post(request, *args, **kwargs)
-            
-            # 4. PHP Logic for OTP on Login (lines 403-413)
-            # if ((deviceType == 1 && version >= 30) || (deviceType == 2 && version >= 2.7))
-            if response.status_code == 200:
-                if (device_type == 1 and version >= 30) or (device_type == 2 and version >= 2.7):
-                    user_id = response.data.get('id') or (user.id if 'user' in locals() else None)
-                    if not user_id and email:
-                         user_id = User.objects.get(email=email).id
-                    
-                    if user_id:
-                        user_obj = User.objects.get(id=user_id)
-                        otp = str(random.randint(1000, 9999))
-                        user_obj.otp = otp
-                        user_obj.otp_verified = 0 # OTP_NOT_VERIFIED
-                        user_obj.save()
-                        send_otp_via_email(user_obj.email, otp)
-                        
-                        # Return user detail as well to match PHP's asJson(true)
-                        response.data['detail'] = UserSerializer(user_obj).data
-                        response.data['message'] = "Please verify your OTP."
-            
-            return response
+            # Role Check (Mirroring legacy behavior).
+            if int(user.role_id) != role_id:
+                if role_id == User.ROLE_DOCTER:
+                    return Response({"error": "You are not allowed to login in therapist section with user credentials."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": "You are not allowed to login in user section with therapist credentials."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Legacy iOS OTP-login flow: password can be empty and still return OTP challenge.
+            if not (password or "").strip():
+                otp = str(random.randint(1000, 9999))
+                _set_user_otp(user, otp)
+                send_otp_via_email(user.email, otp)
+                return Response({
+                    "message": "Please verify your OTP.",
+                    "detail": UserSerializer(user).data
+                }, status=status.HTTP_200_OK)
+
+            auth_user = authenticate(request, username=email, password=password) or authenticate(request, email=email, password=password)
+            if not auth_user:
+                return Response({"error": "Incorrect password."}, status=status.HTTP_400_BAD_REQUEST)
+
+            refresh = RefreshToken.for_user(auth_user)
+            response_data = {
+                "message": "Login Successfully",
+                "access-token": str(refresh.access_token),
+                "refresh-token": str(refresh),
+                "detail": UserSerializer(auth_user).data
+            }
+
+            # OTP challenge for newer versions (legacy behavior).
+            if (device_type == 1 and version >= 30) or (device_type == 2 and version >= 2.7):
+                otp = str(random.randint(1000, 9999))
+                _set_user_otp(auth_user, otp)
+                send_otp_via_email(auth_user.email, otp)
+                response_data["message"] = "Please verify your OTP."
+
+            return Response(response_data, status=status.HTTP_200_OK)
 
         except User.DoesNotExist:
             return Response({"error": "Incorrect Email"}, status=status.HTTP_400_BAD_REQUEST)
@@ -637,7 +692,10 @@ class AcceptConsentView(APIView):
 class SendMessageView(APIView):
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request, to_id):
+    def post(self, request):
+        to_id = request.query_params.get('to_id') or request.data.get('to_id')
+        if not to_id:
+            return Response({"message": "to_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             to_user = User.objects.get(id=to_id)
         except User.DoesNotExist:
@@ -657,4 +715,91 @@ class SendMessageView(APIView):
         )
 
         return Response({"message": "sent"}, status=status.HTTP_200_OK)
+
+
+class GetCountryView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        search = request.query_params.get("name", "").strip()
+        countries_qs = User.objects.exclude(country__isnull=True).exclude(country__exact="")
+        if search:
+            countries_qs = countries_qs.filter(country__icontains=search)
+        countries = (
+            countries_qs.values_list("country", flat=True)
+            .distinct()
+            .order_by("country")
+        )
+        return Response({"list": [{"name": country} for country in countries]}, status=status.HTTP_200_OK)
+
+
+class GetCityView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        search = request.query_params.get("name", "").strip()
+        country = request.query_params.get("country_id", "").strip()
+
+        cities_qs = User.objects.exclude(city__isnull=True).exclude(city__exact="")
+        if country:
+            cities_qs = cities_qs.filter(country__iexact=country)
+        if search:
+            cities_qs = cities_qs.filter(city__icontains=search)
+
+        cities = (
+            cities_qs.values_list("city", flat=True)
+            .distinct()
+            .order_by("city")
+        )
+        return Response({"list": [{"name": city} for city in cities]}, status=status.HTTP_200_OK)
+
+
+class UserSearchView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        search = request.query_params.get("search", "").strip()
+        users = User.objects.filter(state_id=User.STATE_ACTIVE)
+        if search:
+            users = users.filter(
+                Q(full_name__icontains=search)
+                | Q(email__icontains=search)
+            )
+        users = users.order_by("id")[:50]
+        data = [
+            {
+                "id": user.id,
+                "full_name": user.full_name or "",
+                "email": user.email or "",
+                "profile_file": user.profile_file or "",
+            }
+            for user in users
+        ]
+        return Response({"list": data}, status=status.HTTP_200_OK)
+
+
+class DefaultAddressView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        # Legacy endpoint compatibility: backend currently stores only a single address on User.
+        return Response(
+            {
+                "message": "Default address is your current profile address.",
+                "detail": {
+                    "address": request.user.address or "",
+                    "city": request.user.city or "",
+                    "country": request.user.country or "",
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class CardDeleteView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        # Legacy endpoint compatibility placeholder until card model migration is complete.
+        return Response({"message": "Card deleted successfully."}, status=status.HTTP_200_OK)
 

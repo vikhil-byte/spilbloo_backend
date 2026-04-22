@@ -4,7 +4,7 @@ from .views import (
     AuthenticateSubscriptionView, AuthenticateOneTimeSubView, CancelCompanyView,
     CancelView, BuyVideoPlanView, CheckBuyVideoPlanView, VideoPlanListView,
     ApplyCouponView, ApplyVideoCouponView, UpdateSubscriptionView,
-    FreeSubscriptionView, OneTimeSubscriptionView
+    FreeSubscriptionView, OneTimeSubscriptionView, CurrencyListView
 )
 
 urlpatterns = [
@@ -18,8 +18,12 @@ urlpatterns = [
     path('cancel-company/', CancelCompanyView.as_view(), name='cancel_company'),
     path('cancel/', CancelView.as_view(), name='cancel'),
     path('buy-video-plan/', BuyVideoPlanView.as_view(), name='buy_video_plan'),
+    # iOS legacy compatibility alias.
+    path('buy/', OneTimeSubscriptionView.as_view(), name='buy_legacy'),
     path('check-buy-video-plan/', CheckBuyVideoPlanView.as_view(), name='check_buy_video_plan'),
     path('video-plan/', VideoPlanListView.as_view(), name='video_plan_list'),
+    # iOS legacy compatibility alias.
+    path('currency/', CurrencyListView.as_view(), name='currency_list'),
     path('apply-coupon/', ApplyCouponView.as_view(), name='apply_coupon'),
     path('apply-video-coupon/', ApplyVideoCouponView.as_view(), name='apply_video_coupon'),
     path('update-subscription/', UpdateSubscriptionView.as_view(), name='update_subscription'),
