@@ -10,20 +10,20 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ('id', 'email', 'full_name', 'role_id', 'contact_no', 'address', 'city', 'country', 'profile_file')
 
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = User
         fields = ('id', 'email', 'password', 'full_name', 'role_id')
         extra_kwargs = {
             'email': {'required': True},
-            'full_name': {'required': True}
+            'full_name': {'required': False, 'allow_blank': True}
         }
 
     def create(self, validated_data):
         user = User.objects.create_user(
             email=validated_data['email'],
-            password=validated_data['password'],
+            password=validated_data.get('password') or None,
             full_name=validated_data.get('full_name', ''),
             role_id=validated_data.get('role_id', User.ROLE_USER)
         )

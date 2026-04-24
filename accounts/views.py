@@ -1,6 +1,7 @@
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated
 from django.contrib.auth import get_user_model
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
@@ -19,10 +20,14 @@ import logging
 from django.utils import timezone
 from django.contrib.auth import authenticate
 from django.core.cache import cache
+from plans.models import SubscribedPlan
 
 logger = logging.getLogger(__name__)
 
 User = get_user_model()
+DEVICE_ANDROID = 1
+DEVICE_IOS = 2
+OTP_NOT_VERIFIED = 0
 
 def send_otp_via_email(email, otp):
     # This is a placeholder for real email service (SendGrid/SES)
@@ -61,36 +66,173 @@ def _mark_user_otp_verified(user) -> None:
         return
     cache.delete(_otp_cache_key(user.id))
 
+
+def _enforce_ios_version_gate(user, device_type: int, version: float):
+    """
+    Mirror legacy PHP check/login version gate for iOS users.
+    """
+    if device_type != DEVICE_IOS:
+        return None
+    if version >= 3.0:
+        return None
+    if user.role_id == User.ROLE_DOCTER:
+        return None
+    if SubscribedPlan.objects.filter(created_by=user, state_id=1).exists():
+        return None
+    return Response(
+        {"error": "A new version of app is available please update your app."},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def _safe_int(value, default=0):
+    try:
+        if value in (None, ""):
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value, default=0.0):
+    try:
+        if value in (None, ""):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_str(value, default=""):
+    if value is None:
+        return default
+    try:
+        return str(value)
+    except Exception:
+        return default
+
+
+def _legacy_user_detail(user):
+    """
+    Build compatibility payload expected by legacy iOS user model parsing.
+    """
+    otp_verified = getattr(user, "otp_verified", None)
+    if otp_verified is None:
+        # Legacy behavior: active users are treated as verified unless explicitly unverified.
+        otp_verified = 1 if user.state_id == User.STATE_ACTIVE else 0
+
+    return {
+        "id": user.id,
+        "email": user.email or "",
+        "full_name": user.full_name or "",
+        "first_name": getattr(user, "first_name", "") or "",
+        "last_name": getattr(user, "last_name", "") or "",
+        "role_id": user.role_id,
+        "state_id": user.state_id,
+        "contact_no": getattr(user, "contact_no", "") or "",
+        "address": getattr(user, "address", "") or "",
+        "city": getattr(user, "city", "") or "",
+        "country": getattr(user, "country", "") or "",
+        "profile_file": getattr(user, "profile_file", "") or "",
+        "doctor_id": _safe_str(getattr(user, "doctor_id", "") or ""),
+        "provider": 0,
+        "isOnline": _safe_str(getattr(user, "online", "") or ""),
+        "otp_verified": otp_verified,
+        "otp": _safe_str(getattr(user, "otp", "") or ""),
+        "is_ios_app_update": False,
+        "is_subscribed_user": False,
+        "is_buy_subscripion": False,
+        "is_buy_video_credits": False,
+        "video_credits": 0,
+    }
+
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     permission_classes = (AllowAny,)
     serializer_class = RegisterSerializer
 
     def create(self, request, *args, **kwargs):
+        if not request.data:
+            logger.warning("Signup rejected: empty payload")
+            return Response({"error": "Data not posted."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user_payload = request.data.get("User")
+        if not isinstance(user_payload, dict):
+            user_payload = {}
+
         # Normalize legacy iOS payload keys (e.g. User[email], User[password]).
         normalized_data = request.data.copy()
-        normalized_data["email"] = request.data.get("email") or request.data.get("User[email]")
-        normalized_data["password"] = request.data.get("password") or request.data.get("User[password]")
+        normalized_data["email"] = (
+            request.data.get("email")
+            or request.data.get("User[email]")
+            or user_payload.get("email")
+        )
+        normalized_data["password"] = (
+            request.data.get("password")
+            or request.data.get("User[password]")
+            or user_payload.get("password")
+        )
         normalized_data["full_name"] = (
             request.data.get("full_name")
             or request.data.get("User[full_name]")
+            or user_payload.get("full_name")
             or " ".join(
                 filter(
                     None,
                     [
                         request.data.get("User[first_name]", "").strip(),
                         request.data.get("User[last_name]", "").strip(),
+                        (user_payload.get("first_name") or "").strip(),
+                        (user_payload.get("last_name") or "").strip(),
                     ],
                 )
             ).strip()
         )
-        normalized_data["role_id"] = request.data.get("role_id") or request.data.get("User[role_id]")
-        normalized_data["device_type"] = request.data.get("device_type") or request.data.get("User[device_type]")
+        normalized_data["role_id"] = (
+            request.data.get("role_id")
+            or request.data.get("User[role_id]")
+            or user_payload.get("role_id")
+        )
+        normalized_data["device_type"] = (
+            request.data.get("device_type")
+            or request.data.get("User[device_type]")
+            or user_payload.get("device_type")
+        )
+
+        # Prevent null values from tripping serializer validation; match PHP defaults.
+        if normalized_data.get("role_id") in (None, ""):
+            normalized_data["role_id"] = User.ROLE_PATIENT
+        if normalized_data.get("password") is None:
+            normalized_data["password"] = ""
+
+        email = (normalized_data.get("email") or "").strip()
+        if email and User.objects.filter(email=email).exists():
+            logger.warning("Signup rejected: duplicate email=%s", email)
+            return Response({"error": "Email already exists."}, status=status.HTTP_400_BAD_REQUEST)
 
         serializer = self.get_serializer(data=normalized_data)
-        serializer.is_valid(raise_exception=True)
-        device_type = int(normalized_data.get('device_type', 0))
-        version = float(request.headers.get('version', 0))
+        if not serializer.is_valid():
+            error_messages = []
+            for errors in serializer.errors.values():
+                if isinstance(errors, (list, tuple)):
+                    error_messages.extend(str(err) for err in errors)
+                else:
+                    error_messages.append(str(errors))
+            # Never log password values. Keep payload diagnostics minimal and safe.
+            logger.warning(
+                "Signup validation failed: errors=%s email=%s has_password=%s payload_keys=%s",
+                serializer.errors,
+                normalized_data.get("email"),
+                bool(normalized_data.get("password")),
+                sorted(list(request.data.keys())),
+            )
+            return Response(
+                {"error": ",".join(error_messages) or "Data not posted."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        device_type = _safe_int(normalized_data.get('device_type'), 0)
+        version = _safe_float(request.headers.get('version', 0), 0.0)
 
         # PHP logic: (deviceType == 1 && version >= 30) || (deviceType == 2 && version >= 2.7)
         # device_type 1 = Android, 2 = iOS (or vice versa depending on mapping, let's assume 1=Android, 2=iOS)
@@ -107,15 +249,21 @@ class RegisterView(generics.CreateAPIView):
 
         otp = str(random.randint(1000, 9999))
         user.role_id = User.ROLE_PATIENT # Default role from PHP signup
+        user.state_id = User.STATE_INACTIVE
+        if hasattr(user, "otp_verified"):
+            user.otp_verified = OTP_NOT_VERIFIED
+        if hasattr(user, "email_verified"):
+            user.email_verified = 0
         user.save()
         _set_user_otp(user, otp)
 
         send_otp_via_email(user.email, otp)
+        logger.info("Signup success: user_id=%s email=%s", user.id, user.email)
 
         return Response({
-            "message": "User registered successfully. Please verify your OTP.",
+            "message": "Please verify your OTP.",
             "detail": UserSerializer(user).data
-        }, status=status.HTTP_201_CREATED)
+        }, status=status.HTTP_200_OK)
 
 class VerifyOtpView(APIView):
     permission_classes = (AllowAny,)
@@ -211,6 +359,10 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
 
     def post(self, request, *args, **kwargs):
+        if not request.data:
+            # Legacy PHP actionLogin() when model load fails.
+            return Response({"error": "No data posted."}, status=status.HTTP_400_BAD_REQUEST)
+
         # Normalize legacy iOS payload keys.
         email = (
             request.data.get('email')
@@ -224,15 +376,37 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
         try:
             if not email:
-                return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": "No data posted."}, status=status.HTTP_400_BAD_REQUEST)
 
             user = User.objects.get(email=email)
+
+            legacy_version_gate_error = _enforce_ios_version_gate(user, device_type, version)
+            if legacy_version_gate_error:
+                return legacy_version_gate_error
 
             # Role Check (Mirroring legacy behavior).
             if int(user.role_id) != role_id:
                 if role_id == User.ROLE_DOCTER:
                     return Response({"error": "You are not allowed to login in therapist section with user credentials."}, status=status.HTTP_400_BAD_REQUEST)
                 return Response({"error": "You are not allowed to login in user section with therapist credentials."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Legacy LoginForm.loginuser() blocks admin logins in API flow.
+            if user.role_id == User.ROLE_ADMIN:
+                return Response({"error": "You are not allowed to login."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Legacy branch parity:
+            # - inactive + otp not verified => 200 guidance response
+            # - inactive otherwise => error
+            if user.state_id == User.STATE_INACTIVE:
+                if getattr(user, "otp_verified", OTP_NOT_VERIFIED) == OTP_NOT_VERIFIED:
+                    return Response(
+                        {
+                            "message": "Details already exist. You need to verify your otp first",
+                            "detail": UserSerializer(user).data,
+                        },
+                        status=status.HTTP_200_OK,
+                    )
+                return Response({"error": " User is not active"}, status=status.HTTP_400_BAD_REQUEST)
 
             # Legacy iOS OTP-login flow: password can be empty and still return OTP challenge.
             if not (password or "").strip():
@@ -246,7 +420,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
             auth_user = authenticate(request, username=email, password=password) or authenticate(request, email=email, password=password)
             if not auth_user:
-                return Response({"error": "Incorrect password."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": "Incorrect Email Or Password."}, status=status.HTTP_400_BAD_REQUEST)
 
             refresh = RefreshToken.for_user(auth_user)
             response_data = {
@@ -271,30 +445,61 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class CheckView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (AllowAny,)
 
-    def get(self, request):
+    def handle_exception(self, exc):
+        if isinstance(exc, (AuthenticationFailed, NotAuthenticated)):
+            auth_header = self.request.headers.get("Authorization", "")
+            auth_preview = ""
+            if auth_header:
+                parts = auth_header.split(" ", 1)
+                if len(parts) == 2:
+                    scheme, token = parts
+                    auth_preview = f"{scheme} {token[:12]}..."
+                else:
+                    auth_preview = f"{auth_header[:20]}..."
+            logger.warning(
+                "check auth failed: reason=%s has_auth=%s auth_preview=%s method=%s path=%s user_agent=%s content_type=%s",
+                str(exc),
+                bool(auth_header),
+                auth_preview,
+                self.request.method,
+                self.request.path,
+                self.request.headers.get("User-Agent", ""),
+                self.request.content_type,
+            )
+        return super().handle_exception(exc)
+
+    def _handle_check(self, request):
+        if not request.user.is_authenticated:
+            # Match legacy PHP actionCheck guest response shape.
+            return Response(
+                {"message": "User not authenticated. No device token found"},
+                status=status.HTTP_200_OK,
+            )
+
         user = request.user
-        device_type = int(request.headers.get('device-type', 0)) # Mapped from headers or token info
+        device_type = int(request.headers.get('device-type', 0))
         version = float(request.headers.get('version', 0))
 
-        # PHP logic: actionCheck (login verification and version enforcement)
-        if device_type == User.DEVICE_IOS:
-             # In PHP: if (!User::checkIsIosLatestVersion())
-             # To simulate, let's assume a latest version (e.g. 3.0)
-             if version < 3.0:
-                  if user.role_id != User.ROLE_DOCTER:
-                       # Check if patient has plan
-                       has_plan = SubscribedPlan.objects.filter(created_by=user, state_id=1).exists()
-                       if not has_plan:
-                            return Response({
-                                "error": "A new version of app is available please update your app."
-                            }, status=status.HTTP_400_BAD_REQUEST)
+        legacy_version_gate_error = _enforce_ios_version_gate(user, device_type, version)
+        if legacy_version_gate_error:
+            return legacy_version_gate_error
 
-        # user.setUserActive() logic
+        # Legacy setUserActive equivalent.
+        user.last_action_time = timezone.now()
+        user.save(update_fields=["last_action_time"])
+
         return Response({
-            "detail": UserSerializer(user).data
+            "detail": _legacy_user_detail(user)
         }, status=status.HTTP_200_OK)
+
+    def get(self, request):
+        return self._handle_check(request)
+
+    def post(self, request):
+        # Legacy clients call this endpoint with POST; keep behavior identical to GET.
+        return self._handle_check(request)
 
 
 class LogoutView(APIView):

@@ -2,8 +2,10 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
+from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated
 from django.db import transaction
 from django.utils import timezone
+from datetime import timedelta
 from .models import Plan, SubscribedPlan, Coupon
 from core.models import VideoPlan, SubscribedVideo, VideoCoupon, CouponUser, Currency
 from .serializers import (
@@ -12,7 +14,9 @@ from .serializers import (
 )
 import json
 import logging
+import random
 import razorpay
+from razorpay.errors import BadRequestError
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -38,6 +42,12 @@ class PlanListView(generics.ListAPIView):
             qs = qs.filter(no_of_video_session=0)
             
         return qs.order_by('-is_recommended')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        # Legacy iOS expects an object containing `list`, not a bare JSON array.
+        return Response({"list": serializer.data}, status=status.HTTP_200_OK)
 
 class CompanyUserPlanListView(generics.ListAPIView):
     permission_classes = (IsAuthenticated,)
@@ -69,8 +79,30 @@ class MyPlansView(generics.ListAPIView):
 class CreateSubscriptionView(APIView):
     permission_classes = (IsAuthenticated,)
 
+    def handle_exception(self, exc):
+        if isinstance(exc, (AuthenticationFailed, NotAuthenticated)):
+            auth_header = self.request.headers.get("Authorization", "")
+            auth_preview = ""
+            if auth_header:
+                parts = auth_header.split(" ", 1)
+                if len(parts) == 2:
+                    scheme, token = parts
+                    auth_preview = f"{scheme} {token[:12]}..."
+                else:
+                    auth_preview = f"{auth_header[:20]}..."
+            logger.warning(
+                "create-subscription auth failed: reason=%s has_auth=%s auth_preview=%s method=%s path=%s",
+                str(exc),
+                bool(auth_header),
+                auth_preview,
+                self.request.method,
+                self.request.path,
+            )
+        return super().handle_exception(exc)
+
     def post(self, request):
-        plan_id = request.data.get('plan_id') # This is the Razorpay Plan ID string
+        # iOS legacy sends plan_id in query params.
+        plan_id = request.data.get('plan_id') or request.query_params.get('plan_id')
         user = request.user
         
         try:
@@ -87,7 +119,6 @@ class CreateSubscriptionView(APIView):
                 if user_address:
                      user.address = user_address
                      user.city = request.data.get('city', user.city)
-                     user.state = request.data.get('state', user.state)
                      user.country = request.data.get('country', user.country)
                      user.contact_no = request.data.get('contact', user.contact_no)
                      user.save()
@@ -107,7 +138,7 @@ class CreateSubscriptionView(APIView):
                 # If user has free plan, next plan starts from current end date
                 # For simplicity, using timezone.now()
                 start_time = timezone.now()
-                rezorpay_start_at = start_time + timezone.timedelta(days=total_trial_days)
+                rezorpay_start_at = start_time + timedelta(days=total_trial_days)
                 start_at_timestamp = int(rezorpay_start_at.timestamp())
 
                 # 3. Create Razorpay Subscription
@@ -119,29 +150,49 @@ class CreateSubscriptionView(APIView):
                 if total_trial_days > 0:
                     params['start_at'] = start_at_timestamp
                 
-                # In real migration: subscription = razorpay_client.subscription.create(params)
-                subscription_id = "sub_mock_" + str(random.randint(1000, 9999))
+                if plan_id and str(plan_id).startswith("seed_"):
+                    # Local/test seed plans are not present in Razorpay; keep flow testable.
+                    subscription_id = "sub_mock_" + str(random.randint(1000, 9999))
+                else:
+                    if not getattr(settings, "RAZORPAY_KEY_ID", "") or not getattr(settings, "RAZORPAY_KEY_SECRET", ""):
+                        return Response({"error": "Razorpay credentials are not configured."}, status=status.HTTP_400_BAD_REQUEST)
+                    try:
+                        subscription = razorpay_client.subscription.create(params)
+                    except BadRequestError as exc:
+                        logger.warning("create-subscription razorpay rejected plan_id=%s error=%s", plan_id, str(exc))
+                        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+                    subscription_id = subscription.get("id")
+                    if not subscription_id:
+                        return Response({"error": "Unable to create Razorpay subscription."}, status=status.HTTP_400_BAD_REQUEST)
                 
                 # 4. Save SubscribedPlan record
-                subscribed_plan = SubscribedPlan.objects.create(
+                SubscribedPlan.objects.create(
                     plan=plan_obj,
                     subscription_id=subscription_id,
                     created_by=user,
                     state_id=0, # STATE_CREATED
                     plan_type=1, # PLAN_TYPE_PAID
                     start_date=timezone.now(),
-                    trial_end_at=rezorpay_start_at,
-                    no_of_video_session=plan_obj.no_of_video_session
+                    renewal_date=rezorpay_start_at,
+                    plan_price=plan_obj.total_price,
+                    gst_price=plan_obj.tax_price,
+                    final_price=plan_obj.final_price,
                 )
                 
                 return Response({
                     "message": "Subscription created successfully.",
-                    "subscription_id": subscription_id
-                }, status=status.HTTP_201_CREATED)
+                    "subscription_id": subscription_id,
+                }, status=status.HTTP_200_OK)
             
         except Plan.DoesNotExist:
+            logger.warning("create-subscription failed: plan not found plan_id=%s user_id=%s", plan_id, getattr(user, "id", None))
             return Response({"error": "Plan not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
+            logger.exception(
+                "create-subscription failed: plan_id=%s user_id=%s",
+                plan_id,
+                getattr(user, "id", None),
+            )
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class AuthenticateSubscriptionView(APIView):
@@ -149,8 +200,9 @@ class AuthenticateSubscriptionView(APIView):
 
     def post(self, request):
         user = request.user
-        plan_id_str = request.data.get('plan_id')
-        sub_id = request.data.get('sub_id')
+        # iOS legacy sends these in query params.
+        plan_id_str = request.data.get('plan_id') or request.query_params.get('plan_id')
+        sub_id = request.data.get('sub_id') or request.query_params.get('sub_id')
         
         try:
             plan = Plan.objects.get(plan_id=plan_id_str)
@@ -202,7 +254,8 @@ class BuyVideoPlanView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        plan_id = request.data.get('plan_id')
+        # iOS legacy sends plan_id/final_price in query params.
+        plan_id = request.data.get('plan_id') or request.query_params.get('plan_id')
         try:
             plan = VideoPlan.objects.get(id=plan_id)
             # Similar to CreateSubscriptionView but for VideoPlan
@@ -218,6 +271,7 @@ class CheckBuyVideoPlanView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
+        # Keep response successful for legacy query-param based call path.
         return Response({"message": "Checking video plan status..."}, status=status.HTTP_200_OK)
 
 class VideoPlanListView(generics.ListAPIView):
@@ -227,6 +281,12 @@ class VideoPlanListView(generics.ListAPIView):
     def get_queryset(self):
         currency = self.request.query_params.get('currency', 'INR')
         return VideoPlan.objects.filter(state_id=1, currency_code=currency).order_by('-id')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        # Legacy iOS expects `data["list"]` contract.
+        return Response({"list": serializer.data}, status=status.HTTP_200_OK)
 
 class ApplyCouponView(APIView):
     permission_classes = (IsAuthenticated,)

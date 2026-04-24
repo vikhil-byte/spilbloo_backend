@@ -296,12 +296,9 @@ class FetchTherapistsView(NodeBaseAPIView):
                     "contact_no": row.get("contact_no") or "",
                     "about_me": row.get("about_me") or "",
                     "profile_file": f"/user/image/{row.get('id')}?file={quote(str(row.get('profile_file') or ''))}",
-                    # iOS decoders expect a numeric value here.
                     "experience": to_int(row.get("experience"), default=0),
                     "token": row.get("token") or "",
-                    # Legacy iOS model reads `device_token`.
                     "device_token": row.get("token") or "",
-                    # Some iOS parsing paths still look for this key.
                     "online": online_status,
                     "isOnline": online_status,
                     "symptoms": symptoms,
