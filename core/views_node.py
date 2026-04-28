@@ -9,6 +9,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.exceptions import PermissionDenied, NotAuthenticated, AuthenticationFailed
 
 from .node_auth import IsNodePatientOrTherapist, NodeHeaderTokenAuthentication
 from .models import NodeSubscriptionPlan, NodeUserSelectedTherapistPlan
@@ -57,6 +58,43 @@ def to_str(value, default=""):
 class NodeBaseAPIView(APIView):
     authentication_classes = (NodeHeaderTokenAuthentication, JWTAuthentication)
     permission_classes = (IsAuthenticated, IsNodePatientOrTherapist)
+
+    def handle_exception(self, exc):
+        if isinstance(exc, (PermissionDenied, NotAuthenticated, AuthenticationFailed)):
+            auth_header = self.request.headers.get("Authorization", "")
+            user_id_header = self.request.headers.get("user-id", "")
+            auth_preview = ""
+            if auth_header:
+                parts = auth_header.split(" ", 1)
+                if len(parts) == 2:
+                    auth_preview = f"{parts[0]} {parts[1][:12]}..."
+                else:
+                    auth_preview = f"{auth_header[:20]}..."
+            logger.warning(
+                "node auth/permission failed: reason=%s path=%s method=%s user_id=%s role_id=%s auth_backend=%s header_user_id=%s has_auth=%s auth_preview=%s",
+                str(exc),
+                self.request.path,
+                self.request.method,
+                getattr(self.request.user, "id", None),
+                getattr(self.request.user, "role_id", None),
+                self.request.successful_authenticator.__class__.__name__
+                if getattr(self.request, "successful_authenticator", None)
+                else "none",
+                user_id_header,
+                bool(auth_header),
+                auth_preview,
+            )
+            if isinstance(exc, (NotAuthenticated, AuthenticationFailed)):
+                return Response(
+                    node_error("Authentication failed or token expired. Please login again.", 401),
+                    status=401,
+                )
+            if isinstance(exc, PermissionDenied):
+                return Response(
+                    node_error("You do not have permission to access this resource.", 403),
+                    status=403,
+                )
+        return super().handle_exception(exc)
 
 
 class CardsView(NodeBaseAPIView):

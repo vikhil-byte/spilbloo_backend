@@ -5,6 +5,9 @@ from rest_framework.views import APIView
 from core.models import DoctorReason, DoctorRequest
 from availability.models import SlotBooking
 from .serializers import DoctorReasonSerializer
+import logging
+
+logger = logging.getLogger(__name__)
 
 class ReasonListView(generics.ListAPIView):
     permission_classes = (AllowAny,) # PHP allowed patient, let's keep AllowAny or IsAuthenticated
@@ -37,8 +40,9 @@ class SendRequestView(APIView):
             return Response({"message": "Your request submitted successfully."}, status=status.HTTP_200_OK)
         except DoctorReason.DoesNotExist:
             return Response({"error": "Invalid reason ID"}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("send-doctor-request failed user_id=%s reason_id=%s", getattr(user, "id", None), reason_id)
+            return Response({"error": "Unable to submit request right now."}, status=status.HTTP_400_BAD_REQUEST)
 
 class CheckIsAllowedView(APIView):
     permission_classes = (IsAuthenticated,)

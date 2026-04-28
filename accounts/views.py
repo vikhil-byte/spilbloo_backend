@@ -6,12 +6,14 @@ from django.contrib.auth import get_user_model
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.exceptions import TokenError
 from .serializers import UserSerializer, RegisterSerializer, CustomTokenObtainPairSerializer
 from .models import HaLogins
 from core.models import (
     ContactForm, LoginHistory, Symptom, UserSymptom, AgeGroup, 
-    AssignedTherapist, PushNotification, VideoPlan, Page, Faq
+    AssignedTherapist, Page, Faq
 )
+from availability.models import Notification
 from core.serializers import SymptomSerializer, PageSerializer, FaqSerializer, TherapistEarningSerializer
 from django.db import transaction
 from django.db.models import Case, When, F, Q
@@ -20,7 +22,12 @@ import logging
 from django.utils import timezone
 from django.contrib.auth import authenticate
 from django.core.cache import cache
-from plans.models import SubscribedPlan
+from django.core.mail import send_mail
+from django.conf import settings
+from plans.models import Plan, SubscribedPlan
+from django.core import signing
+import hashlib
+import secrets
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +36,53 @@ DEVICE_ANDROID = 1
 DEVICE_IOS = 2
 OTP_NOT_VERIFIED = 0
 
+def _normalize_email(value) -> str:
+    return (value or "").strip().lower()
+
 def send_otp_via_email(email, otp):
-    # This is a placeholder for real email service (SendGrid/SES)
-    logger.info(f"Sending OTP {otp} to email {email}")
-    # In production: send_mail(subject, message, from, [email])
-    pass
+    subject = "Spilbloo OTP Verification"
+    message = f"Your OTP is {otp}. It is valid for 10 minutes."
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
+    sent = False
+    try:
+        send_mail(subject, message, from_email, [email], fail_silently=False)
+        sent = True
+    except Exception:
+        # Keep auth flow resilient even when SMTP is not configured.
+        pass
+    logger.info("OTP email log: otp=%s", otp)
+
+
+def _password_reset_cache_key(user_id: int) -> str:
+    return f"spilbloo:password_reset:{user_id}"
+
+
+def _hash_reset_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def _build_password_reset_link(email: str, token: str) -> str:
+    base_url = (
+        getattr(settings, "PASSWORD_RESET_URL", "")
+        or getattr(settings, "FRONTEND_URL", "")
+        or "https://app.spilbloo.com/reset-password"
+    )
+    sep = "&" if "?" in base_url else "?"
+    return f"{base_url}{sep}email={email}&token={token}"
+
+
+def send_password_reset_email(email: str, reset_link: str):
+    subject = "Reset your Spilbloo password"
+    message = (
+        "We received a request to reset your password.\n\n"
+        f"Use this link to set a new password:\n{reset_link}\n\n"
+        "This link expires in 30 minutes."
+    )
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
+    try:
+        send_mail(subject, message, from_email, [email], fail_silently=False)
+    except Exception:
+        logger.info("Password reset email fallback log: email=%s", email)
 
 
 def _otp_cache_key(user_id: int) -> str:
@@ -121,6 +170,52 @@ def _legacy_user_detail(user):
         # Legacy behavior: active users are treated as verified unless explicitly unverified.
         otp_verified = 1 if user.state_id == User.STATE_ACTIVE else 0
 
+    active_paid_subscription = (
+        SubscribedPlan.objects.filter(created_by=user, state_id=1, plan_type=1)
+        .select_related("plan")
+        .order_by("-id")
+        .first()
+    )
+    subscribed_plan = None
+    if active_paid_subscription:
+        plan_obj = active_paid_subscription.plan
+        plan_detail = {}
+        if plan_obj:
+            total_price = float(plan_obj.total_price or 0)
+            weekly_price = total_price / 4 if total_price else 0
+            plan_detail = {
+                "id": plan_obj.id,
+                "plan_id": plan_obj.plan_id or "",
+                "title": plan_obj.title or "",
+                "description": plan_obj.description or "",
+                "video_description": "",
+                "no_of_video_session": plan_obj.no_of_video_session or 0,
+                "no_of_free_trial_days": plan_obj.no_of_free_trial_days or 0,
+                "discounted_price": str(plan_obj.total_price or "0"),
+                "discounted_price_calculated": int(round(total_price)),
+                "total_price": str(plan_obj.total_price or "0"),
+                "tax_price": str(plan_obj.tax_price or "0"),
+                "tax_percentage": "18",
+                "final_price": str(plan_obj.final_price or "0"),
+                "weekly_price": "{:.2f}".format(weekly_price) if weekly_price else "0",
+                "is_recommended": plan_obj.is_recommended or 0,
+                "plan_type": plan_obj.plan_type or 1,
+                "duration": plan_obj.duration or 30,
+                "currency_code": plan_obj.currency_code or "INR",
+                "company_name": "",
+            }
+
+        subscribed_plan = {
+            "id": active_paid_subscription.id,
+            "state_id": active_paid_subscription.state_id,
+            "upcoming_state": active_paid_subscription.upcoming_state or 0,
+            "plan_id": plan_obj.id if plan_obj else 0,
+            "renewal_date": active_paid_subscription.renewal_date.isoformat() if active_paid_subscription.renewal_date else "",
+            "start_date": active_paid_subscription.start_date.isoformat() if active_paid_subscription.start_date else "",
+            "end_date": active_paid_subscription.end_date.isoformat() if active_paid_subscription.end_date else "",
+            "plan_detail": plan_detail,
+        }
+
     return {
         "id": user.id,
         "email": user.email or "",
@@ -140,10 +235,11 @@ def _legacy_user_detail(user):
         "otp_verified": otp_verified,
         "otp": _safe_str(getattr(user, "otp", "") or ""),
         "is_ios_app_update": False,
-        "is_subscribed_user": False,
-        "is_buy_subscripion": False,
+        "is_subscribed_user": bool(active_paid_subscription),
+        "is_buy_subscripion": bool(active_paid_subscription),
         "is_buy_video_credits": False,
         "video_credits": 0,
+        "subscribed_plan": subscribed_plan or {},
     }
 
 class RegisterView(generics.CreateAPIView):
@@ -205,7 +301,8 @@ class RegisterView(generics.CreateAPIView):
         if normalized_data.get("password") is None:
             normalized_data["password"] = ""
 
-        email = (normalized_data.get("email") or "").strip()
+        email = _normalize_email(normalized_data.get("email"))
+        normalized_data["email"] = email
         if email and User.objects.filter(email=email).exists():
             logger.warning("Signup rejected: duplicate email=%s", email)
             return Response({"error": "Email already exists."}, status=status.HTTP_400_BAD_REQUEST)
@@ -269,7 +366,7 @@ class VerifyOtpView(APIView):
     permission_classes = (AllowAny,)
 
     def post(self, request):
-        email = request.data.get('email') or request.data.get('User[email]')
+        email = _normalize_email(request.data.get('email') or request.data.get('User[email]'))
         otp = request.data.get('otp') or request.data.get('User[otp]')
 
         if not email or not otp:
@@ -283,11 +380,11 @@ class VerifyOtpView(APIView):
         stored_otp = _get_user_otp(user)
         if str(stored_otp) == str(otp):
             user.state_id = User.STATE_ACTIVE
+            refresh = RefreshToken.for_user(user)
+            # Legacy node auth checks activation_key as bearer token.
+            user.activation_key = str(refresh.access_token)
             user.save()
             _mark_user_otp_verified(user)
-
-            # Generate JWT Token (like PHP's create AccessToken / generateAuthKey)
-            refresh = RefreshToken.for_user(user)
 
             # Log history
             LoginHistory.objects.create(
@@ -309,7 +406,7 @@ class ResendOtpView(APIView):
     permission_classes = (AllowAny,)
 
     def post(self, request):
-        email = request.data.get('email') or request.data.get('User[email]')
+        email = _normalize_email(request.data.get('email') or request.data.get('User[email]'))
         if not email:
             return Response({"error": "No data posted"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -332,7 +429,7 @@ class DoctorContactView(APIView):
 
     def post(self, request):
         # Migrating `actionDoctorContact()`
-        email = request.data.get('email')
+        email = _normalize_email(request.data.get('email'))
         if ContactForm.objects.filter(email=email).exists():
              return Response({"error": "Email already exists."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -364,7 +461,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             return Response({"error": "No data posted."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Normalize legacy iOS payload keys.
-        email = (
+        email = _normalize_email(
             request.data.get('email')
             or request.data.get('username')
             or request.data.get('LoginForm[username]')
@@ -423,6 +520,9 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 return Response({"error": "Incorrect Email Or Password."}, status=status.HTTP_400_BAD_REQUEST)
 
             refresh = RefreshToken.for_user(auth_user)
+            # Legacy node auth checks activation_key as bearer token.
+            auth_user.activation_key = str(refresh.access_token)
+            auth_user.save(update_fields=["activation_key"])
             response_data = {
                 "message": "Login Successfully",
                 "access-token": str(refresh.access_token),
@@ -431,7 +531,15 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             }
 
             # OTP challenge for newer versions (legacy behavior).
-            if (device_type == 1 and version >= 30) or (device_type == 2 and version >= 2.7):
+            otp_required = (device_type == 1 and version >= 30) or (device_type == 2 and version >= 2.7)
+            logger.info(
+                "Login OTP decision: email=%s device_type=%s version=%s required=%s",
+                auth_user.email,
+                device_type,
+                version,
+                otp_required,
+            )
+            if otp_required:
                 otp = str(random.randint(1000, 9999))
                 _set_user_otp(auth_user, otp)
                 send_otp_via_email(auth_user.email, otp)
@@ -441,8 +549,9 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
         except User.DoesNotExist:
             return Response({"error": "Incorrect Email"}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("login failed unexpectedly for email=%s", email)
+            return Response({"error": "Unable to process login request."}, status=status.HTTP_400_BAD_REQUEST)
 
 class CheckView(APIView):
     permission_classes = (AllowAny,)
@@ -467,6 +576,12 @@ class CheckView(APIView):
                 self.request.path,
                 self.request.headers.get("User-Agent", ""),
                 self.request.content_type,
+            )
+            # Legacy PHP actionCheck returns guest payload instead of 401
+            # when user is unauthenticated/expired.
+            return Response(
+                {"message": "User not authenticated. No device token found"},
+                status=status.HTTP_200_OK,
             )
         return super().handle_exception(exc)
 
@@ -514,9 +629,23 @@ class LogoutView(APIView):
             latest_login.logout_time = timezone.now()
             latest_login.save()
 
-        # In JWT world, we usually just blacklist the refresh token on the client side
-        # Alternatively, we could use simplejwt's blacklist app. Let's return success for now.
+        refresh_token = request.data.get("refresh-token") or request.data.get("refresh_token")
+        if refresh_token:
+            try:
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+            except (TokenError, AttributeError):
+                # AttributeError occurs if blacklist app isn't installed.
+                logger.warning("logout blacklist skipped for user_id=%s", getattr(user, "id", None))
+
+        if hasattr(user, "activation_key"):
+            user.activation_key = None
+            user.save(update_fields=["activation_key"])
         return Response({"message": "Successfully logged out."}, status=status.HTTP_200_OK)
+
+    def get(self, request):
+        # Legacy iOS flow may call logout as GET.
+        return self.post(request)
 
 
 class ChangePasswordView(APIView):
@@ -591,7 +720,7 @@ class ForgotPasswordView(APIView):
     permission_classes = (AllowAny,)
 
     def post(self, request):
-        email = request.data.get('email', '').strip()
+        email = _normalize_email(request.data.get('email'))
         role_id = request.data.get('role_id')
 
         if not email:
@@ -605,14 +734,54 @@ class ForgotPasswordView(APIView):
                 else:
                     return Response({"message": "You cannot reset password with therapist email."}, status=status.HTTP_200_OK)
 
-            # PHP logic uses `generatePasswordResetToken`. We could generate a secure token here.
-            # user.activation_key = generate_secure_token()
-            # user.save()
-            # send email...
+            # Secure, expiring reset token without DB schema changes:
+            # - sign a random nonce with timestamp
+            # - store only token hash in cache
+            # - email link to user
+            nonce = secrets.token_urlsafe(24)
+            signed_token = signing.TimestampSigner(salt="spilbloo-password-reset").sign(nonce)
+            cache.set(_password_reset_cache_key(user.id), _hash_reset_token(signed_token), timeout=1800)
+            reset_link = _build_password_reset_link(user.email, signed_token)
+            send_password_reset_email(user.email, reset_link)
 
             return Response({"message": "Please check your email to reset your password."}, status=status.HTTP_200_OK)
         except User.DoesNotExist:
             return Response({"error": "Email is not registered."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ResetPasswordConfirmView(APIView):
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        email = _normalize_email(request.data.get("email"))
+        token = (request.data.get("token") or "").strip()
+        new_password = request.data.get("new_password") or request.data.get("password")
+
+        if not email or not token or not new_password:
+            return Response({"error": "email, token and new_password are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({"error": "Invalid reset link."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            signing.TimestampSigner(salt="spilbloo-password-reset").unsign(token, max_age=1800)
+        except signing.BadSignature:
+            return Response({"error": "Invalid reset link."}, status=status.HTTP_400_BAD_REQUEST)
+        except signing.SignatureExpired:
+            return Response({"error": "Reset link expired."}, status=status.HTTP_400_BAD_REQUEST)
+
+        expected_hash = cache.get(_password_reset_cache_key(user.id))
+        if not expected_hash or not secrets.compare_digest(expected_hash, _hash_reset_token(token)):
+            return Response({"error": "Invalid reset link."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password)
+        user.last_password_change = timezone.now()
+        user.save(update_fields=["password", "last_password_change"])
+        cache.delete(_password_reset_cache_key(user.id))
+
+        return Response({"message": "Password reset successfully."}, status=status.HTTP_200_OK)
 
 
 class SymptomListView(generics.ListAPIView):
@@ -694,8 +863,8 @@ class FaqView(APIView):
 class AssignDoctorView(APIView):
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request):
-        doctor_id = request.data.get('doctor_id')
+    def _assign(self, request):
+        doctor_id = request.data.get('doctor_id') or request.query_params.get('doctor_id')
         type_id = request.data.get('type_id', 1) # Default TYPE_SUBSCRIPTION_PLAN
         patient = request.user
 
@@ -706,10 +875,11 @@ class AssignDoctorView(APIView):
 
         try:
             with transaction.atomic():
-                if patient.doctor_id:
+                current_doctor_id = getattr(patient, "doctor_id", None)
+                if current_doctor_id:
                     # Update old assigned therapist record
                     old_assign = AssignedTherapist.objects.filter(
-                        therapist_id=patient.doctor_id,
+                        therapist_id=current_doctor_id,
                         created_by_id=patient.id
                     ).first()
                     
@@ -729,22 +899,36 @@ class AssignDoctorView(APIView):
                     therapist_name=doctor.full_name
                 )
 
-                patient.doctor_id = doctor.id
-                patient.doctor_assigned_time = timezone.now()
-                patient.save()
+                updated_user_fields = []
+                if hasattr(patient, "doctor_id"):
+                    patient.doctor_id = doctor.id
+                    updated_user_fields.append("doctor_id")
+                if hasattr(patient, "doctor_assigned_time"):
+                    patient.doctor_assigned_time = timezone.now()
+                    updated_user_fields.append("doctor_assigned_time")
+                if updated_user_fields:
+                    patient.save(update_fields=updated_user_fields)
 
-                # Send Notification
+                # Legacy PHP uses tbl_notification (per-user), not tbl_push_notification.
                 msg = "Tap here to send them your introduction message"
-                PushNotification.objects.create(
+                Notification.objects.create(
                     title=msg,
-                    description=msg,
+                    html=msg,
                     to_user_id=doctor.id,
                     created_by_id=patient.id,
                 )
 
             return Response({"message": "Therapist assigned successfully."}, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("assign-doctor failed: user_id=%s doctor_id=%s", getattr(request.user, "id", None), doctor_id)
+            return Response({"error": "Unable to assign therapist right now."}, status=status.HTTP_400_BAD_REQUEST)
+
+    def post(self, request):
+        return self._assign(request)
+
+    def get(self, request):
+        # Legacy iOS flow calls assign-doctor with query params.
+        return self._assign(request)
 
 class AssignVideoDoctorView(APIView):
     permission_classes = (IsAuthenticated,)
@@ -760,7 +944,7 @@ class AssignVideoDoctorView(APIView):
 
         try:
             with transaction.atomic():
-                if not patient.doctor_id:
+                if not getattr(patient, "doctor_id", None):
                     new_assign = AssignedTherapist.objects.create(
                         state_id=1, # STATE_ASSIGNED
                         therapist_id=doctor.id,
@@ -769,22 +953,50 @@ class AssignVideoDoctorView(APIView):
                         therapist_email=doctor.email,
                         therapist_name=doctor.full_name
                     )
-                    patient.doctor_id = doctor.id
-                    patient.doctor_assigned_time = timezone.now()
-                    patient.save()
+                    updated_user_fields = []
+                    if hasattr(patient, "doctor_id"):
+                        patient.doctor_id = doctor.id
+                        updated_user_fields.append("doctor_id")
+                    if hasattr(patient, "doctor_assigned_time"):
+                        patient.doctor_assigned_time = timezone.now()
+                        updated_user_fields.append("doctor_assigned_time")
+                    if updated_user_fields:
+                        patient.save(update_fields=updated_user_fields)
 
-                    # Handle Free Plan logic per PHP
-                    free_plan = VideoPlan.objects.filter(type_id=1).first() # Assuming type_id 1 is FREE
-                    if free_plan:
+                    # Handle free subscription seed per PHP assign-video-doctor flow.
+                    free_plan = Plan.objects.filter(plan_type=0, state_id=1).order_by("id").first()
+                    if free_plan and not SubscribedPlan.objects.filter(
+                        created_by=patient,
+                        plan=free_plan,
+                        plan_type=0,
+                        state_id=1,
+                    ).exists():
                         from datetime import timedelta
-                        end_date = timezone.now() + timedelta(days=free_plan.duration)
-                        # Awaiting SubscribedVideo model implementation, logging for now
-                        print(f"Would have created SubscribedVideo for {patient.id} with end_date {end_date}")
+
+                        start_date = timezone.now()
+                        end_date = start_date + timedelta(days=int(free_plan.duration or 0))
+                        SubscribedPlan.objects.create(
+                            plan=free_plan,
+                            plan_type=0,
+                            state_id=1,
+                            start_date=start_date,
+                            end_date=end_date,
+                            renewal_date=end_date,
+                            subscription_id=str(free_plan.id),
+                            plan_price=free_plan.total_price,
+                            gst_price=free_plan.tax_price,
+                            final_price=free_plan.final_price,
+                            coupon_free_trial_days=0,
+                            type_id=2,
+                            upcoming_plan_id=free_plan.id,
+                            upcoming_state=1,
+                            created_by=patient,
+                        )
 
                     msg = "Tap here to send them your introduction message"
-                    PushNotification.objects.create(
+                    Notification.objects.create(
                         title=msg,
-                        description=msg,
+                        html=msg,
                         to_user_id=doctor.id,
                         created_by_id=patient.id,
                     )
@@ -793,8 +1005,9 @@ class AssignVideoDoctorView(APIView):
                 "message": "Therapist assigned successfully.",
                 "detail": UserSerializer(patient).data
             }, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("assign-video-doctor failed: user_id=%s doctor_id=%s", getattr(request.user, "id", None), doctor_id)
+            return Response({"error": "Unable to assign therapist right now."}, status=status.HTTP_400_BAD_REQUEST)
 
 class SocialLoginView(APIView):
     permission_classes = (AllowAny,)
@@ -804,13 +1017,13 @@ class SocialLoginView(APIView):
         user_id = user_data.get('user_id')
         role_id = user_data.get('role_id', User.ROLE_PATIENT)
         provider = user_data.get('provider')
-        email = user_data.get('email')
+        email = _normalize_email(user_data.get('email'))
 
         if not user_id:
             return Response({"message": "Please fill all the Details"}, status=status.HTTP_400_BAD_REQUEST)
 
         if not email or email == '<null>':
-            email = f"{user_id}@spilbloo.com"
+            email = _normalize_email(f"{user_id}@spilbloo.com")
 
         auth = HaLogins.objects.filter(user_id_str=str(user_id)).first()
 
@@ -858,8 +1071,9 @@ class SocialLoginView(APIView):
                     "is_login": 1 if auth else 0,
                     "detail": UserSerializer(user).data
                 }, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("social-login failed for provider=%s user_id=%s", provider, user_id)
+            return Response({"error": "Unable to process social login."}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class EarningsView(APIView):
@@ -886,12 +1100,25 @@ class AcceptConsentView(APIView):
 
     def post(self, request):
         user = request.user
-        # We need to map `is_consent_accept` onto the Django user or via related model if it doesn't exist.
-        # Since we just used AbstractUser, we can just return success or update a JSON field if added.
+        # PHP parity: persist consent acceptance on user when fields exist.
+        update_fields = []
+        if hasattr(user, "is_consent_accept"):
+            user.is_consent_accept = 1
+            update_fields.append("is_consent_accept")
+        if hasattr(user, "consent_accepted_on"):
+            user.consent_accepted_on = timezone.now()
+            update_fields.append("consent_accepted_on")
+        if update_fields:
+            user.save(update_fields=update_fields)
+
         return Response({
             "message": "Consent form accepted successfully.",
-            "is_consent_accept": 1
+            "is_consent_accept": getattr(user, "is_consent_accept", 1)
         }, status=status.HTTP_200_OK)
+
+    def get(self, request):
+        # Legacy iOS flow calls accept-consent as GET.
+        return self.post(request)
 
 
 class SendMessageView(APIView):
@@ -901,22 +1128,18 @@ class SendMessageView(APIView):
         to_id = request.query_params.get('to_id') or request.data.get('to_id')
         if not to_id:
             return Response({"message": "to_id is required."}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            to_user = User.objects.get(id=to_id)
-        except User.DoesNotExist:
+        if not User.objects.filter(id=to_id).exists():
             return Response({"message": "user not found."}, status=status.HTTP_400_BAD_REQUEST)
 
         title = request.data.get('title', '')
-        type_id = request.data.get('type_id', 0)
         description = request.data.get('description', '')
 
-        # Create PushNotification mapped from Notification
-        PushNotification.objects.create(
+        # Direct message alert is a per-user notification row.
+        Notification.objects.create(
             title=title,
-            description=description,
+            html=description,
             to_user_id=to_id,
             created_by_id=request.user.id,
-            type_id=type_id
         )
 
         return Response({"message": "sent"}, status=status.HTTP_200_OK)
@@ -1005,6 +1228,24 @@ class CardDeleteView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request):
-        # Legacy endpoint compatibility placeholder until card model migration is complete.
+        user = request.user
+        # Best-effort cleanup across legacy naming variants.
+        card_fields = [
+            "card_id",
+            "stripe_card_id",
+            "stripe_customer_id",
+            "customer_id",
+            "payment_method_id",
+            "card_last4",
+            "card_brand",
+            "card_token",
+        ]
+        update_fields = []
+        for field in card_fields:
+            if hasattr(user, field):
+                setattr(user, field, "")
+                update_fields.append(field)
+        if update_fields:
+            user.save(update_fields=update_fields)
         return Response({"message": "Card deleted successfully."}, status=status.HTTP_200_OK)
 

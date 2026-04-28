@@ -6,7 +6,8 @@ from .views import (
     CheckView, LogoutView, ChangePasswordView, DetailView, GetPageView,
     ForgotPasswordView, SymptomListView, MatchesListView, FaqView, AssignDoctorView,
     AssignVideoDoctorView, SocialLoginView, EarningsView, AcceptConsentView, SendMessageView,
-    GetCountryView, GetCityView, UserSearchView, DefaultAddressView, CardDeleteView
+    GetCountryView, GetCityView, UserSearchView, DefaultAddressView, CardDeleteView,
+    ResetPasswordConfirmView
 )
 from .views_notification import NotificationOnOffView
 
@@ -30,6 +31,7 @@ urlpatterns = [
     path('search/', UserSearchView.as_view(), name='user_search'),
     path('default-address/', DefaultAddressView.as_view(), name='default_address'),
     path('forgot-password/', ForgotPasswordView.as_view(), name='forgot_password'),
+    path('reset-password/', ResetPasswordConfirmView.as_view(), name='reset_password'),
     path('symptom-list/', SymptomListView.as_view(), name='symptom_list'),
     path('matches-list/', MatchesListView.as_view(), name='matches_list'),
     path('faq/', FaqView.as_view(), name='faq'),

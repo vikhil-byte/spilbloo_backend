@@ -2,13 +2,16 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
-from .models import DoctorSlot, SlotBooking, Slot, Notification
+from .models import DoctorSlot, SlotBooking, Slot, Notification, PrescriptionUpload
 from .serializers import DoctorSlotSerializer, SlotBookingSerializer
 from django.db import transaction
 from django.utils import timezone
 from core.models import RefundLog
 from django.contrib.auth import get_user_model
 from plans.models import SubscribedPlan
+from django.core.mail import send_mail
+from django.conf import settings
+import os
 
 User = get_user_model()
 import json
@@ -16,12 +19,66 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def send_event_email(to_email, subject, message):
+    if not to_email:
+        return
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
+    try:
+        send_mail(subject, message, from_email, [to_email], fail_silently=False)
+    except Exception:
+        logger.info("email fallback log to=%s subject=%s", to_email, subject)
+
+
+def _send_fcm(token, title, description):
+    try:
+        import firebase_admin
+        from firebase_admin import credentials, messaging
+    except Exception:
+        return False
+
+    try:
+        app = firebase_admin.get_app()
+    except Exception:
+        app = None
+
+    try:
+        if app is None:
+            cred_path = os.environ.get("FIREBASE_CREDENTIALS_PATH", "")
+            if cred_path and os.path.exists(cred_path):
+                cred = credentials.Certificate(cred_path)
+                app = firebase_admin.initialize_app(cred)
+            else:
+                service_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+                if not service_json:
+                    return False
+                cred = credentials.Certificate(json.loads(service_json))
+                app = firebase_admin.initialize_app(cred)
+
+        msg = messaging.Message(
+            token=token,
+            notification=messaging.Notification(title=title, body=description),
+            data={"title": title, "description": description},
+        )
+        messaging.send(msg, app=app)
+        return True
+    except Exception:
+        return False
+
 def send_push_notification(user, title, description):
-    # Placeholder for Firebase Cloud Messaging (FCM)
-    logger.info(f"Sending Push to {user.id}: {title}")
-    # from firebase_admin import messaging
-    # ... message building and sending ...
-    pass
+    if not user:
+        return
+    token = getattr(user, "device_token", "") if hasattr(user, "device_token") else ""
+    sent = False
+    if token:
+        sent = _send_fcm(token, title, description)
+    logger.info(
+        "push notify user_id=%s has_device_token=%s sent=%s title=%s",
+        user.id,
+        bool(token),
+        sent,
+        title,
+    )
 
 class AddScheduleView(APIView):
     permission_classes = (IsAuthenticated,)
@@ -59,8 +116,9 @@ class AddScheduleView(APIView):
                             created_by=doctor
                         )
             return Response({"message": "Availability saved successfully."}, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("add-schedule failed for doctor_id=%s", getattr(doctor, "id", None))
+            return Response({"error": "Unable to save availability."}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class UpdateScheduleView(APIView):
@@ -99,8 +157,9 @@ class UpdateScheduleView(APIView):
                         created_by=doctor
                     )
             return Response({"message": "Availability saved successfully."}, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("update-schedule failed for doctor_id=%s", getattr(doctor, "id", None))
+            return Response({"error": "Unable to update availability."}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class GetDoctorSlotView(APIView):
@@ -225,15 +284,21 @@ class BookingView(APIView):
                     html=msg
                 )
                 
-                # booking.sendBookingRequestmailtoDoctor() Placeholder logic
-                send_push_notification(booking.doctor, "New Booking Request", msg)
+                doctor_user = User.objects.filter(id=doctor_id).first()
+                send_push_notification(doctor_user, "New Booking Request", msg)
+                send_event_email(
+                    getattr(doctor_user, "email", ""),
+                    "New booking request",
+                    msg,
+                )
             
             return Response({
                 "message": "Booking added successfully.",
                 "details": SlotBookingSerializer(booking).data
             }, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("booking creation failed for patient_id=%s doctor_id=%s", getattr(patient, "id", None), doctor_id)
+            return Response({"error": "Unable to create booking right now."}, status=status.HTTP_400_BAD_REQUEST)
 
 class DoctorBookingListView(generics.ListAPIView):
     permission_classes = (IsAuthenticated,)
@@ -289,7 +354,10 @@ class NotificationCountView(APIView):
 class AcceptBookingView(APIView):
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request, booking_id):
+    def post(self, request, booking_id=None):
+        booking_id = booking_id or request.data.get("booking_id") or request.query_params.get("booking_id")
+        if not booking_id:
+            return Response({"error": "booking_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             booking = SlotBooking.objects.get(id=booking_id)
             booking.state_id = 3 # ACCEPT
@@ -301,8 +369,11 @@ class AcceptBookingView(APIView):
 class DoctorRescheduleView(APIView):
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request, booking_id):
+    def post(self, request, booking_id=None):
         doctor = request.user
+        booking_id = booking_id or request.data.get("booking_id") or request.query_params.get("booking_id")
+        if not booking_id:
+            return Response({"error": "booking_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             booking = SlotBooking.objects.get(id=booking_id, doctor_id=doctor.id)
             if booking.doctor_reschedule == 1: # YES
@@ -327,6 +398,11 @@ class DoctorRescheduleView(APIView):
                 title=msg,
                 html=msg
             )
+            send_event_email(
+                getattr(booking.created_by, "email", ""),
+                "Session rescheduled by therapist",
+                msg,
+            )
             return Response({
                 "message": "Booking reschedule successfully.",
                 "details": SlotBookingSerializer(booking).data
@@ -337,8 +413,11 @@ class DoctorRescheduleView(APIView):
 class DoctorCancelView(APIView):
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request, booking_id):
+    def post(self, request, booking_id=None):
         doctor = request.user
+        booking_id = booking_id or request.data.get("booking_id") or request.query_params.get("booking_id")
+        if not booking_id:
+            return Response({"error": "booking_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             with transaction.atomic():
                 booking = SlotBooking.objects.select_for_update().get(id=booking_id, doctor_id=doctor.id)
@@ -381,6 +460,11 @@ class DoctorCancelView(APIView):
                     title=msg,
                     html=msg
                 )
+                send_event_email(
+                    getattr(patient, "email", ""),
+                    "Session cancelled by therapist",
+                    msg,
+                )
 
                 return Response({
                     "message": "Booking canceled successfully.",
@@ -392,13 +476,61 @@ class DoctorCancelView(APIView):
 class PatientRescheduleView(APIView):
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request, booking_id):
-        return Response({"message": "Booking reschedule successfully."}, status=status.HTTP_200_OK)
+    def post(self, request, booking_id=None):
+        user = request.user
+        booking_id = booking_id or request.data.get("booking_id") or request.query_params.get("booking_id")
+        if not booking_id:
+            return Response({"error": "booking_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            booking = SlotBooking.objects.get(id=booking_id, created_by_id=user.id)
+        except SlotBooking.DoesNotExist:
+            return Response({"error": "No booking found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if booking.patient_reschedule == 1:
+            return Response({"error": "You have already rescheduled the booking once."}, status=status.HTTP_400_BAD_REQUEST)
+
+        start_time = request.data.get("start_time")
+        end_time = request.data.get("end_time")
+        if not start_time or not end_time:
+            return Response({"error": "Data not posted."}, status=status.HTTP_400_BAD_REQUEST)
+
+        booking.old_start_time = booking.start_time
+        booking.old_end_time = booking.end_time
+        booking.start_time = start_time
+        booking.end_time = end_time
+        booking.state_id = 3  # STATE_ACCEPT
+        booking.patient_reschedule = 1  # YES
+        booking.save()
+
+        message = f"{user.full_name} has rescheduled your video session to"
+        Notification.objects.create(
+            to_user_id=booking.doctor_id,
+            created_by=user,
+            title=message,
+            html=message,
+            model_type="SlotBooking",
+        )
+        doctor_user = User.objects.filter(id=booking.doctor_id).first()
+        send_event_email(
+            getattr(doctor_user, "email", ""),
+            "Session rescheduled by patient",
+            message,
+        )
+        return Response(
+            {
+                "details": SlotBookingSerializer(booking).data,
+                "message": "Booking reschedule successfully.",
+            },
+            status=status.HTTP_200_OK,
+        )
 
 class ConfirmRescheduleView(APIView):
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request, booking_id):
+    def post(self, request, booking_id=None):
+        booking_id = booking_id or request.data.get("booking_id") or request.query_params.get("booking_id")
+        if not booking_id:
+            return Response({"error": "booking_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             booking = SlotBooking.objects.get(id=booking_id)
             booking.is_reschedule_confirm = 1 # YES
@@ -406,3 +538,79 @@ class ConfirmRescheduleView(APIView):
             return Response({"message": "Reschedule confirmed successfully"}, status=status.HTTP_200_OK)
         except SlotBooking.DoesNotExist:
             return Response({"error": "No Booking found"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UploadPrescriptionView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        booking_id = request.data.get("booking_id") or request.query_params.get("booking_id")
+        if not booking_id:
+            return Response({"error": "booking_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            booking = SlotBooking.objects.get(id=booking_id)
+        except SlotBooking.DoesNotExist:
+            return Response({"error": "No booking found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        prescription_file = request.FILES.get("prescription_file") or request.FILES.get("file")
+        notes = request.data.get("notes", "")
+        upload = PrescriptionUpload.objects.create(
+            booking_id=booking.id,
+            notes=notes,
+            file=prescription_file,
+            created_by=request.user,
+        )
+        return Response(
+            {
+                "message": "Prescription uploaded successfully.",
+                "booking_id": booking.id,
+                "prescription_id": upload.id,
+                "file_url": upload.file.url if upload.file else "",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class CheckSessionView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        booking_id = request.data.get("booking_id") or request.query_params.get("booking_id")
+        if not booking_id:
+            return Response({"error": "booking_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            booking = SlotBooking.objects.get(id=booking_id)
+        except SlotBooking.DoesNotExist:
+            return Response({"error": "No booking found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {
+                "message": "Session status fetched successfully.",
+                "booking_id": booking.id,
+                "is_active": int(getattr(booking, "is_active", 0) or 0),
+                "is_call_end": int(getattr(booking, "is_call_end", 0) or 0),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class CheckVideoLinkView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        booking_id = request.data.get("booking_id") or request.query_params.get("booking_id")
+        if not booking_id:
+            return Response({"error": "booking_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            booking = SlotBooking.objects.get(id=booking_id)
+        except SlotBooking.DoesNotExist:
+            return Response({"error": "No booking found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {
+                "message": "Video link fetched successfully.",
+                "booking_id": booking.id,
+                "room_id": getattr(booking, "room_id", "") or "",
+            },
+            status=status.HTTP_200_OK,
+        )

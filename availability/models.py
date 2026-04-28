@@ -60,3 +60,15 @@ class Notification(models.Model):
 
     class Meta:
         db_table = 'tbl_notification'
+
+
+class PrescriptionUpload(models.Model):
+    booking_id = models.IntegerField()
+    notes = models.TextField(null=True, blank=True)
+    file = models.FileField(upload_to="prescriptions/", null=True, blank=True)
+
+    created_on = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="prescription_uploads")
+
+    class Meta:
+        db_table = "tbl_prescription_upload"

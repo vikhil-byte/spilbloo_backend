@@ -7,6 +7,9 @@ from .models import Call
 from .serializers import CallSerializer
 from availability.models import SlotBooking, Notification
 from accounts.models import User
+import logging
+
+logger = logging.getLogger(__name__)
 
 class JoinView(APIView):
     permission_classes = (IsAuthenticated,)
@@ -15,6 +18,8 @@ class JoinView(APIView):
         user = request.user
         booking_id = request.data.get('booking_id')
         session_id = request.data.get('session_id')
+        if not booking_id or not session_id:
+            return Response({"error": "Data not posted."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             booking = SlotBooking.objects.get(id=booking_id, room_id=session_id)
@@ -38,14 +43,21 @@ class JoinView(APIView):
                 created_by=user
             )
 
-            # Check if other user joined logic skipped for brevity, implementing notification
-            message = f"{name} is waiting for you in the room!"
-            Notification.objects.create(
-                to_user_id=receiver_user.id,
-                created_by=user,
-                title=message,
-                model_type='Call'
-            )
+            # Mirror PHP behavior: send wait notification only if receiver hasn't joined yet.
+            other_user_joined = Call.objects.filter(
+                booking_id=booking.id,
+                session_id=session_id,
+                state_id=1,
+                created_by_id=receiver_user.id,
+            ).exists()
+            if not other_user_joined:
+                message = f"{name} is waiting for you in the room!"
+                Notification.objects.create(
+                    to_user_id=receiver_user.id,
+                    created_by=user,
+                    title=message,
+                    model_type='Call'
+                )
 
             return Response({
                 "message": "Joined Successfully.",
@@ -56,8 +68,9 @@ class JoinView(APIView):
             return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
         except User.DoesNotExist:
             return Response({"error": "Receiver user not found."}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("join-call failed user_id=%s booking_id=%s", getattr(user, "id", None), booking_id)
+            return Response({"error": "Unable to join call right now."}, status=status.HTTP_400_BAD_REQUEST)
 
 class LeaveView(APIView):
     permission_classes = (IsAuthenticated,)
@@ -94,14 +107,18 @@ class LeaveView(APIView):
 
         except SlotBooking.DoesNotExist:
             return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("leave-call failed user_id=%s booking_id=%s", getattr(user, "id", None), booking_id)
+            return Response({"error": "Unable to leave call right now."}, status=status.HTTP_400_BAD_REQUEST)
 
 class CompleteBookingView(APIView):
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request, booking_id):
+    def post(self, request, booking_id=None):
         user = request.user
+        booking_id = booking_id or request.data.get("booking_id") or request.query_params.get("booking_id")
+        if not booking_id:
+            return Response({"error": "booking_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
             booking = SlotBooking.objects.get(id=booking_id)
@@ -133,5 +150,6 @@ class CompleteBookingView(APIView):
 
         except SlotBooking.DoesNotExist:
             return Response({"error": "Booking not found"}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("complete-booking failed user_id=%s booking_id=%s", getattr(user, "id", None), booking_id)
+            return Response({"error": "Unable to complete booking right now."}, status=status.HTTP_400_BAD_REQUEST)

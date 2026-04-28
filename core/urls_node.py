@@ -21,6 +21,8 @@ from .views_node import (
 urlpatterns = [
     path("cards", CardsView.as_view(), name="node_cards"),
     path("fetch-Journals", FetchJournalsView.as_view(), name="node_fetch_journals"),
+    # iOS legacy uses lowercase endpoint.
+    path("fetch-journals", FetchJournalsView.as_view(), name="node_fetch_journals_legacy"),
     path("add-journal", AddJournalView.as_view(), name="node_add_journal"),
     path("edit-journal", EditJournalView.as_view(), name="node_edit_journal"),
     path("daily-qna", DailyQnAView.as_view(), name="node_daily_qna"),

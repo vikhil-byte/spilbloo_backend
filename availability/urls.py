@@ -3,7 +3,8 @@ from .views import (
     AddScheduleView, UpdateScheduleView, GetDoctorSlotView, BookingView,
     DoctorBookingListView, PatientBookingListView, DoctorBookingReqView,
     NotificationCountView, AcceptBookingView, DoctorRescheduleView,
-    DoctorCancelView, PatientRescheduleView, ConfirmRescheduleView
+    DoctorCancelView, PatientRescheduleView, ConfirmRescheduleView,
+    UploadPrescriptionView, CheckSessionView, CheckVideoLinkView
 )
 
 urlpatterns = [
@@ -18,9 +19,9 @@ urlpatterns = [
     path('appointment-list/', DoctorBookingListView.as_view(), name='appointment_list'),
     path('complete/', AcceptBookingView.as_view(), name='complete'), # Complete logic might be shared
     path('cancel/', DoctorCancelView.as_view(), name='cancel'),
-    path('upload-presciption/', AcceptBookingView.as_view(), name='upload_presciption'), # Placeholder
-    path('check-session/', BookingView.as_view(), name='check_session'), # Placeholder
-    path('check-video-link/', BookingView.as_view(), name='check_video_link'), # Placeholder
+    path('upload-presciption/', UploadPrescriptionView.as_view(), name='upload_presciption'),
+    path('check-session/', CheckSessionView.as_view(), name='check_session'),
+    path('check-video-link/', CheckVideoLinkView.as_view(), name='check_video_link'),
     path('notification-count/', NotificationCountView.as_view(), name='notification_count'),
     # iOS legacy compatibility aliases.
     path('list/', GetDoctorSlotView.as_view(), name='slot_list_legacy'),
