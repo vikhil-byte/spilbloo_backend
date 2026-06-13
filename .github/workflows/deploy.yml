@@ -1,0 +1,68 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+jobs:
+  deploy_dev:
+    name: Deploy to Development Environment
+    if: github.ref == 'refs/heads/dev'
+    environment: dev
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Dev Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/spilbloo_backend
+            
+            # Fetch and reset local changes to dev branch
+            git fetch origin dev
+            git reset --hard origin/dev
+            
+            # Write environment variables dynamically from environment secret
+            echo "${{ secrets.ENV_FILE }}" > .env
+            
+            # Rebuild and restart dev containers
+            sudo docker-compose down
+            sudo docker-compose up -d --build
+
+  deploy_prod:
+    name: Deploy to Production Environment
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Prod Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/spilbloo_backend
+            
+            # Fetch and reset local changes to main branch
+            git fetch origin main
+            git reset --hard origin/main
+            
+            # Write environment variables dynamically from environment secret
+            echo "${{ secrets.ENV_FILE }}" > .env
+            
+            # Rebuild and restart prod containers
+            sudo docker-compose down
+            sudo docker-compose up -d --build
