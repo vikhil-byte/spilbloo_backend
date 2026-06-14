@@ -30,19 +30,11 @@ fi
 if [ ! -f .env ]; then
     echo "[!] WARNING: .env file not found in $(pwd)"
     echo "Please create a .env file containing your secrets and configuration."
-    echo "Example configurations needed:"
-    echo "  DEBUG=False"
-    echo "  ALLOWED_HOSTS=yourdomain.com,your-ec2-ip"
-    echo "  POSTGRES_DB=therapy_app_db"
-    echo "  POSTGRES_USER=db_user"
-    echo "  POSTGRES_PASSWORD=secure_password_here"
-    echo "  DB_HOST=db"
-    echo "  DB_PORT=5432"
-    echo "  RAZORPAY_KEY_ID=..."
-    echo "  RAZORPAY_KEY_SECRET=..."
-    echo ""
     exit 1
 fi
+chmod 600 .env
+
+
 
 # 3. Pull and Build Containers
 echo "[-] Building and launching Docker containers..."

@@ -56,14 +56,20 @@ services:
       - db
       - redis
 
-  nginx:
-    build: ./nginx
+  caddy:
+    image: caddy:2-alpine
     restart: unless-stopped
-    volumes:
-      - static_volume:/app/staticfiles
-      - media_volume:/app/media
     ports:
       - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN_NAME=${DOMAIN_NAME}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
     depends_on:
       - web
 
@@ -71,3 +77,5 @@ volumes:
   postgres_data:
   static_volume:
   media_volume:
+  caddy_data:
+  caddy_config:
