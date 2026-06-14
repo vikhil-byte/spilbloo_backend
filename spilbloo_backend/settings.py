@@ -111,6 +111,26 @@ DATABASES = {
 }
 
 
+# Cache configuration
+# Use Redis when running inside Docker/production to share state (like OTPs) across multiple Gunicorn workers.
+# Fallback to local memory cache for local development.
+if os.environ.get("DB_HOST") == "db" or "REDIS_URL" in os.environ:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": os.environ.get("REDIS_URL", "redis://redis:6379/1"),
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "spilbloo-local-cache",
+        }
+    }
+
+
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 
