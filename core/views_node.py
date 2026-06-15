@@ -361,7 +361,7 @@ class FetchTherapistsView(NodeBaseAPIView):
                     json.dumps(null_field_counts),
                 )
             random.shuffle(processed)
-            return Response(node_success("OK", {"therapists": processed}, 200), status=200)
+            return Response(node_success("OK", processed, 200), status=200)
         except Exception as exc:
             logger.exception("node.fetch_therapists error: %s", str(exc))
             return Response(node_error(str(exc), 500), status=500)
