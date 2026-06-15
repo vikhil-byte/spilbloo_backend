@@ -6,10 +6,11 @@ import subprocess
 
 DJANGO_DEFAULTS = {
     # AbstractUser system booleans
-    'is_superuser': '0',
-    'is_staff': '0',
-    'is_active': '1',
+    'is_superuser': 'FALSE',
+    'is_staff': 'FALSE',
+    'is_active': 'TRUE',
     'date_joined': "CURRENT_TIMESTAMP",
+
     # AbstractUser string fields with empty string default
     'first_name': "''",
     'last_name': "''",
@@ -77,36 +78,53 @@ def parse_values(values_str):
     in_tuple = False
     current_val = []
     
-    for char in values_str:
+    i = 0
+    n = len(values_str)
+    while i < n:
+        char = values_str[i]
+        
         if not in_tuple:
             if char == '(':
                 in_tuple = True
                 current_tuple = []
                 current_val = []
+            i += 1
             continue
             
         if escape_next:
             current_val.append(char)
             escape_next = False
+            i += 1
             continue
             
         if char == '\\':
             current_val.append(char)
             escape_next = True
+            i += 1
             continue
             
         if char == "'":
-            current_val.append(char)
-            in_string = not in_string
-            continue
-            
+            # Look ahead to see if it is a double single-quote ''
+            if i + 1 < n and values_str[i+1] == "'":
+                current_val.append("'")
+                current_val.append("'")
+                i += 2  # Skip both quotes
+                continue
+            else:
+                current_val.append(char)
+                in_string = not in_string
+                i += 1
+                continue
+                
         if in_string:
             current_val.append(char)
+            i += 1
             continue
             
         if char == ',':
             current_tuple.append(''.join(current_val).strip())
             current_val = []
+            i += 1
             continue
             
         if char == ')':
@@ -114,11 +132,14 @@ def parse_values(values_str):
             tuples.append(current_tuple)
             in_tuple = False
             current_val = []
+            i += 1
             continue
             
         current_val.append(char)
+        i += 1
         
     return tuples
+
 
 def filter_insert_statement(stmt_clean, active_table_columns, warned_tables=None):
     if warned_tables is None:
@@ -171,12 +192,31 @@ def filter_insert_statement(stmt_clean, active_table_columns, warned_tables=None
             print(f"[!] Warning: Value tuple length mismatch in {table_name}. Expected {len(columns)}, got {len(t)}.")
             return stmt_clean
         
-        # Replace NULL values with defaults if the column has a defined fallback
+        # Replace NULL values with defaults if the column has a defined fallback, and clean up invalid zero dates
         for i, col in enumerate(columns):
-            if t[i].strip().upper() == 'NULL' and col in DJANGO_DEFAULTS:
+            val_clean = t[i].strip().strip("'")
+            if val_clean in ('0000-00-00 00:00:00', '0000-00-00'):
+                t[i] = 'NULL'
+            elif t[i].strip().upper() == 'NULL' and col in DJANGO_DEFAULTS:
                 t[i] = DJANGO_DEFAULTS[col]
                 
+            # Truncate tbl_notification.title to 255 characters to match schema VARCHAR(255) limit
+            if table_name == 'tbl_notification' and col == 'title':
+                has_quotes = t[i].startswith("'") and t[i].endswith("'")
+                raw_val = t[i][1:-1] if has_quotes else t[i]
+                # Unescape double single-quotes to count the real length
+                raw_len = len(raw_val.replace("''", "'"))
+                if raw_len > 255:
+                    # Truncate to fit 255 characters while preserving quotes
+                    # Let's keep it safe by truncating raw_val and re-escaping quotes
+                    unescaped = raw_val.replace("''", "'")
+                    truncated_unescaped = unescaped[:252] + "..."
+                    escaped_back = truncated_unescaped.replace("'", "''")
+                    t[i] = f"'{escaped_back}'" if has_quotes else escaped_back
+                
         filtered_t = [t[i] for i in indices_to_keep]
+
+
         for field in defaults_to_add:
             filtered_t.append(defaults_to_add[field])
         filtered_tuples.append(f"({', '.join(filtered_t)})")
@@ -292,10 +332,16 @@ def convert_mysql_to_postgres(input_path, output_path, env_path=None):
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print("Usage: python convert_mysql_to_postgres.py <input_file> <output_file> [path_to_spilbloo_backend_dir]")
+        print("Usage: python convert_mysql_to_postgres.py <input_file> <output_file> [project_dir | active_tables_file]")
         sys.exit(1)
     
-    project_dir = sys.argv[3] if len(sys.argv) >= 4 else None
-    env_file = os.path.join(project_dir, ".env") if project_dir else None
+    path_arg = sys.argv[3] if len(sys.argv) >= 4 else None
+    if path_arg and (path_arg.endswith('.json') or path_arg.endswith('.txt') or 'active_tables' in path_arg):
+        env_file = path_arg
+    elif path_arg:
+        env_file = os.path.join(path_arg, ".env")
+    else:
+        env_file = None
     
     convert_mysql_to_postgres(sys.argv[1], sys.argv[2], env_file)
+
