@@ -20,8 +20,60 @@ DJANGO_DEFAULTS = {
     'role_id': '2',
     'state_id': '1',
     'type_id': '0',
-    'login_error_count': '0'
+    'login_error_count': '0',
+    'title': "'Slot'",
+    'duration_millisec': '0',
+    'plan_price': '0',
+    'gst_price': '0',
+    'final_price': '0'
 }
+
+TABLE_NAME_MAPPING = {
+    'tbl_availability_doctor_slot': 'tbl_doctor_slot',
+    'tbl_availability_slot': 'tbl_slot',
+    'tbl_availability_slot_booking': 'tbl_slot_booking',
+    'tbl_subscription_plan': 'tbl_plan',
+    'tbl_subscription_subscribed_plan': 'tbl_subscribed_plan',
+    'tbl_subscription_coupon': 'tbl_coupon',
+    'tbl_faq_category': 'tbl_category',
+}
+
+COLUMN_NAME_MAPPING = {
+    'tbl_coupon': {
+        'amount': 'discount'
+    }
+}
+
+NUMERIC_COLUMNS = {
+    'id', 'limit', 'user_limit', 'no_of_free_trial_days', 'state_id', 'type_id', 
+    'experience', 'incentive_days', 'doctor_price', 'final_price', 'tax_price', 
+    'total_price', 'plan_price', 'gst_price', 'one_day_price', 'no_of_video_session', 
+    'duration', 'duration_millisec', 'tos', 'role_id', 'login_error_count',
+    'availability_slot_id', 'doctor_id', 'slot_id', 'is_active', 'is_refunded',
+    'doctor_reschedule', 'patient_reschedule', 'is_reschedule_confirm',
+    'to_user_id', 'is_read', 'booking_id', 'user_id', 'created_by_id', 'plan_id',
+    'company_id', 'subscribed_plan_id', 'company_coupon_id', 'file_id',
+    'upcoming_plan_id', 'upcoming_state', 'category_id', 'coupon_discount'
+}
+
+def duration_str_to_seconds(val):
+    if not val:
+        return 0
+    parts = val.split(':')
+    if len(parts) == 3:
+        try:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        except ValueError:
+            return 0
+    elif len(parts) == 2:
+        try:
+            return int(parts[0]) * 60 + int(parts[1])
+        except ValueError:
+            return 0
+    try:
+        return int(val)
+    except ValueError:
+        return 0
 
 def load_db_config(env_path):
     config = {
@@ -157,6 +209,9 @@ def filter_insert_statement(stmt_clean, active_table_columns, warned_tables=None
     cols_str = match.group(2)
     columns = [c.strip().lower() for c in cols_str.split(',')]
     
+    if table_name in COLUMN_NAME_MAPPING:
+        columns = [COLUMN_NAME_MAPPING[table_name].get(c, c) for c in columns]
+    
     # 1. Remove columns that do not exist in the target schema
     missing_cols = [c for c in columns if c not in active_cols]
     if missing_cols and table_name not in warned_tables:
@@ -199,6 +254,12 @@ def filter_insert_statement(stmt_clean, active_table_columns, warned_tables=None
                 t[i] = 'NULL'
             elif t[i].strip().upper() == 'NULL' and col in DJANGO_DEFAULTS:
                 t[i] = DJANGO_DEFAULTS[col]
+            
+            if col == 'is_available':
+                if val_clean == '1':
+                    t[i] = 'TRUE'
+                elif val_clean == '0':
+                    t[i] = 'FALSE'
                 
             # Truncate tbl_notification.title to 255 characters to match schema VARCHAR(255) limit
             if table_name == 'tbl_notification' and col == 'title':
@@ -213,6 +274,13 @@ def filter_insert_statement(stmt_clean, active_table_columns, warned_tables=None
                     truncated_unescaped = unescaped[:252] + "..."
                     escaped_back = truncated_unescaped.replace("'", "''")
                     t[i] = f"'{escaped_back}'" if has_quotes else escaped_back
+            
+            if table_name == 'tbl_call' and col == 'duration':
+                t[i] = str(duration_str_to_seconds(val_clean))
+            elif table_name == 'tbl_call' and col == 'duration_millisec':
+                t[i] = str(int(val_clean) if val_clean.isdigit() else 0)
+            elif col in NUMERIC_COLUMNS and val_clean == '':
+                t[i] = '0'
                 
         filtered_t = [t[i] for i in indices_to_keep]
 
@@ -221,7 +289,8 @@ def filter_insert_statement(stmt_clean, active_table_columns, warned_tables=None
             filtered_t.append(defaults_to_add[field])
         filtered_tuples.append(f"({', '.join(filtered_t)})")
         
-    new_stmt = f"INSERT INTO {table_name} ({', '.join(new_columns)}) VALUES\n" + ",\n".join(filtered_tuples) + ";"
+    quoted_columns = [f'"{col}"' for col in new_columns]
+    new_stmt = f"INSERT INTO {table_name} ({', '.join(quoted_columns)}) VALUES\n" + ",\n".join(filtered_tuples) + ";"
     return new_stmt
 
 def convert_mysql_to_postgres(input_path, output_path, env_path=None):
@@ -295,6 +364,9 @@ def convert_mysql_to_postgres(input_path, output_path, env_path=None):
         
         for stmt in statements:
             stmt_strip = stmt.strip()
+            insert_idx = stmt_strip.upper().find("INSERT INTO")
+            if insert_idx != -1:
+                stmt_strip = stmt_strip[insert_idx:]
             if stmt_strip.upper().startswith("INSERT INTO"):
                 stmt_clean = stmt_strip.replace('`', '')
                 
@@ -302,6 +374,10 @@ def convert_mysql_to_postgres(input_path, output_path, env_path=None):
                 match = re.match(r"(?i)INSERT\s+INTO\s+([a-zA-Z0-9_\-]+)", stmt_clean)
                 if match:
                     table_name = match.group(1).lower()
+                    if table_name in TABLE_NAME_MAPPING:
+                        mapped = TABLE_NAME_MAPPING[table_name]
+                        stmt_clean = re.sub(r"(?i)(INSERT\s+INTO\s+)" + table_name, r"\1" + mapped, stmt_clean, count=1)
+                        table_name = mapped
                     if active_tables is not None and table_name not in active_tables:
                         skipped_count += 1
                         continue

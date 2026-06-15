@@ -179,7 +179,7 @@ class PlanListView(generics.ListAPIView):
     def get_queryset(self):
         type_id = self.request.query_params.get('type_id', 0)
         currency = self.request.query_params.get('currency', 'INR')
-        qs = Plan.objects.filter(state_id=1, plan_type=1, type_id=1, currency_code=currency) # 1=Paid, 1=Visible
+        qs = Plan.objects.filter(state_id=1, plan_type=0, type_id=0, currency_code=currency) # 0=Paid, 0=Visible
         
         if str(type_id) == '1': # PLAN_VIDEO_AND_TEXT
             qs = qs.filter(no_of_video_session__gt=0)
@@ -203,11 +203,11 @@ class CompanyUserPlanListView(generics.ListAPIView):
         email = getattr(user, "email", "") or ""
         domain = email.split("@")[-1].lower() if "@" in email else ""
         if not domain:
-            return Plan.objects.filter(state_id=1, plan_type=1, type_id=1).order_by("-is_recommended")
+            return Plan.objects.filter(state_id=1, plan_type=0, type_id=0).order_by("-is_recommended")
 
         company = Company.objects.filter(state_id=Company.STATE_ACTIVE, email_domain__iexact=domain).first()
         if not company:
-            return Plan.objects.filter(state_id=1, plan_type=1, type_id=1).order_by("-is_recommended")
+            return Plan.objects.filter(state_id=1, plan_type=0, type_id=0).order_by("-is_recommended")
 
         coupon_plan_ids = CompanyCoupon.objects.filter(
             company=company,

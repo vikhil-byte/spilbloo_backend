@@ -5,8 +5,8 @@ but are missing from the current Django schema (active_tables.json).
 import json
 import re
 
-DUMP_PATH = "/Users/vikhil/Downloads/therapy_app_db (1).sql"
-ACTIVE_TABLES_PATH = "/Users/vikhil/Desktop/spilbloo/spilbloo_backend/active_tables.json"
+DUMP_PATH = "./raw_dump.sql"
+ACTIVE_TABLES_PATH = "./active_tables.json"
 
 # Load active tables from Django schema
 with open(ACTIVE_TABLES_PATH) as f:

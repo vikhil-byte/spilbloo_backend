@@ -74,6 +74,12 @@ class User(AbstractUser):
     state_id = models.SmallIntegerField(choices=STATE_CHOICES, default=STATE_ACTIVE)
     type_id = models.SmallIntegerField(default=0)
 
+    qualification = models.CharField(max_length=255, blank=True, null=True)
+    experience = models.IntegerField(default=0, blank=True, null=True)
+    online = models.CharField(max_length=50, default='no', blank=True, null=True)
+    is_available = models.BooleanField(default=True)
+    token = models.CharField(max_length=255, default='', blank=True, null=True)
+
     last_visit_time = models.DateTimeField(blank=True, null=True)
     last_action_time = models.DateTimeField(blank=True, null=True)
     last_password_change = models.DateTimeField(blank=True, null=True)
