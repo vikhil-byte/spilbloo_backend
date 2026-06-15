@@ -36,6 +36,8 @@ chmod 600 .env
 
 
 
+
+
 # 3. Pull and Build Containers
 echo "[-] Building and launching Docker containers..."
 sudo docker-compose down --remove-orphans || true

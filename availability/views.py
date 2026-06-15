@@ -12,6 +12,8 @@ from plans.models import SubscribedPlan
 from django.core.mail import send_mail
 from django.conf import settings
 import os
+from core.email_service import get_email_client
+
 
 User = get_user_model()
 import json
@@ -24,10 +26,12 @@ def send_event_email(to_email, subject, message):
     if not to_email:
         return
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
-    try:
-        send_mail(subject, message, from_email, [to_email], fail_silently=False)
-    except Exception:
-        logger.info("email fallback log to=%s subject=%s", to_email, subject)
+    get_email_client().send_email(
+        subject=subject,
+        body=message,
+        to_email=to_email,
+        from_email=from_email
+    )
 
 
 def _send_fcm(token, title, description):

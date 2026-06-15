@@ -28,6 +28,8 @@ from plans.models import Plan, SubscribedPlan
 from django.core import signing
 import hashlib
 import secrets
+from core.email_service import get_email_client
+
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +45,12 @@ def send_otp_via_email(email, otp):
     subject = "Spilbloo OTP Verification"
     message = f"Your OTP is {otp}. It is valid for 10 minutes."
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
-    sent = False
-    try:
-        send_mail(subject, message, from_email, [email], fail_silently=False)
-        sent = True
-    except Exception:
-        # Keep auth flow resilient even when SMTP is not configured.
-        pass
+    get_email_client().send_email(
+        subject=subject,
+        body=message,
+        to_email=email,
+        from_email=from_email
+    )
     logger.info("OTP email log: otp=%s", otp)
 
 
@@ -79,10 +80,12 @@ def send_password_reset_email(email: str, reset_link: str):
         "This link expires in 30 minutes."
     )
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
-    try:
-        send_mail(subject, message, from_email, [email], fail_silently=False)
-    except Exception:
-        logger.info("Password reset email fallback log: email=%s", email)
+    get_email_client().send_email(
+        subject=subject,
+        body=message,
+        to_email=email,
+        from_email=from_email
+    )
 
 
 def _otp_cache_key(user_id: int) -> str:
