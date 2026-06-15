@@ -35,12 +35,22 @@ DEBUG = os.environ.get("DEBUG", "True") == "True"
 
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "*").split(",")
 
+CSRF_TRUSTED_ORIGINS = [
+    f"https://{host.strip()}" for host in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if host.strip()
+]
+# Fallback using DOMAIN_NAME environment variable
+domain_name = os.environ.get("DOMAIN_NAME")
+if domain_name:
+    CSRF_TRUSTED_ORIGINS.append(f"https://{domain_name}")
+    CSRF_TRUSTED_ORIGINS.append(f"http://{domain_name}")
+
 if not DEBUG:
     SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "False") == "True"
     SESSION_COOKIE_SECURE = SECURE_SSL_REDIRECT
     CSRF_COOKIE_SECURE = SECURE_SSL_REDIRECT
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
+
 
 
 # Application definition
