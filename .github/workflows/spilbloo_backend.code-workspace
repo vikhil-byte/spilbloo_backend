@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../.."
+		},
+		{
+			"path": "../../../spilbloo-app"
+		},
+		{
+			"path": "../../../spilbloo-site"
+		}
+	],
+	"settings": {}
+}

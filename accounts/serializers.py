@@ -5,9 +5,18 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 User = get_user_model()
 
 class UserSerializer(serializers.ModelSerializer):
+    profile_file = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = ('id', 'email', 'full_name', 'role_id', 'contact_no', 'address', 'city', 'country', 'profile_file')
+
+    def get_profile_file(self, obj):
+        if not obj.profile_file:
+            return ""
+        from urllib.parse import quote
+        return f"/user/image/{obj.id}?file={quote(str(obj.profile_file))}"
+
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)

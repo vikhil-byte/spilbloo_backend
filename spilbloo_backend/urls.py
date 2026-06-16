@@ -17,11 +17,12 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import path, include
-from accounts.views import LogoutView
-from accounts.views import CardDeleteView
+from accounts.views import LogoutView, CardDeleteView, UserImageView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("user/image/<int:pk>", UserImageView.as_view(), name="user_image"),
+
     # iOS legacy compatibility alias (historical typo in client path).
     path("api/users/logout/", LogoutView.as_view()),
     # iOS legacy compatibility alias.

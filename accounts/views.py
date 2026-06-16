@@ -692,13 +692,75 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         # PHP: actionUpdateProfile allows updating user details
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+
+        data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+
+        # Handle profile file upload (key may be 'profile_file' or 'User[profile_file]')
+        profile_file = request.FILES.get('profile_file') or request.FILES.get('User[profile_file]')
+        if profile_file:
+            from core.s3_utils import upload_to_s3
+
+            filename = f"user-{instance.id}-profile-{profile_file.name}"
+            s3_key = upload_to_s3(profile_file, filename)
+            if s3_key:
+                data['profile_file'] = s3_key
+            else:
+                return Response({"error": "S3 upload failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        serializer = self.get_serializer(instance, data=data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
 
         return Response({
             "detail": serializer.data
         }, status=status.HTTP_200_OK)
+
+
+class UserImageView(APIView):
+    permission_classes = (AllowAny,)
+    authentication_classes = ()
+
+    def get(self, request, pk):
+        from urllib.parse import unquote
+        from django.http import HttpResponseRedirect
+        from django.conf import settings
+
+        file_name = request.GET.get('file') or request.query_params.get('file')
+        if not file_name:
+            try:
+                user = User.objects.get(pk=pk)
+                file_name = user.profile_file
+            except User.DoesNotExist:
+                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not file_name:
+            return Response({"error": "Image file not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        file_name = unquote(file_name)
+
+        # Try S3 Proxy first if bucket is configured
+        bucket_name = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', '')
+        if bucket_name:
+            from core.s3_utils import get_s3_client
+            from django.http import StreamingHttpResponse
+            try:
+                s3 = get_s3_client()
+                s3_response = s3.get_object(Bucket=bucket_name, Key=file_name)
+                content_type = s3_response.get('ContentType', 'image/png')
+                response = StreamingHttpResponse(
+                    s3_response['Body'],
+                    content_type=content_type
+                )
+                if 'ContentLength' in s3_response:
+                    response['Content-Length'] = s3_response['ContentLength']
+                return response
+            except Exception as e:
+                logger.warning(f"Failed to stream from S3: {e}")
+                return Response({"error": "Image not found on S3"}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({"error": "S3 Storage not configured"}, status=status.HTTP_404_NOT_FOUND)
+
+
 
 
 class DetailView(generics.RetrieveAPIView):
