@@ -6,16 +6,32 @@ User = get_user_model()
 
 class UserSerializer(serializers.ModelSerializer):
     profile_file = serializers.SerializerMethodField()
+    first_name = serializers.SerializerMethodField()
+    last_name = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ('id', 'email', 'full_name', 'role_id', 'contact_no', 'address', 'city', 'country', 'profile_file')
+        fields = ('id', 'email', 'full_name', 'first_name', 'last_name', 'role_id', 'contact_no', 'address', 'city', 'country', 'profile_file')
 
     def get_profile_file(self, obj):
         if not obj.profile_file:
             return ""
         from urllib.parse import quote
         return f"/user/image/{obj.id}?file={quote(str(obj.profile_file))}"
+
+    def get_first_name(self, obj):
+        return getattr(obj, "first_name", "") or ""
+
+    def get_last_name(self, obj):
+        return getattr(obj, "last_name", "") or ""
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Prevent iOS/Swift force-unwrap crashes by turning null string values into empty strings
+        for key in ('email', 'full_name', 'first_name', 'last_name', 'contact_no', 'address', 'city', 'country', 'profile_file'):
+            if key in data and data[key] is None:
+                data[key] = ""
+        return data
 
 
 class RegisterSerializer(serializers.ModelSerializer):
