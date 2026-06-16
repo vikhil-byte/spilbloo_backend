@@ -16,10 +16,17 @@ class Command(BaseCommand):
             s3 = get_s3_client()
             
             try:
-                s3.create_bucket(Bucket=bucket_name)
+                region = getattr(settings, 'AWS_S3_REGION_NAME', 'us-east-1')
+                if region and region != 'us-east-1':
+                    s3.create_bucket(
+                        Bucket=bucket_name,
+                        CreateBucketConfiguration={'LocationConstraint': region}
+                    )
+                else:
+                    s3.create_bucket(Bucket=bucket_name)
                 self.stdout.write(f"Created S3 bucket '{bucket_name}'.")
-            except Exception:
-                pass
+            except Exception as e:
+                self.stdout.write(f"Bucket creation failed or skipped: {e}")
 
             try:
                 # Put public-read policy
