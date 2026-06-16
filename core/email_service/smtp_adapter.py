@@ -10,7 +10,7 @@ class SMTPEmailAdapter(BaseEmailAdapter):
     SMTP email client using Django's standard mail functions.
     Compatible with Gmail SMTP, custom SMTP servers, or AWS SES SMTP credentials.
     """
-    def send_email(self, subject: str, body: str, to_email: str, from_email: str = None) -> bool:
+    def send_email(self, subject: str, body: str, to_email: str, from_email: str = None, html_body: str = None) -> bool:
         if not from_email:
             from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
         
@@ -20,9 +20,11 @@ class SMTPEmailAdapter(BaseEmailAdapter):
                 message=body,
                 from_email=from_email,
                 recipient_list=[to_email],
+                html_message=html_body,
                 fail_silently=False
             )
             return True
         except Exception as e:
             logger.exception("SMTP Email sending failed to %s: %s", to_email, str(e))
             return False
+

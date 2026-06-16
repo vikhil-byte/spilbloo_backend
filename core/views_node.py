@@ -12,7 +12,13 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.exceptions import PermissionDenied, NotAuthenticated, AuthenticationFailed
 
 from .node_auth import IsNodePatientOrTherapist, NodeHeaderTokenAuthentication
-from .models import NodeSubscriptionPlan, NodeUserSelectedTherapistPlan
+from .models import (
+    NodeSubscriptionPlan, NodeUserSelectedTherapistPlan, HomeCard,
+    DailyJournal, DailyCheckinQuestion, DailyCheckinAnswer,
+    DailyCheckinQuestionAndAnswer, UserAppReview, ChatsHistory,
+    ApiAccessToken
+)
+
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -100,17 +106,17 @@ class NodeBaseAPIView(APIView):
 class CardsView(NodeBaseAPIView):
     def get(self, request):
         try:
-            results = fetch_rows("SELECT * FROM tbl_home_card WHERE is_active = 1")
+            results = HomeCard.objects.filter(is_active=1)
             processed = [
                 {
-                    "title": row.get("title"),
-                    "description": row.get("description"),
-                    "img_url_path": row.get("img_url_path"),
-                    "is_active": row.get("is_active") == 1,
-                    "position": row.get("position"),
-                    "card_type": row.get("card_type"),
+                    "title": card.title,
+                    "description": card.description,
+                    "img_url_path": card.img_url_path,
+                    "is_active": card.is_active == 1,
+                    "position": card.position,
+                    "card_type": card.card_type,
                 }
-                for row in results
+                for card in results
             ]
             return Response(node_success("OK", {"cards": processed}, 200), status=200)
         except Exception as exc:
@@ -121,7 +127,11 @@ class FetchJournalsView(NodeBaseAPIView):
     def get(self, request):
         user_id = request.query_params.get("userId")
         try:
-            results = fetch_rows("SELECT * FROM tbl_daily_journal WHERE created_by_id = %s", [user_id])
+            results = list(DailyJournal.objects.filter(created_by_id=user_id).values())
+            # Convert date objects to string for JSON compatibility
+            for r in results:
+                if r.get("entry_date"):
+                    r["entry_date"] = str(r["entry_date"])
             return Response(node_success("OK", {"journals": results}, 200), status=200)
         except Exception as exc:
             return Response(node_error(str(exc), 500), status=500)
@@ -134,11 +144,12 @@ class AddJournalView(NodeBaseAPIView):
         created_by_id = request.data.get("created_by_id")
         entry_date = request.data.get("entry_date")
         try:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "INSERT INTO tbl_daily_journal (entry_date, journal, question_id, created_by_id) VALUES (%s, %s, %s, %s)",
-                    [entry_date, journal, question_id, created_by_id],
-                )
+            DailyJournal.objects.create(
+                entry_date=entry_date,
+                journal=journal,
+                question_id=question_id,
+                created_by_id=created_by_id,
+            )
             return Response(node_success("OK", {}, 200), status=200)
         except Exception as exc:
             return Response(node_error(str(exc), 500), status=500)
@@ -150,11 +161,7 @@ class EditJournalView(NodeBaseAPIView):
         created_by_id = request.data.get("created_by_id")
         entry_date = request.data.get("entry_date")
         try:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "UPDATE tbl_daily_journal SET journal = %s WHERE created_by_id = %s AND entry_date = %s",
-                    [journal, created_by_id, entry_date],
-                )
+            DailyJournal.objects.filter(created_by_id=created_by_id, entry_date=entry_date).update(journal=journal)
             return Response(node_success("OK", {}, 200), status=200)
         except Exception as exc:
             return Response(node_error(str(exc), 500), status=500)
@@ -163,22 +170,8 @@ class EditJournalView(NodeBaseAPIView):
 class DailyQnAView(NodeBaseAPIView):
     def get(self, request):
         try:
-            try:
-                questions = fetch_rows("SELECT * FROM tbl_daily_checkin_question WHERE is_active = 1")
-            except Exception:
-                # Keep response contract stable even when table isn't present yet.
-                return Response(node_success("OK", {"question_and_answers": []}, 200), status=200)
-
-            answers = []
-            for answer_query in (
-                "SELECT * FROM tbl_daily_checkin_answer",
-                "SELECT * FROM tbl_daily_checkin_Answer",
-            ):
-                try:
-                    answers = fetch_rows(answer_query)
-                    break
-                except Exception:
-                    continue
+            questions = list(DailyCheckinQuestion.objects.filter(is_active=1).values())
+            answers = list(DailyCheckinAnswer.objects.all().values())
 
             question_map = {}
             for q in questions:
@@ -201,11 +194,10 @@ class AddUserAnswersView(NodeBaseAPIView):
         user_id = request.data.get("user_id")
         qna_map = request.data.get("qna_map", [])
         try:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "INSERT INTO tbl_daily_checkin_question_and_answer (created_by_id, qna_map) VALUES (%s, %s::jsonb)",
-                    [user_id, json.dumps(qna_map)],
-                )
+            DailyCheckinQuestionAndAnswer.objects.create(
+                created_by_id=user_id,
+                qna_map=qna_map,
+            )
             return Response(node_success("OK", {}, 200), status=200)
         except Exception:
             return Response(node_error("Error adding daily check-in Q&A", 500), status=500)
@@ -215,21 +207,20 @@ class DailyUserAnswersView(NodeBaseAPIView):
     def get(self, request):
         user_id = request.query_params.get("userId")
         try:
-            results = fetch_rows(
-                "SELECT * FROM tbl_daily_checkin_question_and_answer WHERE created_by_id = %s",
-                [user_id],
-            )
+            results = list(DailyCheckinQuestionAndAnswer.objects.filter(created_by_id=user_id).values())
             answers = [[], [], [], [], []]
             for result in results:
                 qna_map = result.get("qna_map") or []
                 if isinstance(qna_map, str):
                     qna_map = json.loads(qna_map)
                 for idx, qna in enumerate(qna_map[:5]):
-                    qna["created_on"] = result.get("entry_date")
+                    entry_date = result.get("entry_date")
+                    qna["created_on"] = str(entry_date) if entry_date else None
                     answers[idx].append(qna)
             return Response(node_success("OK", {"user_answers": answers}, 200), status=200)
         except Exception:
             return Response(node_error("Error fetching daily check-in user answers", 500), status=500)
+
 
 
 class FetchUserSelectedTherapistAndPlanView(NodeBaseAPIView):
@@ -287,7 +278,7 @@ class FetchUserSelectedTherapistAndPlanView(NodeBaseAPIView):
 class FetchUserAppReviewView(NodeBaseAPIView):
     def get(self, request):
         try:
-            results = fetch_rows("SELECT * FROM tbl_user_app_review")
+            results = list(UserAppReview.objects.all().values())
             return Response(node_success("OK", {"reviews": results}, 200), status=200)
         except Exception as exc:
             return Response(node_error(str(exc), 500), status=500)
@@ -297,16 +288,10 @@ class FetchTherapistsView(NodeBaseAPIView):
     def get(self, request):
         try:
             try:
-                results = fetch_rows(
-                    "SELECT * FROM tbl_user WHERE role_id = %s and is_available = %s",
-                    [5, True],
-                )
+                results = list(User.objects.filter(role_id=5, is_available=True).values())
             except Exception:
                 # Fallback for migrated schemas where is_available column doesn't exist yet.
-                results = fetch_rows(
-                    "SELECT * FROM tbl_user WHERE role_id = %s",
-                    [5],
-                )
+                results = list(User.objects.filter(role_id=5).values())
             logger.info(
                 "node.fetch_therapists raw_rows=%s user_id=%s auth=%s",
                 len(results),
@@ -319,27 +304,27 @@ class FetchTherapistsView(NodeBaseAPIView):
                 "Anger management",
                 "Specific phobia",
                 "Social anxiety",
-                "Sleep dificulties",
+                "Sleep difficulties",
                 "Sexual abuse",
-                "past trauma",
+                "Past trauma",
                 "Family conflict",
-                "Low self esteem",
+                "Low self-esteem",
             ]
             processed = [
                 (
                     lambda online_status: {
-                    "id": row.get("id"),
-                    "full_name": row.get("full_name") or "",
-                    "qualification": row.get("qualification") or "",
-                    "contact_no": row.get("contact_no") or "",
-                    "about_me": row.get("about_me") or "",
-                    "profile_file": f"/user/image/{row.get('id')}?file={quote(str(row.get('profile_file') or ''))}",
-                    "experience": to_int(row.get("experience"), default=0),
-                    "token": row.get("token") or "",
-                    "device_token": row.get("token") or "",
-                    "online": online_status,
-                    "isOnline": online_status,
-                    "symptoms": symptoms,
+                        "id": row.get("id"),
+                        "full_name": row.get("full_name") or "",
+                        "qualification": row.get("qualification") or "",
+                        "contact_no": row.get("contact_no") or "",
+                        "about_me": row.get("about_me") or "",
+                        "profile_file": f"/user/image/{row.get('id')}?file={quote(str(row.get('profile_file') or ''))}",
+                        "experience": to_int(row.get("experience"), default=0),
+                        "token": row.get("token") or "",
+                        "device_token": row.get("token") or "",
+                        "online": online_status,
+                        "isOnline": online_status,
+                        "symptoms": symptoms,
                     }
                 )(to_str(row.get("online"), default=""))
                 for row in results
@@ -373,35 +358,18 @@ class SelectTherapistAndPlanView(NodeBaseAPIView):
         therapist_id = request.data.get("therapist_id")
         plan_id = request.data.get("plan_id")
         try:
-            therapist_rows = fetch_rows(
-                "SELECT id FROM tbl_user WHERE id = %s AND role_id = 5",
-                [therapist_id],
-            )
-            if not therapist_rows:
+            if not User.objects.filter(id=therapist_id, role_id=5).exists():
                 return Response({"error": True, "message": "Therapist not found !"}, status=400)
 
-            existing = fetch_rows(
-                "SELECT id FROM tbl_user_selected_therapist_plan WHERE user_id = %s",
-                [user_id],
+            from django.utils import timezone
+            NodeUserSelectedTherapistPlan.objects.update_or_create(
+                user_id=user_id,
+                defaults={
+                    "therapist_id": therapist_id,
+                    "plan_id": plan_id,
+                    "selected_on": timezone.now(),
+                }
             )
-            with connection.cursor() as cursor:
-                if existing:
-                    cursor.execute(
-                        """
-                        UPDATE tbl_user_selected_therapist_plan
-                        SET therapist_id = %s, plan_id = %s, selected_on = CURRENT_TIMESTAMP
-                        WHERE user_id = %s
-                        """,
-                        [therapist_id, plan_id, user_id],
-                    )
-                else:
-                    cursor.execute(
-                        """
-                        INSERT INTO tbl_user_selected_therapist_plan (user_id, therapist_id, plan_id, selected_on)
-                        VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
-                        """,
-                        [user_id, therapist_id, plan_id],
-                    )
             return Response(
                 node_success("Therapist and plan selected successfully", {}, 200),
                 status=200,
@@ -414,14 +382,10 @@ class SendPushNotificationView(NodeBaseAPIView):
     def post(self, request):
         try:
             to_id = request.data.get("to_id")
-            title = request.data.get("title")
-            tokens = fetch_rows(
-                "SELECT device_token FROM tbl_api_access_token WHERE created_by_id = %s",
-                [to_id],
-            )
-            if not tokens:
+            tokens = ApiAccessToken.objects.filter(created_by_id=to_id)
+            if not tokens.exists():
                 return Response(node_error("Error sending push notification", 400), status=400)
-            device_token = tokens[0].get("device_token")
+            device_token = tokens.first().device_token
             # StarterNode returns success envelope with device token in results.
             return Response(
                 node_success("Push notification sent successfully", device_token, 200),
@@ -434,11 +398,18 @@ class SendPushNotificationView(NodeBaseAPIView):
 class FetchChatMessagesView(NodeBaseAPIView):
     def get(self, request, user_id):
         try:
-            rows = fetch_rows(
-                "SELECT chats_message FROM tbl_chats_history WHERE user_id = %s ORDER BY created_on",
-                [user_id],
-            )
-            chat_messages = [json.loads(row.get("chats_message") or "[]") for row in rows]
+            rows = ChatsHistory.objects.filter(user_id=user_id).order_by("created_on")
+            chat_messages = []
+            for row in rows:
+                msg = row.chats_message
+                if isinstance(msg, str):
+                    try:
+                        msg = json.loads(msg or "[]")
+                    except Exception:
+                        msg = []
+                elif msg is None:
+                    msg = []
+                chat_messages.append(msg)
             first = chat_messages[0] if chat_messages else []
             return Response(
                 node_success("Chat messages retrieved successfully", {"messages": first}, 200),
@@ -462,20 +433,24 @@ class AddChatMessageView(NodeBaseAPIView):
 
         bot_chat = {"message": bot_response, "is_sent": False}
         try:
-            rows = fetch_rows("SELECT chats_message FROM tbl_chats_history WHERE user_id = %s", [user_id])
-            with connection.cursor() as cursor:
-                if rows:
-                    existing = json.loads(rows[0].get("chats_message") or "[]")
-                    existing.extend([chat_message, bot_chat])
-                    cursor.execute(
-                        "UPDATE tbl_chats_history SET chats_message = %s WHERE user_id = %s",
-                        [json.dumps(existing), user_id],
-                    )
-                else:
-                    cursor.execute(
-                        "INSERT INTO tbl_chats_history (user_id, chats_message) VALUES (%s, %s)",
-                        [user_id, json.dumps([chat_message, bot_chat])],
-                    )
+            row = ChatsHistory.objects.filter(user_id=user_id).first()
+            if row:
+                existing = row.chats_message
+                if isinstance(existing, str):
+                    try:
+                        existing = json.loads(existing or "[]")
+                    except Exception:
+                        existing = []
+                elif existing is None:
+                    existing = []
+                existing.extend([chat_message, bot_chat])
+                row.chats_message = json.dumps(existing)
+                row.save()
+            else:
+                ChatsHistory.objects.create(
+                    user_id=user_id,
+                    chats_message=json.dumps([chat_message, bot_chat])
+                )
             return Response(
                 node_success(
                     "Messages added successfully",
@@ -494,3 +469,4 @@ class NotImplementedNodeView(NodeBaseAPIView):
 
     def post(self, request):
         return Response(node_error("Endpoint migration in progress", 404), status=404)
+

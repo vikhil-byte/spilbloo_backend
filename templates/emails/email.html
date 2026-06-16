@@ -1,0 +1,8 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 12px 0; font-weight: 500;">Hi {{ name }},</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
+  {{ content }}
+</p>
+{% endblock %}

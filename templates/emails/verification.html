@@ -1,0 +1,26 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="font-family: 'Crimson Pro', Georgia, serif; color: #1A2E26; margin: 0 0 16px 0; font-size: 24px; font-weight: 700; line-height: 1.2;">Verify Your Email</h2>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 12px 0; font-weight: 500;">Hi {{ full_name }},</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
+  Welcome to Spilbloo! Thanks for signing up. To continue, please confirm your email address by clicking the button below.
+</p>
+
+<table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 28px;">
+  <tr>
+    <td align="center">
+      <a href="{{ verification_link }}" style="display: inline-block; padding: 12px 28px; background-color: #2F6C52; color: #ffffff; border-radius: 12px; text-decoration: none; font-weight: 600; font-size: 15px; border: 1px solid #2F6C52; transition: background-color 0.3s ease;">
+        Verify Email
+      </a>
+    </td>
+  </tr>
+</table>
+
+<p style="color: #6B7C75; font-size: 14px; line-height: 20px; margin: 0 0 8px 0;">
+  If the button above isn't working, please copy and paste the link below directly into your browser's address bar:
+</p>
+<p style="margin: 0; word-break: break-all;">
+  <a href="{{ verification_link }}" style="color: #4CA77B; text-decoration: underline; font-size: 14px;">{{ verification_link }}</a>
+</p>
+{% endblock %}

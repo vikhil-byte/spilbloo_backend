@@ -1,0 +1,29 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="font-family: 'Crimson Pro', Georgia, serif; color: #1A2E26; margin: 0 0 16px 0; font-size: 24px; font-weight: 700; line-height: 1.2;">Application Received</h2>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 12px 0; font-weight: 500;">Hi {{ full_name }},</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 20px 0;">
+  Thank you for reaching out. We have received your application, and our team will get back to you soon. Here are the details you provided:
+</p>
+
+<table style="border-collapse: collapse; width: 100%; margin-bottom: 24px;" cellpadding="8">
+  <tr>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #1A2E26; font-weight: 600;" width="40%">Name:</td>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #6B7C75;" width="60%">{{ full_name }}</td>
+  </tr>
+  <tr>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #1A2E26; font-weight: 600;" width="40%">Email:</td>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #6B7C75;" width="60%">{{ email }}</td>
+  </tr>
+  <tr>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #1A2E26; font-weight: 600;" width="40%">Contact No:</td>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #6B7C75;" width="60%">{{ contact_no }}</td>
+  </tr>
+</table>
+
+<p style="color: #6B7C75; font-size: 14px; line-height: 22px; margin: 0; padding-top: 16px; border-top: 1px solid #E8F3EF;">
+  Regards,<br>
+  <strong>Team Spilbloo</strong>
+</p>
+{% endblock %}

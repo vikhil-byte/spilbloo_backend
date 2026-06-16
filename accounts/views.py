@@ -23,7 +23,9 @@ from django.utils import timezone
 from django.contrib.auth import authenticate
 from django.core.cache import cache
 from django.core.mail import send_mail
+from django.template.loader import render_to_string
 from django.conf import settings
+
 from plans.models import Plan, SubscribedPlan
 from django.core import signing
 import hashlib
@@ -44,14 +46,24 @@ def _normalize_email(value) -> str:
 def send_otp_via_email(email, otp):
     subject = "Spilbloo OTP Verification"
     message = f"Your OTP is {otp}. It is valid for 10 minutes."
+    
+    context = {
+        "subject": subject,
+        "otp": otp
+    }
+    html_content = render_to_string("emails/otp_email.html", context)
+    
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
     get_email_client().send_email(
         subject=subject,
         body=message,
         to_email=email,
-        from_email=from_email
+        from_email=from_email,
+        html_body=html_content
     )
     logger.info("OTP email log: otp=%s", otp)
+
+
 
 
 def _password_reset_cache_key(user_id: int) -> str:

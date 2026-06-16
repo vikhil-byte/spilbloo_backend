@@ -949,7 +949,7 @@ class Faq(models.Model):
 
 class NodeSubscriptionPlan(models.Model):
     """
-    Unmanaged compatibility model for legacy StarterNode table.
+    Managed compatibility model for legacy table.
     """
 
     id = models.BigAutoField(primary_key=True)
@@ -963,13 +963,13 @@ class NodeSubscriptionPlan(models.Model):
     plan_type = models.TextField(blank=True, null=True)
 
     class Meta:
-        managed = False
+        managed = True
         db_table = "tbl_subscription_plan"
 
 
 class NodeUserSelectedTherapistPlan(models.Model):
     """
-    Unmanaged compatibility model for legacy StarterNode table.
+    Managed compatibility model for legacy table.
     """
 
     id = models.BigAutoField(primary_key=True)
@@ -979,5 +979,95 @@ class NodeUserSelectedTherapistPlan(models.Model):
     selected_on = models.DateTimeField(blank=True, null=True)
 
     class Meta:
-        managed = False
+        managed = True
         db_table = "tbl_user_selected_therapist_plan"
+
+
+class HomeCard(models.Model):
+    id = models.AutoField(primary_key=True)
+    title = models.CharField(max_length=255, blank=True, null=True)
+    description = models.TextField(blank=True, null=True)
+    img_url_path = models.CharField(max_length=255, blank=True, null=True)
+    is_active = models.IntegerField(default=1)
+    position = models.IntegerField(default=0)
+    card_type = models.CharField(max_length=50, blank=True, null=True)
+
+    class Meta:
+        managed = True
+        db_table = "tbl_home_card"
+
+
+class DailyJournal(models.Model):
+    id = models.AutoField(primary_key=True)
+    entry_date = models.DateField(auto_now_add=True)
+    journal = models.TextField(blank=True, null=True)
+    question_id = models.IntegerField(blank=True, null=True)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, db_column="created_by_id", related_name="daily_journals")
+
+    class Meta:
+        managed = True
+        db_table = "tbl_daily_journal"
+
+
+class DailyCheckinQuestion(models.Model):
+    id = models.AutoField(primary_key=True)
+    question = models.TextField(blank=True, null=True)
+    is_active = models.IntegerField(default=1)
+
+    class Meta:
+        managed = True
+        db_table = "tbl_daily_checkin_question"
+
+
+class DailyCheckinAnswer(models.Model):
+    id = models.AutoField(primary_key=True)
+    question_id = models.IntegerField(blank=True, null=True)
+    answer = models.TextField(blank=True, null=True)
+
+    class Meta:
+        managed = True
+        db_table = "tbl_daily_checkin_answer"
+
+
+class DailyCheckinQuestionAndAnswer(models.Model):
+    id = models.AutoField(primary_key=True)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, db_column="created_by_id", related_name="daily_qnas")
+    qna_map = models.JSONField(blank=True, null=True)
+    entry_date = models.DateField(auto_now_add=True)
+
+    class Meta:
+        managed = True
+        db_table = "tbl_daily_checkin_question_and_answer"
+
+
+class UserAppReview(models.Model):
+    id = models.AutoField(primary_key=True)
+    rating = models.IntegerField(blank=True, null=True)
+    review = models.TextField(blank=True, null=True)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, db_column="created_by_id", related_name="app_reviews")
+
+    class Meta:
+        managed = True
+        db_table = "tbl_user_app_review"
+
+
+class ChatsHistory(models.Model):
+    id = models.AutoField(primary_key=True)
+    user_id = models.IntegerField(blank=True, null=True)
+    chats_message = models.TextField(blank=True, null=True)
+    created_on = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        managed = True
+        db_table = "tbl_chats_history"
+
+
+class ApiAccessToken(models.Model):
+    id = models.AutoField(primary_key=True)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, db_column="created_by_id", related_name="api_access_tokens")
+    device_token = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        managed = True
+        db_table = "tbl_api_access_token"
+

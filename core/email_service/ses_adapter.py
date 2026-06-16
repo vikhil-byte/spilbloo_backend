@@ -8,7 +8,7 @@ class SESEmailAdapter(BaseEmailAdapter):
     """
     Direct AWS SES API email client using boto3 SDK.
     """
-    def send_email(self, subject: str, body: str, to_email: str, from_email: str = None) -> bool:
+    def send_email(self, subject: str, body: str, to_email: str, from_email: str = None, html_body: str = None) -> bool:
         try:
             import boto3
         except ImportError:
@@ -35,17 +35,24 @@ class SESEmailAdapter(BaseEmailAdapter):
                 # Fallback to IAM Instance Profile/Role or local AWS credentials file
                 client = boto3.client('ses', region_name=region_name)
 
+            message_body = {
+                'Text': {
+                    'Charset': 'UTF-8',
+                    'Data': body,
+                }
+            }
+            if html_body:
+                message_body['Html'] = {
+                    'Charset': 'UTF-8',
+                    'Data': html_body,
+                }
+
             response = client.send_email(
                 Destination={
                     'ToAddresses': [to_email],
                 },
                 Message={
-                    'Body': {
-                        'Text': {
-                            'Charset': 'UTF-8',
-                            'Data': body,
-                        },
-                    },
+                    'Body': message_body,
                     'Subject': {
                         'Charset': 'UTF-8',
                         'Data': subject,
@@ -58,3 +65,4 @@ class SESEmailAdapter(BaseEmailAdapter):
         except Exception as e:
             logger.exception("AWS SES API Email sending failed to %s: %s", to_email, str(e))
             return False
+

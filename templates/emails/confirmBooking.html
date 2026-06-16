@@ -1,0 +1,22 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="font-family: 'Crimson Pro', Georgia, serif; color: #1A2E26; margin: 0 0 16px 0; font-size: 24px; font-weight: 700; line-height: 1.2;">Video Session Confirmed</h2>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 20px 0;">Your video session with {{ therapist_name }} has been confirmed!</p>
+
+<div style="background-color: #E8F3EF; border: 1px solid rgba(76, 167, 123, 0.2); border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 24px;">
+  <p style="margin: 0 0 4px 0; font-size: 18px; font-weight: 700; color: #2F6C52;">
+    {{ session_date }}
+  </p>
+  <p style="margin: 0; font-size: 16px; font-weight: 600; color: #6B7C75;">
+    {{ session_start_time }} &bull; 45 mins
+  </p>
+</div>
+
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">The video room will be activated 5 minutes prior to the scheduled time on the app.</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">To make the most out of your session, we request you to be on time.</p>
+<p style="color: #6B7C75; font-size: 14px; line-height: 22px; margin: 0; padding-top: 12px; border-top: 1px solid #E8F3EF;">
+  You can reschedule on the app, if needed, once up to 24 hours before the start time.<br>
+  In case of a no-show, the session will be non-refundable.
+</p>
+{% endblock %}

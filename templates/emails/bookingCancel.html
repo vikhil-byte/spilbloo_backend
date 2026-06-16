@@ -1,0 +1,17 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="font-family: 'Crimson Pro', Georgia, serif; color: #1A2E26; margin: 0 0 16px 0; font-size: 24px; font-weight: 700; line-height: 1.2;">Video Session Cancelled</h2>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 12px 0; font-weight: 500;">Hi {{ first_name }},</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 20px 0;">Unfortunately, {{ therapist_name }} had to cancel your video session that was scheduled for:</p>
+
+<div style="background-color: #E8F3EF; border: 1px solid rgba(76, 167, 123, 0.2); border-radius: 12px; padding: 16px; text-align: center; margin-bottom: 20px;">
+  <p style="margin: 0; font-size: 16px; font-weight: 700; color: #2F6C52;">
+    {{ session_date }} ({{ session_day }})<br>
+    {{ session_start_time }} – {{ session_end_time }}
+  </p>
+</div>
+
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">Worry not, your video credit has been refunded back to your account!</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0;">You can connect with {{ therapist_name }} to find a suitable time to schedule your next session.</p>
+{% endblock %}
