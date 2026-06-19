@@ -255,6 +255,8 @@ def _legacy_user_detail(user):
         "is_buy_video_credits": False,
         "video_credits": 0,
         "subscribed_plan": subscribed_plan or {},
+        "language": getattr(user, "language", "") or "",
+        "affirmation_for_the_day": user.get_affirmation_for_the_day(),
     }
 
 class RegisterView(generics.CreateAPIView):
@@ -693,7 +695,77 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
 
-        data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+        raw_data = request.data
+        
+        # Helper to get parameter by checking multiple legacy keys
+        def get_val(field_name):
+            # Check keys: field_name, User[field_name], User[field_name]:, User[field_name] 
+            keys_to_try = [
+                field_name,
+                f"User[{field_name}]",
+                f"User[{field_name}]:",
+                f"User[{field_name}] ",
+            ]
+            for k in keys_to_try:
+                if k in raw_data:
+                    return raw_data[k]
+            
+            user_dict = raw_data.get("User")
+            if isinstance(user_dict, dict):
+                return user_dict.get(field_name)
+            return None
+
+        # Extract normalized fields
+        full_name = get_val("full_name")
+        first_name = get_val("first_name")
+        last_name = get_val("last_name")
+        gender = get_val("gender")
+        therapist_gender = get_val("therapist_gender")
+        dob = get_val("date_of_birth") or get_val("dob")
+        email = get_val("email")
+        contact_no = get_val("contact_no") or get_val("phoneNumber")
+        longitude = get_val("longitude")
+        latitude = get_val("latitude")
+        address = get_val("address")
+        city = get_val("city")
+        country = get_val("country")
+        zipcode = get_val("zipcode")
+
+        # Update the model instance fields directly
+        if full_name is not None:
+            instance.full_name = full_name
+        if first_name is not None:
+            instance.first_name = first_name
+        if last_name is not None:
+            instance.last_name = last_name
+        if gender is not None:
+            try:
+                instance.gender = int(gender)
+            except (ValueError, TypeError):
+                pass
+        if therapist_gender is not None:
+            try:
+                instance.therapist_gender = int(therapist_gender)
+            except (ValueError, TypeError):
+                pass
+        if dob is not None:
+            instance.date_of_birth = dob if (dob and str(dob).strip() and str(dob).strip() != "<null>") else None
+        if email is not None:
+            instance.email = _normalize_email(email)
+        if contact_no is not None:
+            instance.contact_no = contact_no
+        if longitude is not None:
+            instance.longitude = longitude
+        if latitude is not None:
+            instance.latitude = latitude
+        if address is not None:
+            instance.address = address
+        if city is not None:
+            instance.city = city
+        if country is not None:
+            instance.country = country
+        if zipcode is not None:
+            instance.zipcode = zipcode
 
         # Handle profile file upload (key may be 'profile_file' or 'User[profile_file]')
         profile_file = request.FILES.get('profile_file') or request.FILES.get('User[profile_file]')
@@ -703,17 +775,20 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
             filename = f"user-{instance.id}-profile-{profile_file.name}"
             s3_key = upload_to_s3(profile_file, filename)
             if s3_key:
-                data['profile_file'] = s3_key
+                instance.profile_file = s3_key
             else:
                 return Response({"error": "S3 upload failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        serializer = self.get_serializer(instance, data=data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
+        instance.save()
 
         return Response({
-            "detail": serializer.data
+            "detail": _legacy_user_detail(instance)
         }, status=status.HTTP_200_OK)
+
+    def post(self, request, *args, **kwargs):
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
+
 
 
 class UserImageView(APIView):

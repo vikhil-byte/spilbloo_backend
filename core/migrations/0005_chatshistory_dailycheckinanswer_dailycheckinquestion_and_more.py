@@ -12,9 +12,7 @@ class Migration(migrations.Migration):
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
-    operations = [
-        migrations.SeparateDatabaseAndState(
-            state_operations=[
+    state_ops = [
                 migrations.CreateModel(
                     name='ChatsHistory',
                     fields=[
@@ -128,7 +126,11 @@ class Migration(migrations.Migration):
                         'managed': True,
                     },
                 ),
-            ],
-            database_operations=[]
+    ]
+
+    operations = [
+        migrations.SeparateDatabaseAndState(
+            state_operations=state_ops,
+            database_operations=state_ops
         )
     ]

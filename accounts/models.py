@@ -80,6 +80,20 @@ class User(AbstractUser):
     is_available = models.BooleanField(default=True)
     token = models.CharField(max_length=255, default='', blank=True, null=True)
 
+    therapist_gender = models.IntegerField(default=0, blank=True, null=True)
+    doctor_id = models.IntegerField(blank=True, null=True)
+    doctor_assigned_time = models.DateTimeField(blank=True, null=True)
+    video_credit = models.CharField(max_length=16, default='0', blank=True, null=True)
+    age_group = models.CharField(max_length=16, blank=True, null=True)
+    designation = models.IntegerField(blank=True, null=True)
+    push_enabled = models.SmallIntegerField(default=1, blank=True, null=True)
+    email_enabled = models.SmallIntegerField(default=1, blank=True, null=True)
+    consent_accepted_on = models.DateTimeField(blank=True, null=True)
+    is_consent_accept = models.IntegerField(default=0, blank=True, null=True)
+    otp = models.IntegerField(blank=True, null=True)
+    otp_verified = models.IntegerField(default=0, blank=True, null=True)
+    email_verified = models.SmallIntegerField(default=0, blank=True, null=True)
+
     last_visit_time = models.DateTimeField(blank=True, null=True)
     last_action_time = models.DateTimeField(blank=True, null=True)
     last_password_change = models.DateTimeField(blank=True, null=True)
@@ -102,6 +116,24 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.full_name or self.email
+
+    def get_affirmation_for_the_day(self):
+        affirmations = [
+            "I prioritize self-care and nurture my mental well-being.",
+            "I release stress and anxiety, replacing them with inner peace.",
+            "I am in control of my thoughts and choose positivity.",
+            "I practice mindfulness and stay present in the moment.",
+            "I embrace my emotions and allow myself to feel.",
+            "I am resilient and can overcome any challenges.",
+            "I am worthy of love, compassion, and self-acceptance.",
+            "I seek help and support when needed, knowing it's a sign of strength.",
+            "I let go of past burdens and forgive myself.",
+            "I trust in the journey of healing and growth."
+        ]
+        import datetime
+        day_of_year = datetime.datetime.now().timetuple().tm_yday
+        selected_index = day_of_year % len(affirmations)
+        return affirmations[selected_index]
 
 class HaLogins(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ha_logins', db_column='user_id_fk', blank=True, null=True) 

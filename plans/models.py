@@ -20,6 +20,7 @@ class Plan(models.Model):
     state_id = models.IntegerField(default=1) # 1=Active
     is_recommended = models.IntegerField(default=0)
     incentive_days = models.IntegerField(default=0)
+    video_description = models.TextField(null=True, blank=True)
 
     class Meta:
         db_table = 'tbl_plan'

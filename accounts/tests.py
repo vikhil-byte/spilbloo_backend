@@ -101,3 +101,76 @@ class ForgotResetPasswordTests(APITestCase):
         )
         self.assertEqual(expired.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(expired.data["error"], "Invalid reset link.")
+
+
+class LanguageAndAffirmationTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="patient_lang@spilbloo.local",
+            password="Pass@123",
+            full_name="Patient Lang",
+            role_id=4,  # Patient role
+            state_id=User.STATE_ACTIVE,
+            language="es",
+            activation_key="testtoken123"
+        )
+
+    def test_user_serializer_contains_language(self):
+        from accounts.serializers import UserSerializer
+        serializer = UserSerializer(self.user)
+        self.assertIn("language", serializer.data)
+        self.assertEqual(serializer.data["language"], "es")
+
+        # Test normalization of null language to empty string
+        self.user.language = None
+        self.user.save()
+        serializer_null = UserSerializer(self.user)
+        self.assertEqual(serializer_null.data["language"], "")
+
+    def test_legacy_user_detail_contains_language_and_affirmation(self):
+        from accounts.views import _legacy_user_detail
+        detail = _legacy_user_detail(self.user)
+        self.assertIn("language", detail)
+        self.assertEqual(detail["language"], "es")
+        self.assertIn("affirmation_for_the_day", detail)
+        self.assertTrue(len(detail["affirmation_for_the_day"]) > 0)
+
+    def test_cards_view_response_contains_affirmation(self):
+        from unittest.mock import patch
+        with patch("core.models.HomeCard.objects.filter") as mock_filter:
+            mock_filter.return_value = []
+            self.client.credentials(HTTP_AUTHORIZATION="Bearer testtoken123", HTTP_USER_ID=str(self.user.id))
+            response = self.client.get("/node/cards")
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertIn("results", response.data)
+            self.assertIn("affirmation", response.data["results"])
+            self.assertIn("cards", response.data["results"])
+            self.assertTrue(len(response.data["results"]["affirmation"]) > 0)
+
+    def test_daily_qna_contains_questions_and_opinions(self):
+        from core.models import DailyCheckinQuestion, DailyCheckinAnswer
+        q = DailyCheckinQuestion.objects.create(question="How do you feel today?", is_active=1)
+        ans = DailyCheckinAnswer.objects.create(question_id=q.id, answer="Good", score=5, journal_question_id=1)
+        
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer testtoken123", HTTP_USER_ID=str(self.user.id))
+        response = self.client.get("/node/daily-qna")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("results", response.data)
+        self.assertIn("question_and_answers", response.data["results"])
+        
+        qnas = response.data["results"]["question_and_answers"]
+        self.assertTrue(len(qnas) > 0)
+        
+        first_q = qnas[0]
+        self.assertEqual(first_q["id"], q.id)
+        self.assertEqual(first_q["question"], "How do you feel today?")
+        self.assertIn("created_on", first_q)
+        self.assertIn("answers", first_q)
+        
+        first_ans = first_q["answers"][0]
+        self.assertEqual(first_ans["id"], ans.id)
+        self.assertEqual(first_ans["answer"], "Good")
+        self.assertEqual(first_ans["score"], 5)
+        self.assertEqual(first_ans["journal_question_id"], 1)
+        self.assertIn("created_on", first_ans)
+

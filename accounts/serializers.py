@@ -11,7 +11,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id', 'email', 'full_name', 'first_name', 'last_name', 'role_id', 'contact_no', 'address', 'city', 'country', 'profile_file')
+        fields = ('id', 'email', 'full_name', 'first_name', 'last_name', 'role_id', 'contact_no', 'address', 'city', 'country', 'profile_file', 'language')
 
     def get_profile_file(self, obj):
         if not obj.profile_file:
@@ -28,7 +28,7 @@ class UserSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
         # Prevent iOS/Swift force-unwrap crashes by turning null string values into empty strings
-        for key in ('email', 'full_name', 'first_name', 'last_name', 'contact_no', 'address', 'city', 'country', 'profile_file'):
+        for key in ('email', 'full_name', 'first_name', 'last_name', 'contact_no', 'address', 'city', 'country', 'profile_file', 'language'):
             if key in data and data[key] is None:
                 data[key] = ""
         return data

@@ -118,7 +118,11 @@ class CardsView(NodeBaseAPIView):
                 }
                 for card in results
             ]
-            return Response(node_success("OK", {"cards": processed}, 200), status=200)
+            if request.user and hasattr(request.user, "get_affirmation_for_the_day"):
+                affirmation = request.user.get_affirmation_for_the_day()
+            else:
+                affirmation = User().get_affirmation_for_the_day()
+            return Response(node_success("OK", {"cards": processed, "affirmation": affirmation}, 200), status=200)
         except Exception as exc:
             return Response(node_error(str(exc), 500), status=500)
 
@@ -175,10 +179,18 @@ class DailyQnAView(NodeBaseAPIView):
 
             question_map = {}
             for q in questions:
+                if q.get("created_on"):
+                    q["created_on"] = q["created_on"].strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    q["created_on"] = ""
                 q["answers"] = []
                 question_map[q["id"]] = q
 
             for ans in answers:
+                if ans.get("created_on"):
+                    ans["created_on"] = ans["created_on"].strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    ans["created_on"] = ""
                 qid = ans.get("question_id")
                 if qid in question_map:
                     question_map[qid]["answers"].append(ans)
@@ -186,7 +198,7 @@ class DailyQnAView(NodeBaseAPIView):
             qna_response = list(question_map.values())
             return Response(node_success("OK", {"question_and_answers": qna_response}, 200), status=200)
         except Exception as exc:
-            return Response(node_error("Error fetching check-in Q&A", 500), status=500)
+            return Response(node_error("Error fetching check-in Q&A: " + str(exc), 500), status=500)
 
 
 class AddUserAnswersView(NodeBaseAPIView):
