@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 
 User = settings.AUTH_USER_MODEL
 
@@ -1013,7 +1014,7 @@ class DailyCheckinQuestion(models.Model):
     id = models.AutoField(primary_key=True)
     question = models.TextField(blank=True, null=True)
     is_active = models.IntegerField(default=1)
-    created_on = models.DateTimeField(auto_now_add=True)
+    created_on = models.DateTimeField(default=timezone.now)
 
     class Meta:
         managed = True
@@ -1026,7 +1027,7 @@ class DailyCheckinAnswer(models.Model):
     answer = models.TextField(blank=True, null=True)
     score = models.IntegerField(default=0)
     journal_question_id = models.IntegerField(blank=True, null=True)
-    created_on = models.DateTimeField(auto_now_add=True)
+    created_on = models.DateTimeField(default=timezone.now)
 
     class Meta:
         managed = True
