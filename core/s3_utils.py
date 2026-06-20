@@ -38,3 +38,24 @@ def upload_to_s3(file_obj, object_name):
     except Exception as e:
         logger.exception("S3 upload failed: %s", str(e))
         return None
+
+
+def get_file_url(file_path):
+    if not file_path:
+        return None
+    if file_path.startswith('http://') or file_path.startswith('https://'):
+        return file_path
+    
+    bucket_name = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', '')
+    if bucket_name:
+        public_url = getattr(settings, 'AWS_S3_PUBLIC_URL', None) or getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+        if public_url:
+            base_url = public_url.rstrip('/')
+            return f"{base_url}/{bucket_name}/{file_path}"
+    
+    from django.core.files.storage import default_storage
+    try:
+        return default_storage.url(file_path)
+    except Exception:
+        return f"/media/{file_path}"
+

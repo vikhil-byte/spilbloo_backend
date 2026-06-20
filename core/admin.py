@@ -3,7 +3,7 @@ from .models import (
     TherapistEarning, ContactForm, DoctorReason, Symptom, DoctorRequest,
     Feed, EmergencyResource, AgeGroup, AssignedTherapist, BestDoctor,
     VideoPlan, VideoCoupon, CouponUser, SubscribedVideo, UserSymptom,
-    Currency, RefundLog, Invoice, HomeContent, LoginHistory
+    Currency, RefundLog, Invoice, HomeContent, LoginHistory, TherapistApplication
 )
 
 # Register your models here.
@@ -27,3 +27,47 @@ admin.site.register(RefundLog)
 admin.site.register(Invoice)
 admin.site.register(HomeContent)
 admin.site.register(LoginHistory)
+from django.utils.html import format_html
+from core.s3_utils import get_file_url
+
+@admin.register(TherapistApplication)
+class TherapistApplicationAdmin(admin.ModelAdmin):
+    list_display = ('name', 'email', 'contact_no', 'qualification', 'rci_registered', 'state_id', 'consent_given', 'consent_date_time', 'created_on', 'view_resume', 'view_certs')
+    list_filter = ('state_id', 'rci_registered', 'qualification', 'consent_given', 'created_on')
+    search_fields = ('name', 'email', 'contact_no', 'address', 'qualification')
+    ordering = ('-created_on',)
+    
+    readonly_fields = ('created_on', 'consent_date_time')
+    
+    fieldsets = (
+        ('Personal Info', {
+            'fields': ('name', 'email', 'contact_no', 'address', 'linkedin_profile')
+        }),
+        ('Professional Credentials', {
+            'fields': ('experience', 'qualification', 'rci_registered', 'employment_status', 'modalities')
+        }),
+        ('Availability & Details', {
+            'fields': ('hours_available', 'days_available', 'motivation', 'distress_situation')
+        }),
+        ('Attachments', {
+            'fields': ('resume_file', 'certifications_file')
+        }),
+        ('Status', {
+            'fields': ('state_id', 'type_id', 'consent_given', 'consent_date_time', 'created_on', 'created_by')
+        }),
+    )
+
+    def view_resume(self, obj):
+        url = get_file_url(obj.resume_file)
+        if url:
+            return format_html('<a href="{}" target="_blank">📄 Resume</a>', url)
+        return "-"
+    view_resume.short_description = 'Resume'
+
+    def view_certs(self, obj):
+        url = get_file_url(obj.certifications_file)
+        if url:
+            return format_html('<a href="{}" target="_blank">📜 Certs</a>', url)
+        return "-"
+    view_certs.short_description = 'Certifications'
+

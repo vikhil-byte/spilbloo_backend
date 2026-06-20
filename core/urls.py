@@ -8,7 +8,7 @@ from .views import (
     CouponUserViewSet, SubscribedVideoViewSet, UserSymptomViewSet,
     SettingViewSet, DisclaimerViewSet, PushNotificationViewSet, 
     FileViewSet, CurrencyViewSet, RefundLogViewSet, InvoiceViewSet, 
-    HomeContentViewSet, LoginHistoryViewSet
+    HomeContentViewSet, LoginHistoryViewSet, TherapistApplicationViewSet
 )
 
 router = DefaultRouter()
@@ -36,6 +36,7 @@ router.register(r'refund-logs', RefundLogViewSet)
 router.register(r'invoices', InvoiceViewSet)
 router.register(r'home-contents', HomeContentViewSet)
 router.register(r'login-histories', LoginHistoryViewSet)
+router.register(r'therapist-applications', TherapistApplicationViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),

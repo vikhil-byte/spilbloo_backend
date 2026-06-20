@@ -34,4 +34,5 @@ urlpatterns = [
     path("api/call/", include("calls.urls")),
     path("api/notification/", include("accounts.urls_notification")),
     path("node/", include("core.urls_node")),
+    path("api/core/", include("core.urls")),
 ]

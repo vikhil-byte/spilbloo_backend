@@ -4,7 +4,7 @@ from .models import (
     Feed, EmergencyResource, AgeGroup, AssignedTherapist, BestDoctor,
     VideoPlan, VideoCoupon, CouponUser, SubscribedVideo, UserSymptom,
     Setting, Disclaimer, PushNotification, File, Currency, RefundLog, 
-    Invoice, HomeContent, LoginHistory, Page, Category, Faq
+    Invoice, HomeContent, LoginHistory, Page, Category, Faq, TherapistApplication
 )
 
 class TherapistEarningSerializer(serializers.ModelSerializer):
@@ -142,3 +142,14 @@ class FaqSerializer(serializers.ModelSerializer):
     class Meta:
         model = Faq
         fields = '__all__'
+
+class TherapistApplicationSerializer(serializers.ModelSerializer):
+    resume_file = serializers.FileField(required=True, write_only=True)
+    certifications_file = serializers.FileField(required=False, allow_null=True, write_only=True)
+    resume_file_path = serializers.CharField(source='resume_file', read_only=True)
+    certifications_file_path = serializers.CharField(source='certifications_file', read_only=True)
+
+    class Meta:
+        model = TherapistApplication
+        fields = '__all__'
+

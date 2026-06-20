@@ -685,3 +685,77 @@ def generate_un_limited_coupon_invoice():
         invoice.state_id = 1 # INITIATED
         invoice.save(update_fields=['state_id'])
         logger.info(f"Generated Unlimited Invoice for {invoice.coupon_code}")
+
+
+@shared_task
+def send_therapist_application_emails(application_id):
+    """
+    Asynchronously sends confirmation email to the applicant and 
+    notification email to founder@spilbloo.com for therapist application.
+    """
+    from core.models import TherapistApplication
+    from core.email_service import get_email_client
+    from django.conf import settings
+    from django.template.loader import render_to_string
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Running send_therapist_application_emails task for app: {application_id}")
+
+    try:
+        instance = TherapistApplication.objects.get(id=application_id)
+    except TherapistApplication.DoesNotExist:
+        logger.error(f"TherapistApplication with ID {application_id} does not exist.")
+        return
+
+    try:
+        # 1. Email to Applicant
+        subject = "Thank you for your application to Spilbloo"
+        context = {"name": instance.name}
+        html_content = render_to_string("emails/therapist_application_confirmation.html", context)
+        
+        from django.utils.html import strip_tags
+        body = strip_tags(html_content).strip()
+        
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
+        client = get_email_client()
+        
+        client.send_email(
+            subject=subject,
+            body=body,
+            to_email=instance.email,
+            from_email=from_email,
+            html_body=html_content
+        )
+        logger.info("Sent confirmation email to applicant: %s", instance.email)
+
+        # 2. Email to Founder/Admin
+        subject_admin = f"New Therapist Application - {instance.name}"
+        body_admin = f"A new therapist application has been submitted by {instance.name} ({instance.email}). Please check the admin dashboard for details."
+        
+        context_admin = {
+            "name": instance.name,
+            "email": instance.email,
+            "contact_no": instance.contact_no,
+            "address": instance.address,
+            "experience": instance.experience,
+            "qualification": instance.qualification,
+            "rci_registered": instance.rci_registered,
+            "employment_status": instance.employment_status,
+            "hours_available": instance.hours_available,
+            "days_available": instance.days_available,
+            "linkedin_profile": instance.linkedin_profile
+        }
+        html_content_admin = render_to_string("emails/therapist_application_notification_admin.html", context_admin)
+        
+        client.send_email(
+            subject=subject_admin,
+            body=body_admin,
+            to_email="founder@spilbloo.com",
+            from_email=from_email,
+            html_body=html_content_admin
+        )
+        logger.info("Sent notification email to founder@spilbloo.com")
+    except Exception as e:
+        logger.exception("Failed to send therapist application emails: %s", str(e))
+

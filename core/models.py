@@ -1076,3 +1076,51 @@ class ApiAccessToken(models.Model):
         managed = True
         db_table = "tbl_api_access_token"
 
+
+class TherapistApplication(models.Model):
+    STATE_INACTIVE = 0
+    STATE_ACCEPT = 1
+    STATE_REJECT = 2
+    STATE_ADD = 3
+
+    STATE_CHOICES = (
+        (STATE_INACTIVE, 'New'),
+        (STATE_ACCEPT, 'Accept'),
+        (STATE_REJECT, 'Reject'),
+        (STATE_ADD, 'Added'),
+    )
+
+    name = models.CharField(max_length=256)
+    email = models.EmailField(max_length=255)
+    contact_no = models.CharField(max_length=32)
+    address = models.CharField(max_length=512)
+    experience = models.CharField(max_length=64)
+    qualification = models.CharField(max_length=128)
+    rci_registered = models.CharField(max_length=16) # "Yes" or "No"
+    employment_status = models.CharField(max_length=128)
+    modalities = models.TextField() # Modalities as comma separated string
+    hours_available = models.CharField(max_length=128)
+    days_available = models.CharField(max_length=128)
+    motivation = models.TextField()
+    distress_situation = models.TextField()
+    
+    resume_file = models.CharField(max_length=1024)
+    certifications_file = models.CharField(max_length=1024, blank=True, null=True)
+    linkedin_profile = models.CharField(max_length=1024, blank=True, null=True)
+
+    consent_given = models.BooleanField(default=False)
+    consent_date_time = models.DateTimeField(null=True, blank=True)
+
+    state_id = models.SmallIntegerField(choices=STATE_CHOICES, default=STATE_INACTIVE)
+    type_id = models.SmallIntegerField(default=0)
+
+    created_on = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_therapist_applications')
+
+    class Meta:
+        db_table = 'tbl_therapist_application'
+
+    def __str__(self):
+        return self.name
+
+
