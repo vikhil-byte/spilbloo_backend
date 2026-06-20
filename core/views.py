@@ -145,6 +145,11 @@ class TherapistApplicationViewSet(viewsets.ModelViewSet):
     permission_classes = [] # Allow public submissions
 
     def perform_create(self, serializer):
+        email = serializer.validated_data.get('email')
+        if TherapistApplication.objects.filter(email=email).exists():
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({"email": ["An application with this email address has already been submitted."]})
+
         request = self.request
         resume_file_obj = request.FILES.get('resume_file')
         certs_file_obj = request.FILES.get('certifications_file')

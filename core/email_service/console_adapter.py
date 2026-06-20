@@ -8,17 +8,18 @@ class ConsoleEmailAdapter(BaseEmailAdapter):
     Mock/Console email client that logs emails to standard output/logs.
     Useful for local development and testing.
     """
-    def send_email(self, subject: str, body: str, to_email: str, from_email: str = None, html_body: str = None) -> bool:
+    def send_email(self, subject: str, body: str, to_email: str, from_email: str = None, html_body: str = None, cc: list = None) -> bool:
         logger.info(
             "\n"
             "=================== CONSOLE EMAIL ADAPTER ===================\n"
             "From: %s\n"
             "To: %s\n"
+            "CC: %s\n"
             "Subject: %s\n"
             "Body:\n%s\n"
             "HTML Body:\n%s\n"
             "=============================================================",
-            from_email or "default", to_email, subject, body, html_body
+            from_email or "default", to_email, cc or "None", subject, body, html_body
         )
         return True
 

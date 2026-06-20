@@ -5,7 +5,7 @@ class BaseEmailAdapter(ABC):
     Abstract interface for all email service providers.
     """
     @abstractmethod
-    def send_email(self, subject: str, body: str, to_email: str, from_email: str = None, html_body: str = None) -> bool:
+    def send_email(self, subject: str, body: str, to_email: str, from_email: str = None, html_body: str = None, cc: list = None) -> bool:
         """
         Send an email.
         
