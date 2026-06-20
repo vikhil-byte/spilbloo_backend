@@ -9,7 +9,7 @@ from celery import shared_task
 # Django Models
 from availability.models import SlotBooking, Notification
 from accounts.models import User
-from core.models import RefundLog, Notification, PushNotification, TherapistEarning, AssignedTherapist
+from core.models import RefundLog, PushNotification, TherapistEarning, AssignedTherapist
 from plans.models import SubscribedPlan, Coupon
 from company.models import Company, CompanyCoupon, MonthlyInvoice, CouponInvoice
 from calls.models import Call
