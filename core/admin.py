@@ -3,7 +3,11 @@ from .models import (
     TherapistEarning, ContactForm, DoctorReason, Symptom, DoctorRequest,
     Feed, EmergencyResource, AgeGroup, AssignedTherapist, BestDoctor,
     VideoPlan, VideoCoupon, CouponUser, SubscribedVideo, UserSymptom,
-    Currency, RefundLog, Invoice, HomeContent, LoginHistory, TherapistApplication
+    Currency, RefundLog, Invoice, HomeContent, LoginHistory, TherapistApplication,
+    Setting, Disclaimer, PushNotification, File, Page, Category, Faq,
+    NodeSubscriptionPlan, NodeUserSelectedTherapistPlan, HomeCard, DailyJournal,
+    DailyCheckinQuestion, DailyCheckinAnswer, DailyCheckinQuestionAndAnswer,
+    UserAppReview, ChatsHistory, ApiAccessToken
 )
 
 # Register your models here.
@@ -27,6 +31,23 @@ admin.site.register(RefundLog)
 admin.site.register(Invoice)
 admin.site.register(HomeContent)
 admin.site.register(LoginHistory)
+admin.site.register(Setting)
+admin.site.register(Disclaimer)
+admin.site.register(PushNotification)
+admin.site.register(File)
+admin.site.register(Page)
+admin.site.register(Category)
+admin.site.register(Faq)
+admin.site.register(NodeSubscriptionPlan)
+admin.site.register(NodeUserSelectedTherapistPlan)
+admin.site.register(HomeCard)
+admin.site.register(DailyJournal)
+admin.site.register(DailyCheckinQuestion)
+admin.site.register(DailyCheckinAnswer)
+admin.site.register(DailyCheckinQuestionAndAnswer)
+admin.site.register(UserAppReview)
+admin.site.register(ChatsHistory)
+admin.site.register(ApiAccessToken)
 from django.utils.html import format_html
 from core.s3_utils import get_file_url
 
