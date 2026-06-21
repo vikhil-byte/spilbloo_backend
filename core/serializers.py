@@ -148,8 +148,19 @@ class TherapistApplicationSerializer(serializers.ModelSerializer):
     certifications_file = serializers.FileField(required=False, allow_null=True, write_only=True)
     resume_file_path = serializers.CharField(source='resume_file', read_only=True)
     certifications_file_path = serializers.CharField(source='certifications_file', read_only=True)
+    resume_url = serializers.SerializerMethodField()
+    certifications_url = serializers.SerializerMethodField()
 
     class Meta:
         model = TherapistApplication
         fields = '__all__'
+
+    def get_resume_url(self, obj):
+        from core.s3_utils import get_file_url
+        return get_file_url(obj.resume_file)
+
+    def get_certifications_url(self, obj):
+        from core.s3_utils import get_file_url
+        return get_file_url(obj.certifications_file)
+
 

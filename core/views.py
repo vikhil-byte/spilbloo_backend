@@ -139,10 +139,23 @@ class LoginHistoryViewSet(viewsets.ModelViewSet):
     serializer_class = LoginHistorySerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
 
+from rest_framework.permissions import BasePermission
+
+class HasTherapistApplicationAccess(BasePermission):
+    def has_permission(self, request, view):
+        return request.user and request.user.is_authenticated and (
+            request.user.is_staff or 
+            request.user.has_perm('core.view_therapistapplication')
+        )
+
 class TherapistApplicationViewSet(viewsets.ModelViewSet):
     queryset = TherapistApplication.objects.all()
     serializer_class = TherapistApplicationSerializer
-    permission_classes = [] # Allow public submissions
+
+    def get_permissions(self):
+        if self.action == 'create':
+            return []
+        return [HasTherapistApplicationAccess()]
 
     def perform_create(self, serializer):
         email = serializer.validated_data.get('email')
