@@ -499,7 +499,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 return legacy_version_gate_error
 
             # Role Check (Mirroring legacy behavior).
-            if int(user.role_id) != role_id:
+            if not user.is_staff and int(user.role_id) != role_id:
                 if role_id == User.ROLE_DOCTER:
                     return Response({"error": "You are not allowed to login in therapist section with user credentials."}, status=status.HTTP_400_BAD_REQUEST)
                 return Response({"error": "You are not allowed to login in user section with therapist credentials."}, status=status.HTTP_400_BAD_REQUEST)
