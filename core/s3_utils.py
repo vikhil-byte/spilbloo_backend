@@ -48,12 +48,23 @@ def get_file_url(file_path):
     
     bucket_name = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', '')
     if bucket_name:
-        public_url = getattr(settings, 'AWS_S3_PUBLIC_URL', None) or getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
-        if public_url:
-            base_url = public_url.rstrip('/')
-            if bucket_name in base_url:
-                return f"{base_url}/{file_path}"
-            return f"{base_url}/{bucket_name}/{file_path}"
+        try:
+            s3_client = get_s3_client()
+            # Generate a secure pre-signed URL valid for 1 hour (3600 seconds)
+            presigned_url = s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': bucket_name, 'Key': file_path},
+                ExpiresIn=3600
+            )
+            return presigned_url
+        except Exception as e:
+            logger.warning("Failed to generate S3 pre-signed URL, falling back to public URL: %s", str(e))
+            public_url = getattr(settings, 'AWS_S3_PUBLIC_URL', None) or getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+            if public_url:
+                base_url = public_url.rstrip('/')
+                if bucket_name in base_url:
+                    return f"{base_url}/{file_path}"
+                return f"{base_url}/{bucket_name}/{file_path}"
     
     from django.core.files.storage import default_storage
     try:
