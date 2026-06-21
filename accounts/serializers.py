@@ -8,10 +8,16 @@ class UserSerializer(serializers.ModelSerializer):
     profile_file = serializers.SerializerMethodField()
     first_name = serializers.SerializerMethodField()
     last_name = serializers.SerializerMethodField()
+    permissions = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ('id', 'email', 'full_name', 'first_name', 'last_name', 'role_id', 'contact_no', 'address', 'city', 'country', 'profile_file', 'language')
+        fields = ('id', 'email', 'full_name', 'first_name', 'last_name', 'role_id', 'contact_no', 'address', 'city', 'country', 'profile_file', 'language', 'is_superuser', 'is_staff', 'permissions')
+
+    def get_permissions(self, obj):
+        if obj.is_superuser:
+            return ["*"]
+        return list(obj.get_all_permissions())
 
     def get_profile_file(self, obj):
         if not obj.profile_file:
