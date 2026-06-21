@@ -84,6 +84,6 @@ class Migration(migrations.Migration):
     operations = [
         migrations.SeparateDatabaseAndState(
             state_operations=state_ops,
-            database_operations=state_ops if is_test else []
+            database_operations=state_ops
         )
     ]
