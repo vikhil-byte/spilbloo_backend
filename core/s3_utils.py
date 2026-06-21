@@ -51,6 +51,8 @@ def get_file_url(file_path):
         public_url = getattr(settings, 'AWS_S3_PUBLIC_URL', None) or getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
         if public_url:
             base_url = public_url.rstrip('/')
+            if bucket_name in base_url:
+                return f"{base_url}/{file_path}"
             return f"{base_url}/{bucket_name}/{file_path}"
     
     from django.core.files.storage import default_storage
