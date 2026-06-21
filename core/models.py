@@ -1069,8 +1069,13 @@ class ChatsHistory(models.Model):
 
 class ApiAccessToken(models.Model):
     id = models.AutoField(primary_key=True)
-    created_by = models.ForeignKey(User, on_delete=models.CASCADE, db_column="created_by_id", related_name="api_access_tokens")
-    device_token = models.CharField(max_length=255, blank=True, null=True)
+    access_token = models.CharField(max_length=256, default="")
+    device_token = models.CharField(max_length=256, default="")
+    device_name = models.CharField(max_length=256, blank=True, null=True)
+    device_type = models.CharField(max_length=256, default="")
+    type_id = models.IntegerField(default=0)
+    created_on = models.DateTimeField(default=timezone.now)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, db_column="created_by_id", related_name="api_access_tokens", null=True, blank=True)
 
     class Meta:
         managed = True
