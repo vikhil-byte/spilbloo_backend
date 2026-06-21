@@ -505,7 +505,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 return Response({"error": "You are not allowed to login in user section with therapist credentials."}, status=status.HTTP_400_BAD_REQUEST)
 
             # Legacy LoginForm.loginuser() blocks admin logins in API flow.
-            if user.role_id == User.ROLE_ADMIN:
+            if user.role_id == User.ROLE_ADMIN and not user.is_staff:
                 return Response({"error": "You are not allowed to login."}, status=status.HTTP_400_BAD_REQUEST)
 
             # Legacy branch parity:

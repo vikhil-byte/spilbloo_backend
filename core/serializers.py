@@ -151,6 +151,16 @@ class TherapistApplicationSerializer(serializers.ModelSerializer):
     resume_url = serializers.SerializerMethodField()
     certifications_url = serializers.SerializerMethodField()
 
+    # Frontend aliases and display mappings
+    state = serializers.CharField(source='get_state_id_display', read_only=True)
+    rciRegistered = serializers.CharField(source='rci_registered', read_only=True)
+    employmentStatus = serializers.CharField(source='employment_status', read_only=True)
+    hoursPerWeek = serializers.CharField(source='hours_available', read_only=True)
+    daysPerWeek = serializers.CharField(source='days_available', read_only=True)
+    whyInterested = serializers.CharField(source='motivation', read_only=True)
+    distressCase = serializers.CharField(source='distress_situation', read_only=True)
+    linkedin = serializers.CharField(source='linkedin_profile', read_only=True)
+
     class Meta:
         model = TherapistApplication
         fields = '__all__'
