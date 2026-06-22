@@ -181,10 +181,10 @@ class PlanListView(generics.ListAPIView):
         currency = self.request.query_params.get('currency', 'INR')
         qs = Plan.objects.filter(state_id=1, plan_type=0, type_id=0, currency_code=currency) # 0=Paid, 0=Visible
         
-        if str(type_id) == '1': # PLAN_VIDEO_AND_TEXT (Plus)
-            qs = qs.filter(no_of_video_session__gt=0)
-        elif str(type_id) == '2': # PLAN_TEXT (Lite)
+        if str(type_id) == '1': # PLAN_TEXT (Lite)
             qs = qs.filter(no_of_video_session=0)
+        elif str(type_id) == '2': # PLAN_VIDEO_AND_TEXT (Plus)
+            qs = qs.filter(no_of_video_session__gt=0)
             
         return qs.order_by('-is_recommended')
 
