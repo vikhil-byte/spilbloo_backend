@@ -9,10 +9,11 @@ class UserSerializer(serializers.ModelSerializer):
     first_name = serializers.SerializerMethodField()
     last_name = serializers.SerializerMethodField()
     permissions = serializers.SerializerMethodField()
+    affirmation_for_the_day = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ('id', 'email', 'full_name', 'first_name', 'last_name', 'role_id', 'contact_no', 'address', 'city', 'country', 'profile_file', 'language', 'is_superuser', 'is_staff', 'permissions')
+        fields = ('id', 'email', 'full_name', 'first_name', 'last_name', 'role_id', 'contact_no', 'address', 'city', 'country', 'profile_file', 'language', 'is_superuser', 'is_staff', 'permissions', 'affirmation_for_the_day')
 
     def get_permissions(self, obj):
         if obj.is_superuser:
@@ -31,10 +32,13 @@ class UserSerializer(serializers.ModelSerializer):
     def get_last_name(self, obj):
         return getattr(obj, "last_name", "") or ""
 
+    def get_affirmation_for_the_day(self, obj):
+        return obj.get_affirmation_for_the_day()
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         # Prevent iOS/Swift force-unwrap crashes by turning null string values into empty strings
-        for key in ('email', 'full_name', 'first_name', 'last_name', 'contact_no', 'address', 'city', 'country', 'profile_file', 'language'):
+        for key in ('email', 'full_name', 'first_name', 'last_name', 'contact_no', 'address', 'city', 'country', 'profile_file', 'language', 'affirmation_for_the_day'):
             if key in data and data[key] is None:
                 data[key] = ""
         return data
