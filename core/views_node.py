@@ -147,6 +147,12 @@ class AddJournalView(NodeBaseAPIView):
         question_id = request.data.get("question_id")
         created_by_id = request.data.get("created_by_id")
         entry_date = request.data.get("entry_date")
+        
+        logger.info(
+            "AddJournalView.post: journal=%s, question_id=%s, created_by_id=%s, entry_date=%s",
+            journal, question_id, created_by_id, entry_date
+        )
+        
         try:
             DailyJournal.objects.create(
                 entry_date=entry_date,
@@ -154,8 +160,10 @@ class AddJournalView(NodeBaseAPIView):
                 question_id=question_id,
                 created_by_id=created_by_id,
             )
+            logger.info("AddJournalView.post success: journal created successfully")
             return Response(node_success("OK", {}, 200), status=200)
         except Exception as exc:
+            logger.exception("AddJournalView.post error creating journal entry: %s", str(exc))
             return Response(node_error(str(exc), 500), status=500)
 
 
