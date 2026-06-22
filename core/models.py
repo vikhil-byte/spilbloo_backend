@@ -1095,7 +1095,7 @@ class TherapistApplication(models.Model):
         (STATE_ADD, 'Added'),
     )
 
-    name = models.CharField(max_length=20)
+    name = models.CharField(max_length=30)
     email = models.EmailField(max_length=255)
     contact_no = models.CharField(max_length=32)
     address = models.CharField(max_length=512)
