@@ -1,10 +1,33 @@
 from django.contrib import admin
+from django import forms
 from .models import User, HaLogins
 
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
+class CustomUserCreationForm(forms.ModelForm):
+    password = forms.CharField(widget=forms.PasswordInput, required=True)
+
+    class Meta:
+        model = User
+        fields = ('email', 'password')
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        user.set_password(self.cleaned_data["password"])
+        if commit:
+            user.save()
+        return user
+
+class CustomUserChangeForm(forms.ModelForm):
+    class Meta:
+        model = User
+        fields = '__all__'
+
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
+    form = CustomUserChangeForm
+    add_form = CustomUserCreationForm
+    
     list_display = ('id', 'email', 'full_name', 'role_id', 'is_active', 'is_staff', 'date_joined')
     list_filter = ('is_active', 'is_staff', 'is_superuser', 'role_id', 'state_id')
     search_fields = ('email', 'full_name', 'contact_no')
