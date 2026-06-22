@@ -2,7 +2,8 @@ import json
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
 from core.models import (
-    Symptom, NodeSubscriptionPlan, HomeCard, DailyCheckinQuestion, DailyCheckinAnswer
+    Symptom, NodeSubscriptionPlan, HomeCard, DailyCheckinQuestion, DailyCheckinAnswer,
+    TherapistApplication
 )
 
 User = get_user_model()
@@ -99,6 +100,63 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("  + Seeded daily check-in Q&A questions."))
         else:
             self.stdout.write("  Daily check-in questions already seeded.")
+
+        # Seed Therapist Applications
+        self.stdout.write("Seeding therapist applications...")
+        if not TherapistApplication.objects.exists():
+            TherapistApplication.objects.create(
+                name='Dr. Aarav Mehta',
+                email='aarav.mehta@example.com',
+                contact_no='+919876543210',
+                address='Flat 402, Green Glen Layout, Bellandur, Bengaluru',
+                experience='5 years',
+                qualification="Master's Degree (Psychology)",
+                rci_registered='Yes',
+                employment_status='Self-employed / Private Practice',
+                modalities='Cognitive Behavioral Therapy (CBT), Trauma-Informed Care',
+                hours_available='20-30 hours',
+                days_available='Flexible (All days)',
+                motivation='I want to reach more people and provide convenient online counseling through Spilbloo.',
+                distress_situation='A client reached out in high distress. I acknowledged their feelings, slowed the conversation down, and guided them using calming ground techniques.',
+                linkedin_profile='https://linkedin.com/in/aaravmehta',
+                state_id=0, # New
+            )
+            TherapistApplication.objects.create(
+                name='Pooja Sharma',
+                email='pooja.sharma@example.com',
+                contact_no='+919999888777',
+                address='742 Evergreen Terrace, Mumbai',
+                experience='3 years',
+                qualification='M.Phil in Clinical Psychology',
+                rci_registered='Yes',
+                employment_status='Employed Full-time',
+                modalities='Acceptance and Commitment Therapy (ACT), Dialectical Behavior Therapy (DBT)',
+                hours_available='10-20 hours',
+                days_available='Weekends only',
+                motivation='Interested in working with a platform that values professional supervision and high-quality telehealth care.',
+                distress_situation='Used empathetic validation and crisis-escalation screening protocols in text format to ensure safety.',
+                linkedin_profile='https://linkedin.com/in/poojasharma',
+                state_id=1, # Accept
+            )
+            TherapistApplication.objects.create(
+                name='Vikram Singh',
+                email='vikram.singh@example.com',
+                contact_no='+919876543219',
+                address='Park Avenue, Block C, Delhi',
+                experience='Less than 1 year',
+                qualification="Bachelor's Degree",
+                rci_registered='No',
+                employment_status='Not currently employed',
+                modalities='Cognitive Behavioral Therapy (CBT)',
+                hours_available='30-40 hours',
+                days_available='Weekdays only',
+                motivation='Looking to start my professional journey in a supportive remote counseling environment.',
+                distress_situation='Helped client identify stressors and construct a self-care list during a challenging period.',
+                state_id=2, # Reject
+            )
+            self.stdout.write(self.style.SUCCESS("  + Seeded therapist applications."))
+        else:
+            self.stdout.write("  Therapist applications already seeded.")
 
         # Seed Therapist Users
         self.stdout.write("Creating therapist users...")
