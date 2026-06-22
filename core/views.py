@@ -157,6 +157,24 @@ class TherapistApplicationViewSet(viewsets.ModelViewSet):
             return []
         return [HasTherapistApplicationAccess()]
 
+    def perform_update(self, serializer):
+        instance = self.get_object()
+        old_state = instance.state_id
+        updated_instance = serializer.save()
+        new_state = updated_instance.state_id
+        
+        if old_state != new_state and new_state in [1, 2]:
+            try:
+                from core.tasks import send_therapist_application_status_email
+                send_therapist_application_status_email.delay(updated_instance.id, new_state)
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info("Queued therapist application status email (state: %s) for ID: %s", new_state, updated_instance.id)
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.exception("Failed to queue therapist application status email Celery task: %s", str(e))
+
     def perform_create(self, serializer):
         email = serializer.validated_data.get('email')
         if TherapistApplication.objects.filter(email=email).exists():

@@ -161,3 +161,21 @@ class TherapistApplicationAdmin(admin.ModelAdmin):
             return format_html('<a href="{}" target="_blank">📜 Certs</a>', url)
         return "-"
     view_certs.short_description = 'Certifications'
+
+    def save_model(self, request, obj, form, change):
+        old_state = None
+        if change:
+            try:
+                old_state = TherapistApplication.objects.get(pk=obj.pk).state_id
+            except TherapistApplication.DoesNotExist:
+                pass
+        super().save_model(request, obj, form, change)
+        if change and old_state != obj.state_id and obj.state_id in [1, 2]:
+            try:
+                from core.tasks import send_therapist_application_status_email
+                send_therapist_application_status_email.delay(obj.id, obj.state_id)
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.exception("Failed to queue therapist application status email Celery task from admin: %s", str(e))
+

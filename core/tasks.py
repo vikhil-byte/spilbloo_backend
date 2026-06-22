@@ -760,3 +760,54 @@ def send_therapist_application_emails(application_id):
     except Exception as e:
         logger.exception("Failed to send therapist application emails: %s", str(e))
 
+
+@shared_task
+def send_therapist_application_status_email(application_id, status_id):
+    """
+    Asynchronously sends accept (shortlisted) or reject email to the applicant.
+    """
+    from core.models import TherapistApplication
+    from core.email_service import get_email_client
+    from django.template.loader import render_to_string
+    from django.utils.html import strip_tags
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Running send_therapist_application_status_email task for app: {application_id}, status: {status_id}")
+
+    try:
+        instance = TherapistApplication.objects.get(id=application_id)
+    except TherapistApplication.DoesNotExist:
+        logger.error(f"TherapistApplication with ID {application_id} does not exist.")
+        return
+
+    try:
+        from_email = "career@spilbloo.com"
+        client = get_email_client()
+        context = {"name": instance.name}
+
+        if status_id == 1: # Accept
+            subject = "Your Application Has Been Shortlisted – Mental Health Therapist at Spilbloo"
+            html_content = render_to_string("emails/therapist_application_accepted.html", context)
+        elif status_id == 2: # Reject
+            subject = "Update on Your Application – Mental Health Therapist at Spilbloo"
+            html_content = render_to_string("emails/therapist_application_rejected.html", context)
+        else:
+            logger.warning(f"Unknown status_id {status_id} for application {application_id}")
+            return
+
+        body = strip_tags(html_content).strip()
+
+        client.send_email(
+            subject=subject,
+            body=body,
+            to_email=instance.email,
+            from_email=from_email,
+            html_body=html_content,
+            cc=["sarah@spilbloo.com"]
+        )
+        logger.info(f"Sent status email (status: {status_id}) to applicant: {instance.email} with CC: sarah@spilbloo.com")
+    except Exception as e:
+        logger.exception("Failed to send therapist application status email: %s", str(e))
+
+
