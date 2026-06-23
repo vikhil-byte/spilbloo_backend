@@ -385,8 +385,18 @@ class AuthenticateSubscriptionView(APIView):
             bool(transaction_id),
         )
         
-        razorpay_payment_id = request.data.get('razorpay_payment_id') or request.query_params.get('razorpay_payment_id')
-        razorpay_signature = request.data.get('razorpay_signature') or request.query_params.get('razorpay_signature')
+        razorpay_payment_id = (
+            request.data.get('razorpay_payment_id')
+            or request.data.get('SubscribedPlan[transaction_id]')
+            or request.data.get('transaction_id')
+            or request.query_params.get('razorpay_payment_id')
+        )
+        razorpay_signature = (
+            request.data.get('razorpay_signature')
+            or request.data.get('SubscribedPlan[signature]')
+            or request.data.get('signature')
+            or request.query_params.get('razorpay_signature')
+        )
 
         if _is_live_razorpay_subscription(sub_id):
             if not razorpay_payment_id or not razorpay_signature:
