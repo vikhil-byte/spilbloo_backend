@@ -327,6 +327,14 @@ class PatientBookingListView(generics.ListAPIView):
         b_type = self.request.query_params.get('type') # UPCOMING/COMPLETED
         patient_id = self.request.query_params.get('patient_id')
 
+        logger.info(
+            "Fetching patient booking list: doctor_id=%s, patient_id=%s, type=%s, user_id=%s",
+            doctor_id,
+            patient_id,
+            b_type,
+            getattr(self.request.user, "id", None)
+        )
+
         qs = SlotBooking.objects.filter(created_by_id=patient_id, doctor_id=doctor_id)
         if str(b_type) == '1': # UPCOMING
             qs = qs.filter(state_id__in=[2, 3]) # REQUEST, ACCEPT

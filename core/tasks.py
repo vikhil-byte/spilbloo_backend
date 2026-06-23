@@ -717,7 +717,7 @@ def send_therapist_application_emails(application_id):
         from django.utils.html import strip_tags
         body = strip_tags(html_content).strip()
         
-        from_email = "career@spilbloo.com"
+        from_email = "careers@spilbloo.com"
         client = get_email_client()
         
         client.send_email(
@@ -751,12 +751,12 @@ def send_therapist_application_emails(application_id):
         client.send_email(
             subject=subject_admin,
             body=body_admin,
-            to_email="career@spilbloo.com",
+            to_email="careers@spilbloo.com",
             from_email=from_email,
             html_body=html_content_admin,
             cc=["sarah@spilbloo.com"]
         )
-        logger.info("Sent notification email to career@spilbloo.com (CC: sarah@spilbloo.com)")
+        logger.info("Sent notification email to careers@spilbloo.com (CC: sarah@spilbloo.com)")
     except Exception as e:
         logger.exception("Failed to send therapist application emails: %s", str(e))
 
@@ -782,7 +782,7 @@ def send_therapist_application_status_email(application_id, status_id):
         return
 
     try:
-        from_email = "career@spilbloo.com"
+        from_email = "careers@spilbloo.com"
         client = get_email_client()
         context = {"name": instance.name}
 
