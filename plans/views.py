@@ -384,6 +384,7 @@ class AuthenticateSubscriptionView(APIView):
             sub_id,
             bool(transaction_id),
         )
+        logger.info("authenticate-subscription params: data=%s query_params=%s", request.data, request.query_params)
         
         razorpay_payment_id = (
             request.data.get('razorpay_payment_id')
@@ -398,15 +399,20 @@ class AuthenticateSubscriptionView(APIView):
             or request.query_params.get('razorpay_signature')
         )
 
+        logger.info("authenticate-subscription extracted: razorpay_payment_id=%s razorpay_signature=%s", razorpay_payment_id, razorpay_signature)
+
         if _is_live_razorpay_subscription(sub_id):
             if not razorpay_payment_id or not razorpay_signature:
+                logger.warning("authenticate-subscription validation failed: missing signature or payment_id")
                 return Response({"error": "Payment verification failed."}, status=status.HTTP_400_BAD_REQUEST)
             try:
-                razorpay_client.utility.verify_payment_signature({
+                logger.info("authenticate-subscription verifying signature for sub_id=%s", sub_id)
+                razorpay_client.utility.verify_subscription_payment_signature({
                     'razorpay_subscription_id': sub_id,
                     'razorpay_payment_id': razorpay_payment_id,
                     'razorpay_signature': razorpay_signature
                 })
+                logger.info("authenticate-subscription verification successful")
             except Exception as e:
                 logger.warning("authenticate-subscription signature verification failed: %s", str(e))
                 return Response({"error": "Payment verification failed."}, status=status.HTTP_400_BAD_REQUEST)
