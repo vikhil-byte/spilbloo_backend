@@ -342,6 +342,15 @@ class PatientBookingListView(generics.ListAPIView):
             qs = qs.filter(state_id__in=[4, 5]) # CANCELLED, COMPLETED
         return qs.order_by('-id')
 
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        logger.info(
+            "PatientBookingListView response: status_code=%s, data=%s",
+            response.status_code,
+            response.data
+        )
+        return response
+
 class DoctorBookingReqView(generics.ListAPIView):
     permission_classes = (IsAuthenticated,)
     serializer_class = SlotBookingSerializer
