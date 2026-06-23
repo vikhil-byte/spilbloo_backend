@@ -749,7 +749,22 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
             except (ValueError, TypeError):
                 pass
         if dob is not None:
-            instance.date_of_birth = dob if (dob and str(dob).strip() and str(dob).strip() != "<null>") else None
+            dob_str = str(dob).strip()
+            if dob_str and dob_str != "<null>":
+                # Convert slashes to hyphens
+                dob_str = dob_str.replace('/', '-')
+                parts = dob_str.split('-')
+                if len(parts) == 3:
+                    if len(parts[0]) == 4: # YYYY-MM-DD
+                        instance.date_of_birth = dob_str
+                    elif len(parts[2]) == 4: # DD-MM-YYYY or MM-DD-YYYY -> convert to YYYY-MM-DD
+                        instance.date_of_birth = f"{parts[2]}-{parts[1]}-{parts[0]}"
+                    else:
+                        instance.date_of_birth = dob_str
+                else:
+                    instance.date_of_birth = dob_str
+            else:
+                instance.date_of_birth = None
         if email is not None:
             instance.email = _normalize_email(email)
         if contact_no is not None:
@@ -779,7 +794,11 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
             else:
                 return Response({"error": "S3 upload failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        instance.save()
+        from django.core.exceptions import ValidationError
+        try:
+            instance.save()
+        except ValidationError as e:
+            return Response({"error": e.messages}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({
             "detail": _legacy_user_detail(instance)

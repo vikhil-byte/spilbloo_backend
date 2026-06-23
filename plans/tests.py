@@ -219,7 +219,7 @@ class VideoPlanPurchaseFlowTests(APITestCase):
         self.assertEqual(float(check.data["final_amount"]), float(buy.data["final_amount"]))
         self.assertTrue(SubscribedVideo.objects.filter(created_by=self.user, plan=self.plan).exists())
         self.user.refresh_from_db()
-        self.assertEqual(self.user.video_credit, 5)
+        self.assertEqual(int(self.user.video_credit), 5)
 
     def test_buy_video_plan_with_coupon_persists_coupon_user(self):
         coupon = VideoCoupon.objects.create(

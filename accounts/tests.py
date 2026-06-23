@@ -174,3 +174,40 @@ class LanguageAndAffirmationTests(APITestCase):
         self.assertEqual(first_ans["journal_question_id"], 1)
         self.assertIn("created_on", first_ans)
 
+
+class UserProfileUpdateTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="profile_tester@spilbloo.local",
+            password="Pass@123",
+            full_name="Profile Tester",
+            role_id=User.ROLE_PATIENT,
+            state_id=User.STATE_ACTIVE,
+        )
+        self.client.force_authenticate(user=self.user)
+        self.url = reverse("user_profile")
+
+    def test_update_profile_date_slashes_yyyy_mm_dd(self):
+        response = self.client.post(self.url, {"date_of_birth": "2008/06/03"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(str(self.user.date_of_birth), "2008-06-03")
+
+    def test_update_profile_date_slashes_dd_mm_yyyy(self):
+        response = self.client.post(self.url, {"date_of_birth": "03/06/2008"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(str(self.user.date_of_birth), "2008-06-03")
+
+    def test_update_profile_date_standard(self):
+        response = self.client.post(self.url, {"date_of_birth": "2008-06-03"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(str(self.user.date_of_birth), "2008-06-03")
+
+    def test_update_profile_date_invalid_format_returns_400(self):
+        response = self.client.post(self.url, {"date_of_birth": "not-a-date"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("error", response.data)
+
+

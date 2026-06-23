@@ -385,6 +385,22 @@ class AuthenticateSubscriptionView(APIView):
             bool(transaction_id),
         )
         
+        razorpay_payment_id = request.data.get('razorpay_payment_id') or request.query_params.get('razorpay_payment_id')
+        razorpay_signature = request.data.get('razorpay_signature') or request.query_params.get('razorpay_signature')
+
+        if _is_live_razorpay_subscription(sub_id):
+            if not razorpay_payment_id or not razorpay_signature:
+                return Response({"error": "Payment verification failed."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                razorpay_client.utility.verify_payment_signature({
+                    'razorpay_subscription_id': sub_id,
+                    'razorpay_payment_id': razorpay_payment_id,
+                    'razorpay_signature': razorpay_signature
+                })
+            except Exception as e:
+                logger.warning("authenticate-subscription signature verification failed: %s", str(e))
+                return Response({"error": "Payment verification failed."}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             plan = Plan.objects.get(plan_id=plan_id_str)
             with transaction.atomic():
