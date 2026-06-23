@@ -271,6 +271,7 @@ class FetchUserSelectedTherapistAndPlanView(NodeBaseAPIView):
                 "device_token": therapist.get("token") or "",
                 "online": online_status,
                 "isOnline": online_status,
+                "language": therapist.get("language") or "",
                 "symptoms": [
                     "Anger management",
                     "Specific phobia",
@@ -344,6 +345,7 @@ class FetchTherapistsView(NodeBaseAPIView):
                         "device_token": row.get("token") or "",
                         "online": online_status,
                         "isOnline": online_status,
+                        "language": row.get("language") or "",
                         "symptoms": symptoms,
                     }
                 )(to_str(row.get("online"), default=""))
