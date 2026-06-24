@@ -170,7 +170,10 @@ class TherapistApplicationAdmin(admin.ModelAdmin):
             except TherapistApplication.DoesNotExist:
                 pass
         super().save_model(request, obj, form, change)
-        if change and old_state != obj.state_id and obj.state_id in [1, 2]:
+        if change and old_state != obj.state_id and obj.state_id in [
+            TherapistApplication.STATE_ACCEPT,
+            TherapistApplication.STATE_REJECT,
+        ]:
             try:
                 from core.tasks import send_therapist_application_status_email
                 send_therapist_application_status_email.delay(obj.id, obj.state_id)

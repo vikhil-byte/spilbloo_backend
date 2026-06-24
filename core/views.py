@@ -163,7 +163,10 @@ class TherapistApplicationViewSet(viewsets.ModelViewSet):
         updated_instance = serializer.save()
         new_state = updated_instance.state_id
         
-        if old_state != new_state and new_state in [1, 2]:
+        if old_state != new_state and new_state in [
+            TherapistApplication.STATE_ACCEPT,
+            TherapistApplication.STATE_REJECT,
+        ]:
             try:
                 from core.tasks import send_therapist_application_status_email
                 send_therapist_application_status_email.delay(updated_instance.id, new_state)

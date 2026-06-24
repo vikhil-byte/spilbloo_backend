@@ -1087,12 +1087,14 @@ class TherapistApplication(models.Model):
     STATE_ACCEPT = 1
     STATE_REJECT = 2
     STATE_ADD = 3
+    STATE_POOL = 4
 
     STATE_CHOICES = (
         (STATE_INACTIVE, 'New'),
         (STATE_ACCEPT, 'Accept'),
         (STATE_REJECT, 'Reject'),
         (STATE_ADD, 'Added'),
+        (STATE_POOL, 'Pool'),
     )
 
     name = models.CharField(max_length=30)
