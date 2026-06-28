@@ -93,3 +93,21 @@ class FetchJournalsViewTests(APITestCase):
         self.assertTrue(first_journal["entry_date"].endswith("T00:00:00.000Z"))
         self.assertTrue(first_journal["created_on"].endswith(".000Z"))
         self.assertEqual(first_journal["created_by_id"], self.user.id)
+
+    def test_add_journal_with_custom_date(self):
+        post_data = {
+            "journal": "Custom Date Journal",
+            "question_id": 3,
+            "created_by_id": self.user.id,
+            "entry_date": "2026-06-20T00:00:00.000Z"
+        }
+        response = self.client.post("/node/add-journal", post_data, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        fetch_response = self.client.get(f"/node/fetch-journals?userId={self.user.id}")
+        self.assertEqual(fetch_response.status_code, status.HTTP_200_OK)
+        
+        journals = fetch_response.json()["results"]["journals"]
+        self.assertEqual(len(journals), 1)
+        self.assertEqual(journals[0]["journal"], "Custom Date Journal")
+        self.assertEqual(journals[0]["entry_date"], "2026-06-20T00:00:00.000Z")

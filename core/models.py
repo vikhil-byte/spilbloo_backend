@@ -1000,7 +1000,7 @@ class HomeCard(models.Model):
 
 class DailyJournal(models.Model):
     id = models.AutoField(primary_key=True)
-    entry_date = models.DateField(auto_now_add=True)
+    entry_date = models.DateField(default=timezone.now)
     journal = models.TextField(blank=True, null=True)
     question_id = models.IntegerField(blank=True, null=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, db_column="created_by_id", related_name="daily_journals")

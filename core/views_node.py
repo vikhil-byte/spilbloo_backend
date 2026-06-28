@@ -170,12 +170,17 @@ class AddJournalView(NodeBaseAPIView):
         )
         
         try:
-            DailyJournal.objects.create(
-                entry_date=entry_date,
-                journal=journal,
-                question_id=question_id,
-                created_by_id=created_by_id,
-            )
+            kwargs = {
+                "journal": journal,
+                "question_id": question_id,
+                "created_by_id": created_by_id,
+            }
+            if entry_date:
+                if isinstance(entry_date, str) and "T" in entry_date:
+                    entry_date = entry_date.split("T")[0]
+                kwargs["entry_date"] = entry_date
+
+            DailyJournal.objects.create(**kwargs)
             logger.info("AddJournalView.post success: journal created successfully")
             return Response(node_success("OK", {}, 200), status=200)
         except Exception as exc:
