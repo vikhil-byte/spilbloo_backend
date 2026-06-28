@@ -132,11 +132,27 @@ class FetchJournalsView(NodeBaseAPIView):
         user_id = request.query_params.get("userId")
         try:
             results = list(DailyJournal.objects.filter(created_by_id=user_id).values())
-            # Convert date objects to string for JSON compatibility
+            processed = []
             for r in results:
+                # Format entry_date (date object -> YYYY-MM-DDT00:00:00.000Z)
+                entry_date_str = ""
                 if r.get("entry_date"):
-                    r["entry_date"] = str(r["entry_date"])
-            return Response(node_success("OK", {"journals": results}, 200), status=200)
+                    entry_date_str = f"{r['entry_date'].strftime('%Y-%m-%d')}T00:00:00.000Z"
+
+                # Format created_on (datetime object -> YYYY-MM-DDTHH:MM:SS.000Z)
+                created_on_str = ""
+                if r.get("created_on"):
+                    created_on_str = r["created_on"].strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+                processed.append({
+                    "id": r.get("id"),
+                    "journal": r.get("journal"),
+                    "question_id": r.get("question_id"),
+                    "entry_date": entry_date_str,
+                    "created_by_id": r.get("created_by"),
+                    "created_on": created_on_str
+                })
+            return Response(node_success("OK", {"journals": processed}, 200), status=200)
         except Exception as exc:
             return Response(node_error(str(exc), 500), status=500)
 

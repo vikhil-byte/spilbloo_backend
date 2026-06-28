@@ -1004,6 +1004,7 @@ class DailyJournal(models.Model):
     journal = models.TextField(blank=True, null=True)
     question_id = models.IntegerField(blank=True, null=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, db_column="created_by_id", related_name="daily_journals")
+    created_on = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         managed = True

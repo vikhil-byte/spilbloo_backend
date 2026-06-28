@@ -46,3 +46,50 @@ class EmailServiceTests(TestCase):
             to_email="test-console@spilbloo.com"
         )
         self.assertTrue(result)
+
+
+from rest_framework.test import APITestCase
+from rest_framework import status
+from django.contrib.auth import get_user_model
+from core.models import DailyJournal
+
+User = get_user_model()
+
+class FetchJournalsViewTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="journal_tester@spilbloo.local",
+            password="Pass@123",
+            full_name="Journal Tester",
+            role_id=1,  # Patient role
+            state_id=1,  # Active
+        )
+        self.client.force_authenticate(user=self.user)
+
+    def test_fetch_journals_formatting(self):
+        journal = DailyJournal.objects.create(
+            journal="Hello World Entry",
+            question_id=2,
+            created_by=self.user
+        )
+        self.assertIsNotNone(journal.created_on)
+
+        response = self.client.get(f"/node/fetch-journals?userId={self.user.id}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        res_data = response.json()
+        self.assertEqual(res_data["code"], 200)
+        self.assertEqual(res_data["message"], "OK")
+        self.assertFalse(res_data["error"])
+        
+        journals = res_data["results"]["journals"]
+        self.assertEqual(len(journals), 1)
+        
+        first_journal = journals[0]
+        self.assertEqual(first_journal["id"], journal.id)
+        self.assertEqual(first_journal["journal"], "Hello World Entry")
+        self.assertEqual(first_journal["question_id"], 2)
+        
+        self.assertTrue(first_journal["entry_date"].endswith("T00:00:00.000Z"))
+        self.assertTrue(first_journal["created_on"].endswith(".000Z"))
+        self.assertEqual(first_journal["created_by_id"], self.user.id)
