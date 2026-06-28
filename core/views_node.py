@@ -207,19 +207,11 @@ class DailyQnAView(NodeBaseAPIView):
             answers = list(DailyCheckinAnswer.objects.all().values())
 
             question_map = {}
-            title_map = {
-                1: "Interest",
-                2: "Anxiety",
-                3: "Sleep",
-                4: "Energy",
-                5: "Mood"
-            }
             for q in questions:
                 if q.get("created_on"):
                     q["created_on"] = q["created_on"].strftime("%Y-%m-%d %H:%M:%S")
                 else:
                     q["created_on"] = ""
-                q["title"] = title_map.get(q["id"], "")
                 q["answers"] = []
                 question_map[q["id"]] = q
 
