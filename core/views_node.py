@@ -149,7 +149,7 @@ class FetchJournalsView(NodeBaseAPIView):
                     "journal": r.get("journal"),
                     "question_id": r.get("question_id"),
                     "entry_date": entry_date_str,
-                    "created_by_id": r.get("created_by"),
+                    "created_by_id": r.get("created_by_id") or r.get("created_by"),
                     "created_on": created_on_str
                 })
             return Response(node_success("OK", {"journals": processed}, 200), status=200)

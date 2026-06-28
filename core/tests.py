@@ -61,7 +61,7 @@ class FetchJournalsViewTests(APITestCase):
             email="journal_tester@spilbloo.local",
             password="Pass@123",
             full_name="Journal Tester",
-            role_id=1,  # Patient role
+            role_id=4,  # Patient role
             state_id=1,  # Active
         )
         self.client.force_authenticate(user=self.user)
