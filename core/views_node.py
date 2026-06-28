@@ -207,11 +207,19 @@ class DailyQnAView(NodeBaseAPIView):
             answers = list(DailyCheckinAnswer.objects.all().values())
 
             question_map = {}
+            title_map = {
+                1: "Interest",
+                2: "Anxiety",
+                3: "Sleep",
+                4: "Energy",
+                5: "Mood"
+            }
             for q in questions:
                 if q.get("created_on"):
                     q["created_on"] = q["created_on"].strftime("%Y-%m-%d %H:%M:%S")
                 else:
                     q["created_on"] = ""
+                q["title"] = title_map.get(q["id"], "")
                 q["answers"] = []
                 question_map[q["id"]] = q
 
@@ -250,13 +258,22 @@ class DailyUserAnswersView(NodeBaseAPIView):
         try:
             results = list(DailyCheckinQuestionAndAnswer.objects.filter(created_by_id=user_id).values())
             answers = [[], [], [], [], []]
+            title_map = {
+                1: "Interest",
+                2: "Anxiety",
+                3: "Sleep",
+                4: "Energy",
+                5: "Mood"
+            }
             for result in results:
                 qna_map = result.get("qna_map") or []
                 if isinstance(qna_map, str):
                     qna_map = json.loads(qna_map)
                 for idx, qna in enumerate(qna_map[:5]):
                     entry_date = result.get("entry_date")
-                    qna["created_on"] = str(entry_date) if entry_date else None
+                    qna["created_on"] = f"{entry_date.strftime('%Y-%m-%d')}T00:00:00.000Z" if entry_date else None
+                    if not qna.get("title"):
+                        qna["title"] = title_map.get(qna.get("id"), "")
                     answers[idx].append(qna)
             return Response(node_success("OK", {"user_answers": answers}, 200), status=200)
         except Exception:
