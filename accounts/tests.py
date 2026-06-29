@@ -254,4 +254,21 @@ class UserProfileUpdateTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("error", response.data)
 
+    def test_update_profile_syncs_first_last_name_from_full_name(self):
+        response = self.client.post(self.url, {"full_name": "John Doe"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, "John")
+        self.assertEqual(self.user.last_name, "Doe")
+        self.assertEqual(response.data["detail"]["first_name"], "John")
+        self.assertEqual(response.data["detail"]["last_name"], "Doe")
+
+    def test_update_profile_syncs_full_name_from_first_last_name(self):
+        response = self.client.post(self.url, {"first_name": "Jane", "last_name": "Smith", "full_name": None}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.full_name, "Jane Smith")
+        self.assertEqual(response.data["detail"]["full_name"], "Jane Smith")
+
+
 

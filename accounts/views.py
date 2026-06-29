@@ -733,12 +733,22 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
             zipcode = get_val("zipcode")
 
             # Update the model instance fields directly
-            if full_name is not None:
-                instance.full_name = full_name
             if first_name is not None:
                 instance.first_name = first_name
             if last_name is not None:
                 instance.last_name = last_name
+
+            if full_name is not None:
+                instance.full_name = full_name
+                # Split full_name into first and last name if they were not explicitly updated
+                if first_name is None and last_name is None:
+                    parts = full_name.strip().split(' ', 1)
+                    instance.first_name = parts[0]
+                    instance.last_name = parts[1] if len(parts) > 1 else ''
+            else:
+                if first_name is not None or last_name is not None:
+                    instance.full_name = f"{instance.first_name} {instance.last_name}".strip()
+
             if gender is not None:
                 try:
                     instance.gender = int(gender)

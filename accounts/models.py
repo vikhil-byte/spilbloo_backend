@@ -117,6 +117,20 @@ class User(AbstractUser):
     def __str__(self):
         return self.full_name or self.email
 
+    def save(self, *args, **kwargs):
+        # Normalize/sync name fields
+        if self.full_name:
+            self.full_name = self.full_name.strip()
+            if not self.first_name and not self.last_name:
+                parts = self.full_name.split(' ', 1)
+                self.first_name = parts[0]
+                self.last_name = parts[1] if len(parts) > 1 else ''
+        elif self.first_name or self.last_name:
+            self.full_name = f"{self.first_name or ''} {self.last_name or ''}".strip()
+        super().save(*args, **kwargs)
+
+
+
     def get_affirmation_for_the_day(self):
         affirmations = [
             "I prioritize self-care and nurture my mental well-being.",
