@@ -271,4 +271,26 @@ class UserProfileUpdateTests(APITestCase):
         self.assertEqual(response.data["detail"]["full_name"], "Jane Smith")
 
 
+class UserRegisterTests(APITestCase):
+    def test_signup_saves_first_name_and_last_name(self):
+        payload = {
+            "User[first_name]": "Alice",
+            "User[last_name]": "Wonderland",
+            "User[email]": "alice@spilbloo.local",
+            "User[full_name]": "Alice Wonderland",
+            "User[password]": "Pass@123"
+        }
+        response = self.client.post("/api/user/signup/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        user = User.objects.get(email="alice@spilbloo.local")
+        self.assertEqual(user.first_name, "Alice")
+        self.assertEqual(user.last_name, "Wonderland")
+        self.assertEqual(user.full_name, "Alice Wonderland")
+        
+        self.assertEqual(response.data["detail"]["first_name"], "Alice")
+        self.assertEqual(response.data["detail"]["last_name"], "Wonderland")
+
+
+
 

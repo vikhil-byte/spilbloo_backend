@@ -285,6 +285,18 @@ class RegisterView(generics.CreateAPIView):
             or request.data.get("User[password]")
             or user_payload.get("password")
         )
+        normalized_data["first_name"] = (
+            request.data.get("first_name")
+            or request.data.get("User[first_name]")
+            or user_payload.get("first_name")
+            or ""
+        ).strip()
+        normalized_data["last_name"] = (
+            request.data.get("last_name")
+            or request.data.get("User[last_name]")
+            or user_payload.get("last_name")
+            or ""
+        ).strip()
         normalized_data["full_name"] = (
             request.data.get("full_name")
             or request.data.get("User[full_name]")
@@ -293,14 +305,13 @@ class RegisterView(generics.CreateAPIView):
                 filter(
                     None,
                     [
-                        request.data.get("User[first_name]", "").strip(),
-                        request.data.get("User[last_name]", "").strip(),
-                        (user_payload.get("first_name") or "").strip(),
-                        (user_payload.get("last_name") or "").strip(),
+                        normalized_data["first_name"],
+                        normalized_data["last_name"],
                     ],
                 )
-            ).strip()
-        )
+            )
+        ).strip()
+
         normalized_data["role_id"] = (
             request.data.get("role_id")
             or request.data.get("User[role_id]")
