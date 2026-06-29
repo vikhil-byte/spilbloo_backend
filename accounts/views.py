@@ -265,6 +265,7 @@ class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
 
     def create(self, request, *args, **kwargs):
+        logger.info("RegisterView request data: %s", request.data)
         if not request.data:
             logger.warning("Signup rejected: empty payload")
             return Response({"error": "Data not posted."}, status=status.HTTP_400_BAD_REQUEST)
@@ -702,6 +703,7 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         return self.request.user
 
     def update(self, request, *args, **kwargs):
+        logger.info("UserProfileView request data: %s, files: %s", request.data, request.FILES)
         try:
             # PHP: actionUpdateProfile allows updating user details
             partial = kwargs.pop('partial', False)
