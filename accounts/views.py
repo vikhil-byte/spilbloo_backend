@@ -691,118 +691,122 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         return self.request.user
 
     def update(self, request, *args, **kwargs):
-        # PHP: actionUpdateProfile allows updating user details
-        partial = kwargs.pop('partial', False)
-        instance = self.get_object()
+        try:
+            # PHP: actionUpdateProfile allows updating user details
+            partial = kwargs.pop('partial', False)
+            instance = self.get_object()
 
-        raw_data = request.data
-        
-        # Helper to get parameter by checking multiple legacy keys
-        def get_val(field_name):
-            # Check keys: field_name, User[field_name], User[field_name]:, User[field_name] 
-            keys_to_try = [
-                field_name,
-                f"User[{field_name}]",
-                f"User[{field_name}]:",
-                f"User[{field_name}] ",
-            ]
-            for k in keys_to_try:
-                if k in raw_data:
-                    return raw_data[k]
+            raw_data = request.data
             
-            user_dict = raw_data.get("User")
-            if isinstance(user_dict, dict):
-                return user_dict.get(field_name)
-            return None
+            # Helper to get parameter by checking multiple legacy keys
+            def get_val(field_name):
+                # Check keys: field_name, User[field_name], User[field_name]:, User[field_name] 
+                keys_to_try = [
+                    field_name,
+                    f"User[{field_name}]",
+                    f"User[{field_name}]:",
+                    f"User[{field_name}] ",
+                ]
+                for k in keys_to_try:
+                    if k in raw_data:
+                        return raw_data[k]
+                
+                user_dict = raw_data.get("User")
+                if isinstance(user_dict, dict):
+                    return user_dict.get(field_name)
+                return None
 
-        # Extract normalized fields
-        full_name = get_val("full_name")
-        first_name = get_val("first_name")
-        last_name = get_val("last_name")
-        gender = get_val("gender")
-        therapist_gender = get_val("therapist_gender")
-        dob = get_val("date_of_birth") or get_val("dob")
-        email = get_val("email")
-        contact_no = get_val("contact_no") or get_val("phoneNumber")
-        longitude = get_val("longitude")
-        latitude = get_val("latitude")
-        address = get_val("address")
-        city = get_val("city")
-        country = get_val("country")
-        zipcode = get_val("zipcode")
+            # Extract normalized fields
+            full_name = get_val("full_name")
+            first_name = get_val("first_name")
+            last_name = get_val("last_name")
+            gender = get_val("gender")
+            therapist_gender = get_val("therapist_gender")
+            dob = get_val("date_of_birth") or get_val("dob")
+            email = get_val("email")
+            contact_no = get_val("contact_no") or get_val("phoneNumber")
+            longitude = get_val("longitude")
+            latitude = get_val("latitude")
+            address = get_val("address")
+            city = get_val("city")
+            country = get_val("country")
+            zipcode = get_val("zipcode")
 
-        # Update the model instance fields directly
-        if full_name is not None:
-            instance.full_name = full_name
-        if first_name is not None:
-            instance.first_name = first_name
-        if last_name is not None:
-            instance.last_name = last_name
-        if gender is not None:
-            try:
-                instance.gender = int(gender)
-            except (ValueError, TypeError):
-                pass
-        if therapist_gender is not None:
-            try:
-                instance.therapist_gender = int(therapist_gender)
-            except (ValueError, TypeError):
-                pass
-        if dob is not None:
-            dob_str = str(dob).strip()
-            if dob_str and dob_str != "<null>":
-                # Convert slashes to hyphens
-                dob_str = dob_str.replace('/', '-')
-                parts = dob_str.split('-')
-                if len(parts) == 3:
-                    if len(parts[0]) == 4: # YYYY-MM-DD
-                        instance.date_of_birth = dob_str
-                    elif len(parts[2]) == 4: # DD-MM-YYYY or MM-DD-YYYY -> convert to YYYY-MM-DD
-                        instance.date_of_birth = f"{parts[2]}-{parts[1]}-{parts[0]}"
+            # Update the model instance fields directly
+            if full_name is not None:
+                instance.full_name = full_name
+            if first_name is not None:
+                instance.first_name = first_name
+            if last_name is not None:
+                instance.last_name = last_name
+            if gender is not None:
+                try:
+                    instance.gender = int(gender)
+                except (ValueError, TypeError):
+                    pass
+            if therapist_gender is not None:
+                try:
+                    instance.therapist_gender = int(therapist_gender)
+                except (ValueError, TypeError):
+                    pass
+            if dob is not None:
+                dob_str = str(dob).strip()
+                if dob_str and dob_str != "<null>":
+                    # Convert slashes to hyphens
+                    dob_str = dob_str.replace('/', '-')
+                    parts = dob_str.split('-')
+                    if len(parts) == 3:
+                        if len(parts[0]) == 4: # YYYY-MM-DD
+                            instance.date_of_birth = dob_str
+                        elif len(parts[2]) == 4: # DD-MM-YYYY or MM-DD-YYYY -> convert to YYYY-MM-DD
+                            instance.date_of_birth = f"{parts[2]}-{parts[1]}-{parts[0]}"
+                        else:
+                            instance.date_of_birth = dob_str
                     else:
                         instance.date_of_birth = dob_str
                 else:
-                    instance.date_of_birth = dob_str
-            else:
-                instance.date_of_birth = None
-        if email is not None:
-            instance.email = _normalize_email(email)
-        if contact_no is not None:
-            instance.contact_no = contact_no
-        if longitude is not None:
-            instance.longitude = longitude
-        if latitude is not None:
-            instance.latitude = latitude
-        if address is not None:
-            instance.address = address
-        if city is not None:
-            instance.city = city
-        if country is not None:
-            instance.country = country
-        if zipcode is not None:
-            instance.zipcode = zipcode
+                    instance.date_of_birth = None
+            if email is not None:
+                instance.email = _normalize_email(email)
+            if contact_no is not None:
+                instance.contact_no = contact_no
+            if longitude is not None:
+                instance.longitude = longitude
+            if latitude is not None:
+                instance.latitude = latitude
+            if address is not None:
+                instance.address = address
+            if city is not None:
+                instance.city = city
+            if country is not None:
+                instance.country = country
+            if zipcode is not None:
+                instance.zipcode = zipcode
 
-        # Handle profile file upload (key may be 'profile_file' or 'User[profile_file]')
-        profile_file = request.FILES.get('profile_file') or request.FILES.get('User[profile_file]')
-        if profile_file:
-            from core.s3_utils import upload_to_s3
+            # Handle profile file upload (key may be 'profile_file' or 'User[profile_file]')
+            profile_file = request.FILES.get('profile_file') or request.FILES.get('User[profile_file]')
+            if profile_file:
+                from core.s3_utils import upload_to_s3
 
-            filename = f"user-{instance.id}-profile-{profile_file.name}"
-            s3_key = upload_to_s3(profile_file, filename)
-            if s3_key:
-                instance.profile_file = s3_key
-            else:
-                return Response({"error": "S3 upload failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                filename = f"user-{instance.id}-profile-{profile_file.name}"
+                s3_key = upload_to_s3(profile_file, filename)
+                if s3_key:
+                    instance.profile_file = s3_key
+                else:
+                    return Response({"error": "S3 upload failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        from django.core.exceptions import ValidationError
-        try:
-            instance.save()
-        except ValidationError as e:
-            return Response({"error": e.messages}, status=status.HTTP_400_BAD_REQUEST)
+            from django.core.exceptions import ValidationError
+            try:
+                instance.save()
+            except ValidationError as e:
+                return Response({"error": e.messages}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({
-            "detail": _legacy_user_detail(instance)
-        }, status=status.HTTP_200_OK)
+            return Response({
+                "detail": _legacy_user_detail(instance)
+            }, status=status.HTTP_200_OK)
+        except Exception as exc:
+            logger.exception("Error in UserProfileView.update")
+            return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def post(self, request, *args, **kwargs):
         kwargs['partial'] = True
