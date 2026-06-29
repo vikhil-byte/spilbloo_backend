@@ -232,7 +232,7 @@ class DailyQnAView(NodeBaseAPIView):
 
 class AddUserAnswersView(NodeBaseAPIView):
     def post(self, request):
-        user_id = request.data.get("user_id")
+        user_id = request.data.get("user_id") or getattr(request.user, "id", None)
         qna_map = request.data.get("qna_map", [])
         try:
             DailyCheckinQuestionAndAnswer.objects.create(
@@ -240,8 +240,10 @@ class AddUserAnswersView(NodeBaseAPIView):
                 qna_map=qna_map,
             )
             return Response(node_success("OK", {}, 200), status=200)
-        except Exception:
-            return Response(node_error("Error adding daily check-in Q&A", 500), status=500)
+        except Exception as exc:
+            logger.exception("Error adding daily check-in Q&A")
+            return Response(node_error("Error adding daily check-in Q&A: " + str(exc), 500), status=500)
+
 
 
 class DailyUserAnswersView(NodeBaseAPIView):

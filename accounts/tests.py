@@ -174,6 +174,50 @@ class LanguageAndAffirmationTests(APITestCase):
         self.assertEqual(first_ans["journal_question_id"], 1)
         self.assertIn("created_on", first_ans)
 
+    def test_add_user_answers_success(self):
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer testtoken123", HTTP_USER_ID=str(self.user.id))
+        payload = {
+            "user_id": self.user.id,
+            "qna_map": [
+                {"id": 1, "question": "Question 1", "answer": "Answer 1"}
+            ]
+        }
+        response = self.client.post("/node/add-user-answers", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        from core.models import DailyCheckinQuestionAndAnswer
+        qna = DailyCheckinQuestionAndAnswer.objects.filter(created_by=self.user).first()
+        self.assertIsNotNone(qna)
+        self.assertEqual(qna.qna_map, payload["qna_map"])
+
+    def test_add_user_answers_string_user_id(self):
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer testtoken123", HTTP_USER_ID=str(self.user.id))
+        payload = {
+            "user_id": str(self.user.id),
+            "qna_map": [
+                {"id": 1, "question": "Question 1", "answer": "Answer 1"}
+            ]
+        }
+        response = self.client.post("/node/add-user-answers", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_add_user_answers_missing_user_id(self):
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer testtoken123", HTTP_USER_ID=str(self.user.id))
+        payload = {
+            "qna_map": [
+                {"id": 1, "question": "Question 1", "answer": "Answer 1"}
+            ]
+        }
+        response = self.client.post("/node/add-user-answers", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        from core.models import DailyCheckinQuestionAndAnswer
+        qna = DailyCheckinQuestionAndAnswer.objects.filter(created_by=self.user).first()
+        self.assertIsNotNone(qna)
+        self.assertEqual(qna.qna_map, payload["qna_map"])
+
+
+
 
 class UserProfileUpdateTests(APITestCase):
     def setUp(self):
