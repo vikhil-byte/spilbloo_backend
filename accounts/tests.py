@@ -134,6 +134,12 @@ class LanguageAndAffirmationTests(APITestCase):
         self.assertEqual(detail["language"], "es")
         self.assertIn("affirmation_for_the_day", detail)
         self.assertTrue(len(detail["affirmation_for_the_day"]) > 0)
+        self.assertIn("gender", detail)
+        self.assertIn("therapist_gender", detail)
+        self.assertIn("is_profile_completed", detail)
+        self.assertIn("symptoms", detail)
+        self.assertIn("about_me", detail)
+        self.assertIn("created_on", detail)
 
     def test_cards_view_response_contains_affirmation(self):
         from unittest.mock import patch

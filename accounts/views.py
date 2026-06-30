@@ -231,6 +231,27 @@ def _legacy_user_detail(user):
             "plan_detail": plan_detail,
         }
 
+    # Fetch user symptoms
+    user_symptoms_qs = UserSymptom.objects.filter(created_by=user, state_id=1).select_related('symptom')
+    symptoms_list = [SymptomSerializer(us.symptom).data for us in user_symptoms_qs if us.symptom]
+
+    # Check profile completeness (PHP checks if date_of_birth is empty)
+    is_profile_completed = 1 if getattr(user, "date_of_birth", None) else 0
+
+    created_on_str = ""
+    if getattr(user, "created_on", None):
+        try:
+            created_on_str = user.created_on.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            pass
+
+    dob_str = ""
+    if getattr(user, "date_of_birth", None):
+        try:
+            dob_str = user.date_of_birth.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+
     return {
         "id": user.id,
         "email": user.email or "",
@@ -257,6 +278,31 @@ def _legacy_user_detail(user):
         "subscribed_plan": subscribed_plan or {},
         "language": getattr(user, "language", "") or "",
         "affirmation_for_the_day": user.get_affirmation_for_the_day(),
+        # Added legacy fields for PHP compatibility
+        "about_me": getattr(user, "about_me", "") or "",
+        "age_group": getattr(user, "age_group", "") or "Not Defined",
+        "created_on": created_on_str,
+        "date_of_birth": dob_str,
+        "email_type": 0,
+        "experience": getattr(user, "experience", 0) or 0,
+        "gender": getattr(user, "gender", 0) or 0,
+        "inr_payment_bottom_sheet_url": "",
+        "is_android_under_maintenance": 0,
+        "is_app_update": 1,
+        "is_available": 1 if getattr(user, "is_available", True) else 0,
+        "is_consent_accept": getattr(user, "is_consent_accept", 0) or 0,
+        "is_ios_under_maintenance": 0,
+        "is_notify": 1 if getattr(user, "push_enabled", 1) else 0,
+        "is_profile_completed": is_profile_completed,
+        "qualification": getattr(user, "qualification", "") or "",
+        "show_inr_payment_bottom_sheet": 0,
+        "show_usd_payment_bottom_sheet": 0,
+        "symptoms": symptoms_list,
+        "therapist_gender": getattr(user, "therapist_gender", 0) or 0,
+        "timezone": getattr(user, "timezone", "") or "",
+        "tos": getattr(user, "tos", "") or "",
+        "type_id": getattr(user, "type_id", 0) or 0,
+        "usd_payment_bottom_sheet_url": "",
     }
 
 class RegisterView(generics.CreateAPIView):
@@ -388,7 +434,7 @@ class RegisterView(generics.CreateAPIView):
 
         return Response({
             "message": "Please verify your OTP.",
-            "detail": UserSerializer(user).data
+            "detail": _legacy_user_detail(user)
         }, status=status.HTTP_200_OK)
 
 class VerifyOtpView(APIView):
