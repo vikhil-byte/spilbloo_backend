@@ -1,4 +1,6 @@
 from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from django.template.loader import render_to_string
 from .models import (
@@ -156,6 +158,23 @@ class TherapistApplicationViewSet(viewsets.ModelViewSet):
         if self.action == 'create':
             return []
         return [HasTherapistApplicationAccess()]
+
+    @action(detail=True, methods=['post'], url_path='send-schedule-email')
+    def send_schedule_email(self, request, pk=None):
+        instance = self.get_object()
+        if instance.state_id != TherapistApplication.STATE_ACCEPT:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError("This candidate has not been accepted.")
+        
+        try:
+            from core.tasks import send_therapist_application_schedule_email
+            send_therapist_application_schedule_email.delay(instance.id)
+            return Response({"detail": "Schedule interview email has been queued."}, status=200)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.exception("Failed to queue schedule interview email Celery task: %s", str(e))
+            return Response({"detail": "Failed to queue schedule interview email."}, status=500)
 
     def perform_update(self, serializer):
         instance = self.get_object()

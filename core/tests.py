@@ -111,3 +111,62 @@ class FetchJournalsViewTests(APITestCase):
         self.assertEqual(len(journals), 1)
         self.assertEqual(journals[0]["journal"], "Custom Date Journal")
         self.assertEqual(journals[0]["entry_date"], "2026-06-20T00:00:00.000Z")
+
+
+from core.models import TherapistApplication
+from unittest.mock import patch
+
+class TherapistApplicationTests(APITestCase):
+    def setUp(self):
+        # Create a superuser to access TherapistApplication endpoints
+        self.admin_user = User.objects.create_superuser(
+            email="admin@spilbloo.com",
+            password="AdminPass@123"
+        )
+        self.client.force_authenticate(user=self.admin_user)
+        
+        self.application = TherapistApplication.objects.create(
+            name="John Doe",
+            email="john@example.com",
+            contact_no="1234567890",
+            address="123 Street",
+            experience="5 years",
+            qualification="M.Sc. Psychology",
+            rci_registered="Yes",
+            employment_status="Employed",
+            modalities="CBT, CFT",
+            hours_available="40",
+            days_available="Mon-Fri",
+            motivation="Help people",
+            distress_situation="Distress situation detail",
+            state_id=TherapistApplication.STATE_ACCEPT
+        )
+
+    @override_settings(EMAIL_SERVICE_PROVIDER='smtp')
+    def test_send_schedule_email_task(self):
+        from core.tasks import send_therapist_application_schedule_email
+        send_therapist_application_schedule_email(self.application.id)
+        
+        self.assertEqual(len(mail.outbox), 1)
+        sent_mail = mail.outbox[0]
+        self.assertEqual(sent_mail.subject, "Schedule Your Interview | Spilbloo")
+        self.assertEqual(sent_mail.to, ["john@example.com"])
+        self.assertEqual(sent_mail.cc, ["sarah@spilbloo.com"])
+        self.assertEqual(sent_mail.from_email, "careers@spilbloo.com")
+        self.assertIn("Hi John,", sent_mail.body)
+        self.assertIn("https://calendly.com/sarah-spilbloo/30min", sent_mail.body)
+
+    @patch('core.tasks.send_therapist_application_schedule_email.delay')
+    def test_send_schedule_email_endpoint_success(self, mock_delay):
+        response = self.client.post(f"/api/core/therapist-applications/{self.application.id}/send-schedule-email/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["detail"], "Schedule interview email has been queued.")
+        mock_delay.assert_called_once_with(self.application.id)
+
+    def test_send_schedule_email_endpoint_invalid_state(self):
+        self.application.state_id = TherapistApplication.STATE_REJECT
+        self.application.save()
+        
+        response = self.client.post(f"/api/core/therapist-applications/{self.application.id}/send-schedule-email/")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+

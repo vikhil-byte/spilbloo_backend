@@ -811,3 +811,48 @@ def send_therapist_application_status_email(application_id, status_id):
         logger.exception("Failed to send therapist application status email: %s", str(e))
 
 
+@shared_task
+def send_therapist_application_schedule_email(application_id):
+    """
+    Asynchronously sends schedule interview email to the applicant.
+    """
+    from core.models import TherapistApplication
+    from core.email_service import get_email_client
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Running send_therapist_application_schedule_email task for app: {application_id}")
+
+    try:
+        instance = TherapistApplication.objects.get(id=application_id)
+    except TherapistApplication.DoesNotExist:
+        logger.error(f"TherapistApplication with ID {application_id} does not exist.")
+        return
+
+    from django.template.loader import render_to_string
+    from django.utils.html import strip_tags
+
+    first_name = instance.name.split()[0] if instance.name else ""
+
+    subject = "Schedule Your Interview | Spilbloo"
+    context = {"name": first_name}
+    html_content = render_to_string("emails/therapist_application_schedule.html", context)
+    body = strip_tags(html_content).strip()
+
+    try:
+        from_email = "careers@spilbloo.com"
+        client = get_email_client()
+        client.send_email(
+            subject=subject,
+            body=body,
+            to_email=instance.email,
+            from_email=from_email,
+            html_body=html_content,
+            cc=["sarah@spilbloo.com"]
+        )
+        logger.info(f"Sent schedule interview email to applicant: {instance.email} with CC: sarah@spilbloo.com")
+    except Exception as e:
+        logger.exception("Failed to send therapist application schedule email: %s", str(e))
+
+
+
