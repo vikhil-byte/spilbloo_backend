@@ -472,7 +472,7 @@ class VerifyOtpView(APIView):
                 "message": "Your account successfully verified!",
                 "access-token": str(refresh.access_token),
                 "refresh-token": str(refresh),
-                "detail": UserSerializer(user).data
+                "detail": _legacy_user_detail(user)
             }, status=status.HTTP_200_OK)
         else:
             return Response({"error": "Incorrect OTP"}, status=status.HTTP_400_BAD_REQUEST)
@@ -574,7 +574,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                     return Response(
                         {
                             "message": "Details already exist. You need to verify your otp first",
-                            "detail": UserSerializer(user).data,
+                            "detail": _legacy_user_detail(user),
                         },
                         status=status.HTTP_200_OK,
                     )
@@ -587,7 +587,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 send_otp_via_email(user.email, otp)
                 return Response({
                     "message": "Please verify your OTP.",
-                    "detail": UserSerializer(user).data
+                    "detail": _legacy_user_detail(user)
                 }, status=status.HTTP_200_OK)
 
             auth_user = authenticate(request, username=email, password=password) or authenticate(request, email=email, password=password)
@@ -602,7 +602,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 "message": "Login Successfully",
                 "access-token": str(refresh.access_token),
                 "refresh-token": str(refresh),
-                "detail": UserSerializer(auth_user).data
+                "detail": _legacy_user_detail(auth_user)
             }
 
             # OTP challenge for newer versions (legacy behavior).
@@ -747,6 +747,12 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         return self.request.user
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        return Response({
+            "detail": _legacy_user_detail(instance)
+        }, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):
         logger.info("UserProfileView request data: %s, files: %s", request.data, request.FILES)
@@ -938,8 +944,7 @@ class DetailView(generics.RetrieveAPIView):
     def retrieve(self, request, *args, **kwargs):
         try:
             instance = self.get_object()
-            serializer = self.get_serializer(instance)
-            return Response({"detail": serializer.data}, status=status.HTTP_200_OK)
+            return Response({"detail": _legacy_user_detail(instance)}, status=status.HTTP_200_OK)
         except Exception:
             return Response({"error": "Data Not Found"}, status=status.HTTP_400_BAD_REQUEST)
 
