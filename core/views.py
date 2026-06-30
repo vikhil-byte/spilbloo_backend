@@ -1,8 +1,40 @@
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticatedOrReadOnly
+from rest_framework.permissions import IsAuthenticatedOrReadOnly, BasePermission, SAFE_METHODS, AllowAny, IsAdminUser
 from django.template.loader import render_to_string
+from django.db.models import Q
+import os
+from rest_framework.exceptions import ValidationError
+
+class IsAdminOrReadOnly(BasePermission):
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return True
+        return request.user and request.user.is_authenticated and request.user.is_staff
+
+class IsOwnerOrAdmin(BasePermission):
+    def has_permission(self, request, view):
+        return request.user and request.user.is_authenticated
+
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_staff:
+            return True
+            
+        owner_attrs = ['created_by', 'created_by_id', 'user', 'user_id', 'therapist', 'therapist_id', 'patient', 'patient_id', 'doctor', 'doctor_id']
+        for attr in owner_attrs:
+            val = getattr(obj, attr, None)
+            if val == user or (isinstance(val, int) and val == user.id):
+                return True
+        return False
+
+def validate_file_extension(file_obj, allowed_extensions):
+    ext = os.path.splitext(file_obj.name)[1].lower()
+    if ext not in allowed_extensions:
+        raise ValidationError(f"File extension '{ext}' is not allowed. Allowed types: {', '.join(allowed_extensions)}")
 from .models import (
     TherapistEarning, ContactForm, DoctorReason, Symptom, DoctorRequest,
     Feed, EmergencyResource, AgeGroup, AssignedTherapist, BestDoctor,
@@ -24,122 +56,215 @@ from .serializers import (
 class TherapistEarningViewSet(viewsets.ModelViewSet):
     queryset = TherapistEarning.objects.all()
     serializer_class = TherapistEarningSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsOwnerOrAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return TherapistEarning.objects.none()
+        if user.is_staff:
+            return TherapistEarning.objects.all()
+        return TherapistEarning.objects.filter(Q(therapist=user) | Q(patient=user) | Q(created_by=user))
 
 class ContactFormViewSet(viewsets.ModelViewSet):
     queryset = ContactForm.objects.all()
     serializer_class = ContactFormSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    
+    def get_permissions(self):
+        if self.action == 'create':
+            return [AllowAny()]
+        return [IsAdminUser()]
 
 class DoctorReasonViewSet(viewsets.ModelViewSet):
     queryset = DoctorReason.objects.all()
     serializer_class = DoctorReasonSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 class SymptomViewSet(viewsets.ModelViewSet):
     queryset = Symptom.objects.all()
     serializer_class = SymptomSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 class DoctorRequestViewSet(viewsets.ModelViewSet):
     queryset = DoctorRequest.objects.all()
     serializer_class = DoctorRequestSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsOwnerOrAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return DoctorRequest.objects.none()
+        if user.is_staff:
+            return DoctorRequest.objects.all()
+        return DoctorRequest.objects.filter(Q(created_by=user) | Q(doctor=user) | Q(patient=user))
 
 class FeedViewSet(viewsets.ModelViewSet):
     queryset = Feed.objects.all()
     serializer_class = FeedSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 class EmergencyResourceViewSet(viewsets.ModelViewSet):
     queryset = EmergencyResource.objects.all()
     serializer_class = EmergencyResourceSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 class AgeGroupViewSet(viewsets.ModelViewSet):
     queryset = AgeGroup.objects.all()
     serializer_class = AgeGroupSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 class AssignedTherapistViewSet(viewsets.ModelViewSet):
     queryset = AssignedTherapist.objects.all()
     serializer_class = AssignedTherapistSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsOwnerOrAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return AssignedTherapist.objects.none()
+        if user.is_staff:
+            return AssignedTherapist.objects.all()
+        return AssignedTherapist.objects.filter(Q(created_by=user) | Q(doctor=user) | Q(patient=user))
 
 class BestDoctorViewSet(viewsets.ModelViewSet):
     queryset = BestDoctor.objects.all()
     serializer_class = BestDoctorSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 class VideoPlanViewSet(viewsets.ModelViewSet):
     queryset = VideoPlan.objects.all()
     serializer_class = VideoPlanSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 class VideoCouponViewSet(viewsets.ModelViewSet):
     queryset = VideoCoupon.objects.all()
     serializer_class = VideoCouponSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 class CouponUserViewSet(viewsets.ModelViewSet):
     queryset = CouponUser.objects.all()
     serializer_class = CouponUserSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsOwnerOrAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return CouponUser.objects.none()
+        if user.is_staff:
+            return CouponUser.objects.all()
+          
+        return CouponUser.objects.filter(created_by=user)
 
 class SubscribedVideoViewSet(viewsets.ModelViewSet):
     queryset = SubscribedVideo.objects.all()
     serializer_class = SubscribedVideoSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsOwnerOrAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return SubscribedVideo.objects.none()
+        if user.is_staff:
+            return SubscribedVideo.objects.all()
+        return SubscribedVideo.objects.filter(created_by=user)
 
 class UserSymptomViewSet(viewsets.ModelViewSet):
     queryset = UserSymptom.objects.all()
     serializer_class = UserSymptomSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsOwnerOrAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return UserSymptom.objects.none()
+        if user.is_staff:
+            return UserSymptom.objects.all()
+        return UserSymptom.objects.filter(created_by=user)
 
 class SettingViewSet(viewsets.ModelViewSet):
     queryset = Setting.objects.all()
     serializer_class = SettingSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 class DisclaimerViewSet(viewsets.ModelViewSet):
     queryset = Disclaimer.objects.all()
     serializer_class = DisclaimerSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 class PushNotificationViewSet(viewsets.ModelViewSet):
     queryset = PushNotification.objects.all()
     serializer_class = PushNotificationSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsOwnerOrAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return PushNotification.objects.none()
+        if user.is_staff:
+            return PushNotification.objects.all()
+        return PushNotification.objects.filter(Q(created_by=user) | Q(user=user))
 
 class FileViewSet(viewsets.ModelViewSet):
     queryset = File.objects.all()
     serializer_class = FileSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsOwnerOrAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return File.objects.none()
+        if user.is_staff:
+            return File.objects.all()
+        return File.objects.filter(created_by=user)
 
 class CurrencyViewSet(viewsets.ModelViewSet):
     queryset = Currency.objects.all()
     serializer_class = CurrencySerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 class RefundLogViewSet(viewsets.ModelViewSet):
     queryset = RefundLog.objects.all()
     serializer_class = RefundLogSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsOwnerOrAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return RefundLog.objects.none()
+        if user.is_staff:
+            return RefundLog.objects.all()
+        return RefundLog.objects.filter(Q(created_by=user) | Q(doctor=user))
 
 class InvoiceViewSet(viewsets.ModelViewSet):
     queryset = Invoice.objects.all()
     serializer_class = InvoiceSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsOwnerOrAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return Invoice.objects.none()
+        if user.is_staff:
+            return Invoice.objects.all()
+        return Invoice.objects.filter(Q(created_by=user) | Q(user=user))
 
 class HomeContentViewSet(viewsets.ModelViewSet):
     queryset = HomeContent.objects.all()
     serializer_class = HomeContentSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 class LoginHistoryViewSet(viewsets.ModelViewSet):
     queryset = LoginHistory.objects.all()
     serializer_class = LoginHistorySerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsOwnerOrAdmin]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return LoginHistory.objects.none()
+        if user.is_staff:
+            return LoginHistory.objects.all()
+        return LoginHistory.objects.filter(user=user)
 
 from rest_framework.permissions import BasePermission
 
@@ -156,7 +281,7 @@ class TherapistApplicationViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action == 'create':
-            return []
+            return [AllowAny()]
         return [HasTherapistApplicationAccess()]
 
     @action(detail=True, methods=['post'], url_path='send-schedule-email')
@@ -215,6 +340,7 @@ class TherapistApplicationViewSet(viewsets.ModelViewSet):
         
         timestamp = int(time.time())
         if resume_file_obj:
+            validate_file_extension(resume_file_obj, {'.pdf', '.doc', '.docx'})
             filename = f"resume-{timestamp}-{resume_file_obj.name}"
             s3_key = upload_to_s3(resume_file_obj, filename)
             if s3_key:
@@ -225,6 +351,7 @@ class TherapistApplicationViewSet(viewsets.ModelViewSet):
                 resume_key = saved_path
                 
         if certs_file_obj:
+            validate_file_extension(certs_file_obj, {'.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'})
             filename = f"certs-{timestamp}-{certs_file_obj.name}"
             s3_key = upload_to_s3(certs_file_obj, filename)
             if s3_key:

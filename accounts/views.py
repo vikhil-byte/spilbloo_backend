@@ -861,6 +861,13 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
             # Handle profile file upload (key may be 'profile_file' or 'User[profile_file]')
             profile_file = request.FILES.get('profile_file') or request.FILES.get('User[profile_file]')
             if profile_file:
+                from core.views import validate_file_extension
+                from rest_framework.exceptions import ValidationError as DRFValidationError
+                try:
+                    validate_file_extension(profile_file, {'.jpg', '.jpeg', '.png', '.webp'})
+                except DRFValidationError as ve:
+                    return Response({"error": ve.detail}, status=status.HTTP_400_BAD_REQUEST)
+
                 from core.s3_utils import upload_to_s3
 
                 filename = f"user-{instance.id}-profile-{profile_file.name}"
