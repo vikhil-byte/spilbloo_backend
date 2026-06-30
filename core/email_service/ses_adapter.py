@@ -8,7 +8,7 @@ class SESEmailAdapter(BaseEmailAdapter):
     """
     Direct AWS SES API email client using boto3 SDK.
     """
-    def send_email(self, subject: str, body: str, to_email: str, from_email: str = None, html_body: str = None, cc: list = None) -> bool:
+    def send_email(self, subject: str, body: str, to_email: str, from_email: str = None, html_body: str = None, cc: list = None, bcc: list = None) -> bool:
         try:
             import boto3
         except ImportError:
@@ -52,6 +52,8 @@ class SESEmailAdapter(BaseEmailAdapter):
             }
             if cc:
                 destination['CcAddresses'] = cc
+            if bcc:
+                destination['BccAddresses'] = bcc
 
             response = client.send_email(
                 Destination=destination,

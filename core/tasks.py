@@ -725,9 +725,10 @@ def send_therapist_application_emails(application_id):
             body=body,
             to_email=instance.email,
             from_email=from_email,
-            html_body=html_content
+            html_body=html_content,
+            bcc=[from_email]
         )
-        logger.info("Sent confirmation email to applicant: %s", instance.email)
+        logger.info("Sent confirmation email to applicant: %s (BCC: %s)", instance.email, from_email)
 
         # 2. Email to Career Team (Notification)
         subject_admin = f"New Therapist Application - {instance.name}"
@@ -804,9 +805,10 @@ def send_therapist_application_status_email(application_id, status_id):
             to_email=instance.email,
             from_email=from_email,
             html_body=html_content,
-            cc=["sarah@spilbloo.com"]
+            cc=["sarah@spilbloo.com"],
+            bcc=[from_email]
         )
-        logger.info(f"Sent status email (status: {status_id}) to applicant: {instance.email} with CC: sarah@spilbloo.com")
+        logger.info(f"Sent status email (status: {status_id}) to applicant: {instance.email} with CC: sarah@spilbloo.com, BCC: {from_email}")
     except Exception as e:
         logger.exception("Failed to send therapist application status email: %s", str(e))
 
@@ -848,9 +850,10 @@ def send_therapist_application_schedule_email(application_id):
             to_email=instance.email,
             from_email=from_email,
             html_body=html_content,
-            cc=["sarah@spilbloo.com"]
+            cc=["sarah@spilbloo.com"],
+            bcc=[from_email]
         )
-        logger.info(f"Sent schedule interview email to applicant: {instance.email} with CC: sarah@spilbloo.com")
+        logger.info(f"Sent schedule interview email to applicant: {instance.email} with CC: sarah@spilbloo.com, BCC: {from_email}")
     except Exception as e:
         logger.exception("Failed to send therapist application schedule email: %s", str(e))
 

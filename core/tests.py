@@ -28,13 +28,17 @@ class EmailServiceTests(TestCase):
         result = client.send_email(
             subject="Test Subject",
             body="Test Body",
-            to_email="test-recipient@spilbloo.com"
+            to_email="test-recipient@spilbloo.com",
+            cc=["cc-recipient@spilbloo.com"],
+            bcc=["bcc-recipient@spilbloo.com"]
         )
         self.assertTrue(result)
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].subject, "Test Subject")
         self.assertEqual(mail.outbox[0].body, "Test Body")
         self.assertEqual(mail.outbox[0].to, ["test-recipient@spilbloo.com"])
+        self.assertEqual(mail.outbox[0].cc, ["cc-recipient@spilbloo.com"])
+        self.assertEqual(mail.outbox[0].bcc, ["bcc-recipient@spilbloo.com"])
         self.assertEqual(mail.outbox[0].from_email, "test-sender@spilbloo.com")
 
     @override_settings(EMAIL_SERVICE_PROVIDER='console')
@@ -152,6 +156,7 @@ class TherapistApplicationTests(APITestCase):
         self.assertEqual(sent_mail.subject, "Schedule Your Interview | Spilbloo")
         self.assertEqual(sent_mail.to, ["john@example.com"])
         self.assertEqual(sent_mail.cc, ["sarah@spilbloo.com"])
+        self.assertEqual(sent_mail.bcc, ["careers@spilbloo.com"])
         self.assertEqual(sent_mail.from_email, "careers@spilbloo.com")
         self.assertIn("Hi John,", sent_mail.body)
         self.assertIn("https://calendly.com/sarah-spilbloo/30min", sent_mail.body)
