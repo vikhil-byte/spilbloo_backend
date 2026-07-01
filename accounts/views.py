@@ -260,6 +260,8 @@ def _legacy_user_detail(user):
         "last_name": getattr(user, "last_name", "") or "",
         "role_id": user.role_id,
         "state_id": user.state_id,
+        "is_superuser": getattr(user, "is_superuser", False),
+        "permissions": list(user.get_all_permissions()) if hasattr(user, "get_all_permissions") else [],
         "contact_no": getattr(user, "contact_no", "") or "",
         "address": getattr(user, "address", "") or "",
         "city": getattr(user, "city", "") or "",
