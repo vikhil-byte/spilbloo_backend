@@ -269,7 +269,7 @@ def _legacy_user_detail(user):
         "provider": 0,
         "isOnline": _safe_str(getattr(user, "online", "") or ""),
         "otp_verified": otp_verified,
-        "otp": _safe_str(getattr(user, "otp", "") or "") if settings.DEBUG else "",
+        #"otp": _safe_str(getattr(user, "otp", "") or "") if settings.DEBUG else "",
         "is_ios_app_update": False,
         "is_subscribed_user": bool(active_paid_subscription),
         "is_buy_subscripion": bool(active_paid_subscription),

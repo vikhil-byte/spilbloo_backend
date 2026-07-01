@@ -245,6 +245,15 @@ AUTH_USER_MODEL = "accounts.User"
 CORS_ALLOWED_ORIGINS = [
     org.strip() for org in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if org.strip()
 ]
+if not CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://spilbloo.com",
+        "https://www.spilbloo.com",
+        "https://dev.spilbloo.com",
+        "https://www.dev.spilbloo.com",
+    ]
 CORS_ALLOW_ALL_ORIGINS = os.environ.get("CORS_ALLOW_ALL_ORIGINS", "True" if DEBUG else "False") == "True"
 
 # REST Framework
