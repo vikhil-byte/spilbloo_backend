@@ -290,7 +290,7 @@ def _legacy_user_detail(user):
         "gender": getattr(user, "gender", 0) or 0,
         "inr_payment_bottom_sheet_url": "",
         "is_android_under_maintenance": 0,
-        "is_app_update": 1,
+        "is_app_update": False,
         "is_available": 1 if getattr(user, "is_available", True) else 0,
         "is_consent_accept": getattr(user, "is_consent_accept", 0) or 0,
         "is_ios_under_maintenance": 0,
