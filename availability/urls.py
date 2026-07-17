@@ -1,6 +1,6 @@
 from django.urls import path
 from .views import (
-    AddScheduleView, UpdateScheduleView, GetDoctorSlotView, BookingView,
+    AddScheduleView, UpdateScheduleView, GetDoctorSlotView, SlotListView, BookingView,
     DoctorBookingListView, PatientBookingListView, DoctorBookingReqView,
     NotificationCountView, AcceptBookingView, DoctorRescheduleView,
     DoctorCancelView, PatientRescheduleView, ConfirmRescheduleView,
@@ -24,7 +24,7 @@ urlpatterns = [
     path('check-video-link/', CheckVideoLinkView.as_view(), name='check_video_link'),
     path('notification-count/', NotificationCountView.as_view(), name='notification_count'),
     # iOS legacy compatibility aliases.
-    path('list/', GetDoctorSlotView.as_view(), name='slot_list_legacy'),
+    path('list/', SlotListView.as_view(), name='slot_list_legacy'),
     path('get-doctor-slot/', GetDoctorSlotView.as_view(), name='get_doctor_slot_legacy'),
     path('booking/', BookingView.as_view(), name='booking_legacy'),
     path('patient-booking-list/', PatientBookingListView.as_view(), name='patient_booking_list_legacy'),

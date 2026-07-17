@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
 from .models import DoctorSlot, SlotBooking, Slot, Notification, PrescriptionUpload
-from .serializers import DoctorSlotSerializer, SlotBookingSerializer
+from .serializers import DoctorSlotSerializer, SlotBookingSerializer, SlotSerializer
 from django.db import transaction
 from django.utils import timezone
 from core.models import RefundLog
@@ -164,6 +164,29 @@ class UpdateScheduleView(APIView):
         except Exception:
             logger.exception("update-schedule failed for doctor_id=%s", getattr(doctor, "id", None))
             return Response({"error": "Unable to update availability."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SlotListView(APIView):
+    permission_classes = (AllowAny,)
+
+    def get(self, request):
+        start_time = request.query_params.get('start_time')
+        end_time = request.query_params.get('end_time')
+        page = request.query_params.get('page', 0)
+
+        # PHP: Slot::findActive() — active slot templates sorted by id ASC, paginated
+        queryset = Slot.objects.filter(state_id=1).order_by('id')
+
+        page_size = 100
+        start = int(page) * page_size
+        end = start + page_size
+        paginated = queryset[start:end]
+
+        serializer = SlotSerializer(
+            paginated, many=True,
+            context={'request': request, 'start_time': start_time, 'end_time': end_time}
+        )
+        return Response({"list": serializer.data}, status=status.HTTP_200_OK)
 
 
 class GetDoctorSlotView(APIView):
