@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated
 from django.contrib.auth import get_user_model
+from django.http import Http404
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -950,11 +951,22 @@ class DetailView(generics.RetrieveAPIView):
     permission_classes = (AllowAny,)
     serializer_class = UserSerializer
 
+    def get_object(self):
+        pk = self.kwargs.get(self.lookup_url_kwarg) or self.request.query_params.get('id')
+        if pk is None:
+            raise Http404
+        queryset = self.get_queryset()
+        queryset = queryset.filter(pk=pk)
+        try:
+            return queryset.get()
+        except queryset.model.DoesNotExist:
+            raise Http404
+
     def retrieve(self, request, *args, **kwargs):
         try:
             instance = self.get_object()
             return Response({"detail": _legacy_user_detail(instance)}, status=status.HTTP_200_OK)
-        except Exception:
+        except Http404:
             return Response({"error": "Data Not Found"}, status=status.HTTP_400_BAD_REQUEST)
 
 
