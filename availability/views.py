@@ -13,10 +13,10 @@ from django.core.mail import send_mail
 from django.conf import settings
 import os
 from core.email_service import get_email_client
+from core.firebase import _send_fcm
 
 
 User = get_user_model()
-import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,41 +33,6 @@ def send_event_email(to_email, subject, message):
         from_email=from_email
     )
 
-
-def _send_fcm(token, title, description):
-    try:
-        import firebase_admin
-        from firebase_admin import credentials, messaging
-    except Exception:
-        return False
-
-    try:
-        app = firebase_admin.get_app()
-    except Exception:
-        app = None
-
-    try:
-        if app is None:
-            cred_path = os.environ.get("FIREBASE_CREDENTIALS_PATH", "")
-            if cred_path and os.path.exists(cred_path):
-                cred = credentials.Certificate(cred_path)
-                app = firebase_admin.initialize_app(cred)
-            else:
-                service_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
-                if not service_json:
-                    return False
-                cred = credentials.Certificate(json.loads(service_json))
-                app = firebase_admin.initialize_app(cred)
-
-        msg = messaging.Message(
-            token=token,
-            notification=messaging.Notification(title=title, body=description),
-            data={"title": title, "description": description},
-        )
-        messaging.send(msg, app=app)
-        return True
-    except Exception:
-        return False
 
 def send_push_notification(user, title, description):
     if not user:
@@ -89,7 +54,7 @@ class AddScheduleView(APIView):
 
     def post(self, request):
         doctor = request.user
-        availability_data = request.data.get('availability', '[]')
+        availability_data = request.data.get('DoctorSlot[availability]') or request.data.get('availability', '[]')
         
         try:
             availability_list = json.loads(availability_data)
@@ -130,9 +95,9 @@ class UpdateScheduleView(APIView):
 
     def post(self, request):
         doctor = request.user
-        start_time = request.data.get('start_time')
-        end_time = request.data.get('end_time')
-        availability_data = request.data.get('availability', '[]')
+        start_time = request.query_params.get('start_time') or request.data.get('start_time')
+        end_time = request.query_params.get('end_time') or request.data.get('end_time')
+        availability_data = request.data.get('DoctorSlot[availability]') or request.data.get('availability', '[]')
 
         if not start_time or not end_time:
             return Response({"error": "Start and End time required."}, status=status.HTTP_400_BAD_REQUEST)

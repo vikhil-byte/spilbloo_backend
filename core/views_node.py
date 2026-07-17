@@ -12,6 +12,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.exceptions import PermissionDenied, NotAuthenticated, AuthenticationFailed
 
 from .node_auth import IsNodePatientOrTherapist, NodeHeaderTokenAuthentication
+from .firebase import _send_fcm
 from .models import (
     NodeSubscriptionPlan, NodeUserSelectedTherapistPlan, HomeCard,
     DailyJournal, DailyCheckinQuestion, DailyCheckinAnswer,
@@ -436,13 +437,26 @@ class SendPushNotificationView(NodeBaseAPIView):
     def post(self, request):
         try:
             to_id = request.data.get("to_id")
+            title = request.data.get("title", "")
+            chat_id = request.data.get("chat_id", "")
+            type_id = request.data.get("type_id", "0")
+
+            if not to_id:
+                return Response(node_error("Missing to_id", 400), status=400)
+
             tokens = ApiAccessToken.objects.filter(created_by_id=to_id)
             if not tokens.exists():
                 return Response(node_error("Error sending push notification", 400), status=400)
-            device_token = tokens.first().device_token
-            # StarterNode returns success envelope with device token in results.
+
+            data = {"chat_id": str(chat_id), "type_id": str(type_id)}
+            sent_count = 0
+            for t in tokens:
+                if t.device_token:
+                    if _send_fcm(t.device_token, title, title, data=data):
+                        sent_count += 1
+
             return Response(
-                node_success("Push notification sent successfully", device_token, 200),
+                node_success("Push notification sent successfully", sent_count, 200),
                 status=200,
             )
         except Exception:
