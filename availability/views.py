@@ -17,6 +17,7 @@ from core.firebase import _send_fcm
 
 
 User = get_user_model()
+import json
 import logging
 
 logger = logging.getLogger(__name__)
