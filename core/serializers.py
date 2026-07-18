@@ -188,7 +188,7 @@ class TherapistInviteSerializer(serializers.ModelSerializer):
     class Meta:
         model = TherapistInvite
         fields = ('id', 'email', 'token', 'expires_at', 'used', 'status', 'created_on', 'created_by')
-        read_only_fields = ('token', 'created_on')
+        read_only_fields = ('id', 'token', 'expires_at', 'used', 'status', 'created_on', 'created_by')
 
     def get_status(self, obj):
         if obj.used:
