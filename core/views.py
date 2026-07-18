@@ -498,6 +498,10 @@ class TherapistOnboardingView(APIView):
 
             with transaction.atomic():
                 # Create User account
+                # Gender mapping
+                GENDER_MAP = {'male': 1, 'female': 2, 'other': 3, 'prefer_not_to_say': 0}
+                gender_val = GENDER_MAP.get(data.get('gender', ''), None)
+
                 user = User.objects.create_user(
                     email=data['email'],
                     password=data['password'],
@@ -506,6 +510,7 @@ class TherapistOnboardingView(APIView):
                     state_id=User.STATE_ACTIVE,
                     contact_no=data['contact_no'],
                     date_of_birth=data.get('date_of_birth'),
+                    gender=gender_val,
                     city=data.get('city', ''),
                     country=data.get('country', ''),
                     about_me=data.get('about_me', ''),
@@ -514,13 +519,17 @@ class TherapistOnboardingView(APIView):
                     email_verified=1,
                 )
 
-                # Set language
-                try:
-                    language_obj = Language.objects.get(id=data['language_id'])
-                    user.language = language_obj.name
+                # Set languages (store as comma-separated names)
+                lang_names = []
+                for lid in data.get('language_ids', []):
+                    try:
+                        lang_obj = Language.objects.get(id=lid)
+                        lang_names.append(lang_obj.name)
+                    except Language.DoesNotExist:
+                        pass
+                if lang_names:
+                    user.language = ', '.join(lang_names)
                     user.save(update_fields=['language'])
-                except Language.DoesNotExist:
-                    pass
 
                 # Create UserSymptom associations
                 for symptom_id in data.get('symptoms', []):
@@ -532,8 +541,10 @@ class TherapistOnboardingView(APIView):
                 # Handle file uploads
                 from core.s3_utils import upload_to_s3
                 profile_key = ""
-                resume_key = ""
-                certs_key = ""
+                qualification_key = ""
+                government_id_key = ""
+                rci_key = ""
+                allowed_doc_exts = {'.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'}
 
                 profile_file = request.FILES.get('profile_image')
                 if profile_file:
@@ -544,29 +555,41 @@ class TherapistOnboardingView(APIView):
                     user.profile_file = profile_key
                     user.save(update_fields=['profile_file'])
 
-                resume_file = request.FILES.get('resume_file')
-                if resume_file:
-                    ext = os.path.splitext(resume_file.name)[1].lower()
-                    if ext not in {'.pdf', '.doc', '.docx'}:
+                qualification_file = request.FILES.get('qualification_file')
+                if qualification_file:
+                    ext = os.path.splitext(qualification_file.name)[1].lower()
+                    if ext not in allowed_doc_exts:
                         raise ValidationError(
-                            {"resume_file": ["Allowed file types: .pdf, .doc, .docx"]}
+                            {"qualification_file": ["Allowed file types: .pdf, .doc, .docx, .jpg, .jpeg, .png"]}
                         )
-                    filename = f"resume-{int(time.time())}-{resume_file.name}"
-                    s3_key = upload_to_s3(resume_file, filename)
+                    filename = f"qualification-{int(time.time())}-{qualification_file.name}"
+                    s3_key = upload_to_s3(qualification_file, filename)
                     if s3_key:
-                        resume_key = s3_key
+                        qualification_key = s3_key
 
-                certs_file = request.FILES.get('certifications_file')
-                if certs_file:
-                    ext = os.path.splitext(certs_file.name)[1].lower()
-                    if ext not in {'.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'}:
+                government_id_file = request.FILES.get('government_id_file')
+                if government_id_file:
+                    ext = os.path.splitext(government_id_file.name)[1].lower()
+                    if ext not in allowed_doc_exts:
                         raise ValidationError(
-                            {"certifications_file": ["Allowed file types: .pdf, .doc, .docx, .jpg, .jpeg, .png"]}
+                            {"government_id_file": ["Allowed file types: .pdf, .doc, .docx, .jpg, .jpeg, .png"]}
                         )
-                    filename = f"certs-{int(time.time())}-{certs_file.name}"
-                    s3_key = upload_to_s3(certs_file, filename)
+                    filename = f"govid-{int(time.time())}-{government_id_file.name}"
+                    s3_key = upload_to_s3(government_id_file, filename)
                     if s3_key:
-                        certs_key = s3_key
+                        government_id_key = s3_key
+
+                rci_file = request.FILES.get('rci_file')
+                if rci_file:
+                    ext = os.path.splitext(rci_file.name)[1].lower()
+                    if ext not in allowed_doc_exts:
+                        raise ValidationError(
+                            {"rci_file": ["Allowed file types: .pdf, .doc, .docx, .jpg, .jpeg, .png"]}
+                        )
+                    filename = f"rci-{int(time.time())}-{rci_file.name}"
+                    s3_key = upload_to_s3(rci_file, filename)
+                    if s3_key:
+                        rci_key = s3_key
 
                 # Create TherapistApplication record
                 TherapistApplication.objects.create(
@@ -575,13 +598,14 @@ class TherapistOnboardingView(APIView):
                     experience=str(data['experience']),
                     qualification='',
                     symptoms=json.dumps(data.get('symptoms', [])),
-                    language_id=data['language_id'],
-                    resume_file=resume_key,
-                    certifications_file=certs_key or None,
+                    language_id=data.get('language_ids', [None])[0],
+                    resume_file=qualification_key or None,
+                    certifications_file=government_id_key or None,
                     consent_given=True,
                     consent_date_time=timezone.now(),
                     state_id=TherapistApplication.STATE_ADD,
                     created_by=user,
+                    rci_file=rci_key or None,
                 )
 
                 # Mark invite as used

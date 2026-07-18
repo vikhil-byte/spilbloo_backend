@@ -1115,6 +1115,7 @@ class TherapistApplication(models.Model):
     
     resume_file = models.CharField(max_length=1024)
     certifications_file = models.CharField(max_length=1024, blank=True, null=True)
+    rci_file = models.CharField(max_length=1024, blank=True, null=True)
     linkedin_profile = models.CharField(max_length=1024, blank=True, null=True)
 
     language = models.ForeignKey(

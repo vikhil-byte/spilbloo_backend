@@ -148,10 +148,13 @@ class FaqSerializer(serializers.ModelSerializer):
 class TherapistApplicationSerializer(serializers.ModelSerializer):
     resume_file = serializers.FileField(required=True, write_only=True)
     certifications_file = serializers.FileField(required=False, allow_null=True, write_only=True)
+    rci_file = serializers.FileField(required=False, allow_null=True, write_only=True)
     resume_file_path = serializers.CharField(source='resume_file', read_only=True)
     certifications_file_path = serializers.CharField(source='certifications_file', read_only=True)
+    rci_file_path = serializers.CharField(source='rci_file', read_only=True)
     resume_url = serializers.SerializerMethodField()
     certifications_url = serializers.SerializerMethodField()
+    rci_url = serializers.SerializerMethodField()
 
     # Frontend aliases and display mappings
     state = serializers.CharField(source='get_state_id_display', read_only=True)
@@ -174,6 +177,10 @@ class TherapistApplicationSerializer(serializers.ModelSerializer):
     def get_certifications_url(self, obj):
         from core.s3_utils import get_file_url
         return get_file_url(obj.certifications_file)
+
+    def get_rci_url(self, obj):
+        from core.s3_utils import get_file_url
+        return get_file_url(obj.rci_file)
 
 
 class LanguageSerializer(serializers.ModelSerializer):
@@ -204,12 +211,17 @@ class TherapistOnboardingSerializer(serializers.Serializer):
     password = serializers.CharField(required=True, write_only=True, min_length=8)
     contact_no = serializers.CharField(max_length=50, required=True)
     date_of_birth = serializers.DateField(required=True, allow_null=True)
+    gender = serializers.ChoiceField(choices=['male', 'female', 'other', 'prefer_not_to_say'], required=False, default='')
     city = serializers.CharField(max_length=100, required=False, default='')
     country = serializers.CharField(max_length=100, required=False, default='')
     about_me = serializers.CharField(required=False, default='')
     experience = serializers.IntegerField(required=True, min_value=0, max_value=50)
     sessions_completed = serializers.IntegerField(required=True, min_value=0)
-    language_id = serializers.IntegerField(required=True)
+    language_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=True,
+        min_length=1,
+    )
     symptoms = serializers.ListField(
         child=serializers.IntegerField(),
         required=False,
