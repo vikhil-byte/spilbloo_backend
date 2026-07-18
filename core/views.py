@@ -431,13 +431,12 @@ class TherapistInviteViewSet(viewsets.ModelViewSet):
                 'onboarding_url': onboarding_url,
                 'expires_at': expires_at.strftime('%B %d, %Y at %I:%M %p'),
             })
-            send_mail(
+            from core.email_service import get_email_client
+            get_email_client().send_email(
                 subject=subject,
-                message=f"Complete your therapist onboarding at: {onboarding_url}",
-                from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'no-reply@spilbloo.com'),
-                recipient_list=[email],
-                html_message=html_message,
-                fail_silently=True,
+                body=f"Complete your therapist onboarding at: {onboarding_url}",
+                to_email=email,
+                html_body=html_message,
             )
             logger.info("Therapist invite sent to %s", email)
         except Exception:
