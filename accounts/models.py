@@ -76,6 +76,7 @@ class User(AbstractUser):
 
     qualification = models.CharField(max_length=255, blank=True, null=True)
     experience = models.IntegerField(default=0, blank=True, null=True)
+    sessions_completed = models.IntegerField(default=0, blank=True, null=True)
     online = models.CharField(max_length=50, default='no', blank=True, null=True)
     is_available = models.BooleanField(default=True)
     token = models.CharField(max_length=255, default='', blank=True, null=True)

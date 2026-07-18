@@ -1,11 +1,23 @@
-from rest_framework import viewsets
+from rest_framework import viewsets, generics, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticatedOrReadOnly, BasePermission, SAFE_METHODS, AllowAny, IsAdminUser
+from rest_framework.views import APIView
 from django.template.loader import render_to_string
-from django.db.models import Q
+from django.db import transaction
+from django.utils import timezone
+from django.core.mail import send_mail
+from django.conf import settings
+from django.contrib.auth import get_user_model
 import os
+import uuid
+import json
+import time
+import logging
 from rest_framework.exceptions import ValidationError
+
+User = get_user_model()
+logger = logging.getLogger(__name__)
 
 class IsAdminOrReadOnly(BasePermission):
     def has_permission(self, request, view):
@@ -39,18 +51,20 @@ from .models import (
     TherapistEarning, ContactForm, DoctorReason, Symptom, DoctorRequest,
     Feed, EmergencyResource, AgeGroup, AssignedTherapist, BestDoctor,
     VideoPlan, VideoCoupon, CouponUser, SubscribedVideo, UserSymptom,
-    Setting, Disclaimer, PushNotification, File, Currency, RefundLog, 
-    Invoice, HomeContent, LoginHistory, TherapistApplication
+    Setting, Disclaimer, PushNotification, File, Currency, RefundLog,
+    Invoice, HomeContent, LoginHistory, TherapistApplication,
+    Language, TherapistInvite
 )
 from .serializers import (
-    TherapistEarningSerializer, ContactFormSerializer, DoctorReasonSerializer, 
-    SymptomSerializer, DoctorRequestSerializer, FeedSerializer, 
-    EmergencyResourceSerializer, AgeGroupSerializer, AssignedTherapistSerializer, 
-    BestDoctorSerializer, VideoPlanSerializer, VideoCouponSerializer, 
+    TherapistEarningSerializer, ContactFormSerializer, DoctorReasonSerializer,
+    SymptomSerializer, DoctorRequestSerializer, FeedSerializer,
+    EmergencyResourceSerializer, AgeGroupSerializer, AssignedTherapistSerializer,
+    BestDoctorSerializer, VideoPlanSerializer, VideoCouponSerializer,
     CouponUserSerializer, SubscribedVideoSerializer, UserSymptomSerializer,
-    SettingSerializer, DisclaimerSerializer, PushNotificationSerializer, 
-    FileSerializer, CurrencySerializer, RefundLogSerializer, InvoiceSerializer, 
-    HomeContentSerializer, LoginHistorySerializer, TherapistApplicationSerializer
+    SettingSerializer, DisclaimerSerializer, PushNotificationSerializer,
+    FileSerializer, CurrencySerializer, RefundLogSerializer, InvoiceSerializer,
+    HomeContentSerializer, LoginHistorySerializer, TherapistApplicationSerializer,
+    LanguageSerializer, TherapistInviteSerializer, TherapistOnboardingSerializer
 )
 
 class TherapistEarningViewSet(viewsets.ModelViewSet):
@@ -380,5 +394,209 @@ class TherapistApplicationViewSet(viewsets.ModelViewSet):
             import logging
             logger = logging.getLogger(__name__)
             logger.exception("Failed to queue therapist application emails Celery task: %s", str(e))
+
+
+class LanguageViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Language.objects.filter(state_id=Language.STATE_ACTIVE).order_by('name')
+    serializer_class = LanguageSerializer
+    permission_classes = [AllowAny]
+
+
+class TherapistInviteViewSet(viewsets.ModelViewSet):
+    queryset = TherapistInvite.objects.all().order_by('-created_on')
+    serializer_class = TherapistInviteSerializer
+    permission_classes = [IsAdminUser]
+
+    def perform_create(self, serializer):
+        email = serializer.validated_data['email']
+        token = uuid.uuid4()
+
+        # Default expiry: 7 days from now
+        from datetime import timedelta
+        expires_at = timezone.now() + timedelta(days=7)
+
+        invite = TherapistInvite.objects.create(
+            email=email,
+            token=token,
+            expires_at=expires_at,
+            created_by=self.request.user,
+        )
+        serializer.instance = invite
+
+        # Send invite email
+        try:
+            onboarding_url = f"{getattr(settings, 'SITE_URL', '')}/therapist-onboarding?token={token}"
+            subject = "You're Invited to Join Spilbloo as a Therapist"
+            html_message = render_to_string('emails/therapist_invite.html', {
+                'onboarding_url': onboarding_url,
+                'expires_at': expires_at.strftime('%B %d, %Y at %I:%M %p'),
+            })
+            send_mail(
+                subject=subject,
+                message=f"Complete your therapist onboarding at: {onboarding_url}",
+                from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'no-reply@spilbloo.com'),
+                recipient_list=[email],
+                html_message=html_message,
+                fail_silently=True,
+            )
+            logger.info("Therapist invite sent to %s", email)
+        except Exception:
+            logger.exception("Failed to send therapist invite email to %s", email)
+
+    def get_queryset(self):
+        return TherapistInvite.objects.all().order_by('-created_on')
+
+
+class TherapistOnboardingView(APIView):
+    permission_classes = [AllowAny]
+
+    def _validate_token(self, request):
+        """Validate the invite token from query params. Returns invite or raises."""
+        token_str = request.query_params.get('token') or request.data.get('token', '')
+        if not token_str:
+            raise ValidationError({"token": ["Invite token is required."]})
+        try:
+            invite = TherapistInvite.objects.get(token=token_str)
+        except TherapistInvite.DoesNotExist:
+            raise ValidationError({"token": ["Invalid invite token."]})
+        if invite.used:
+            raise ValidationError({"token": ["This invite has already been used."]})
+        if invite.is_expired():
+            raise ValidationError({"token": ["This invite link has expired. Please request a new one."]})
+        return invite
+
+    def get(self, request):
+        """Check if invite token is valid — used by frontend to pre-fill email."""
+        try:
+            invite = self._validate_token(request)
+            return Response({
+                'valid': True,
+                'email': invite.email,
+                'expires_at': invite.expires_at.isoformat(),
+            }, status=status.HTTP_200_OK)
+        except ValidationError as e:
+            return Response({'valid': False, 'detail': e.detail}, status=status.HTTP_400_BAD_REQUEST)
+
+    def post(self, request):
+        """Complete therapist onboarding: create User + TherapistApplication."""
+        invite = None
+        try:
+            invite = self._validate_token(request)
+
+            serializer = TherapistOnboardingSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            data = serializer.validated_data
+
+            # Email must match invite
+            if data['email'].lower() != invite.email.lower():
+                raise ValidationError(
+                    {"email": ["Email does not match the invited email address."]}
+                )
+
+            with transaction.atomic():
+                # Create User account
+                user = User.objects.create_user(
+                    email=data['email'],
+                    password=data['password'],
+                    full_name=data['full_name'],
+                    role_id=User.ROLE_DOCTER,
+                    state_id=User.STATE_ACTIVE,
+                    experience=data['experience'],
+                    sessions_completed=data['sessions_completed'],
+                    email_verified=1,
+                )
+
+                # Set language
+                try:
+                    language_obj = Language.objects.get(id=data['language_id'])
+                    user.language = language_obj.name
+                    user.save(update_fields=['language'])
+                except Language.DoesNotExist:
+                    pass
+
+                # Create UserSymptom associations
+                for symptom_id in data.get('symptoms', []):
+                    UserSymptom.objects.create(
+                        symptom_id=symptom_id,
+                        created_by=user,
+                    )
+
+                # Handle file uploads
+                from core.s3_utils import upload_to_s3
+                profile_key = ""
+                resume_key = ""
+                certs_key = ""
+
+                profile_file = request.FILES.get('profile_image')
+                if profile_file:
+                    filename = f"profile-{int(time.time())}-{profile_file.name}"
+                    s3_key = upload_to_s3(profile_file, filename)
+                    if s3_key:
+                        profile_key = s3_key
+                    user.profile_file = profile_key
+                    user.save(update_fields=['profile_file'])
+
+                resume_file = request.FILES.get('resume_file')
+                if resume_file:
+                    ext = os.path.splitext(resume_file.name)[1].lower()
+                    if ext not in {'.pdf', '.doc', '.docx'}:
+                        raise ValidationError(
+                            {"resume_file": ["Allowed file types: .pdf, .doc, .docx"]}
+                        )
+                    filename = f"resume-{int(time.time())}-{resume_file.name}"
+                    s3_key = upload_to_s3(resume_file, filename)
+                    if s3_key:
+                        resume_key = s3_key
+
+                certs_file = request.FILES.get('certifications_file')
+                if certs_file:
+                    ext = os.path.splitext(certs_file.name)[1].lower()
+                    if ext not in {'.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'}:
+                        raise ValidationError(
+                            {"certifications_file": ["Allowed file types: .pdf, .doc, .docx, .jpg, .jpeg, .png"]}
+                        )
+                    filename = f"certs-{int(time.time())}-{certs_file.name}"
+                    s3_key = upload_to_s3(certs_file, filename)
+                    if s3_key:
+                        certs_key = s3_key
+
+                # Create TherapistApplication record
+                TherapistApplication.objects.create(
+                    name=data['full_name'],
+                    email=data['email'],
+                    experience=str(data['experience']),
+                    qualification='',
+                    symptoms=json.dumps(data.get('symptoms', [])),
+                    language_id=data['language_id'],
+                    resume_file=resume_key,
+                    certifications_file=certs_key or None,
+                    consent_given=True,
+                    consent_date_time=timezone.now(),
+                    state_id=TherapistApplication.STATE_ADD,
+                    created_by=user,
+                )
+
+                # Mark invite as used
+                invite.used = True
+                invite.save(update_fields=['used'])
+
+            return Response(
+                {
+                    'message': 'Onboarding completed successfully.',
+                    'user_id': user.id,
+                    'email': user.email,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        except ValidationError as e:
+            return Response({'detail': e.detail}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("Therapist onboarding failed for email=%s",
+                             getattr(invite, 'email', None))
+            return Response(
+                {'detail': 'An error occurred during onboarding. Please try again.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 

@@ -1117,6 +1117,12 @@ class TherapistApplication(models.Model):
     certifications_file = models.CharField(max_length=1024, blank=True, null=True)
     linkedin_profile = models.CharField(max_length=1024, blank=True, null=True)
 
+    language = models.ForeignKey(
+        'Language', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='therapist_applications'
+    )
+    symptoms = models.TextField(blank=True, null=True)  # JSON array of symptom IDs
+
     consent_given = models.BooleanField(default=False)
     consent_date_time = models.DateTimeField(null=True, blank=True)
 
@@ -1131,5 +1137,51 @@ class TherapistApplication(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class Language(models.Model):
+    STATE_INACTIVE = 0
+    STATE_ACTIVE = 1
+
+    STATE_CHOICES = (
+        (STATE_INACTIVE, 'Inactive'),
+        (STATE_ACTIVE, 'Active'),
+    )
+
+    name = models.CharField(max_length=100, unique=True)
+    code = models.CharField(max_length=10, blank=True, null=True)
+    state_id = models.SmallIntegerField(choices=STATE_CHOICES, default=STATE_ACTIVE)
+    created_on = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'tbl_language'
+        verbose_name = 'Language'
+        verbose_name_plural = 'Languages'
+
+    def __str__(self):
+        return self.name
+
+
+class TherapistInvite(models.Model):
+    email = models.EmailField(max_length=255)
+    token = models.UUIDField(unique=True, default=None)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='created_therapist_invites'
+    )
+    created_on = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'tbl_therapist_invite'
+        verbose_name = 'Therapist Invite'
+        verbose_name_plural = 'Therapist Invites'
+
+    def is_expired(self):
+        return timezone.now() > self.expires_at
+
+    def __str__(self):
+        return f"{self.email} ({'used' if self.used else 'pending'})"
 
 

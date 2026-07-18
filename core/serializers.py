@@ -1,10 +1,12 @@
 from rest_framework import serializers
+from django.contrib.auth import get_user_model
 from .models import (
     TherapistEarning, ContactForm, DoctorReason, Symptom, DoctorRequest,
     Feed, EmergencyResource, AgeGroup, AssignedTherapist, BestDoctor,
     VideoPlan, VideoCoupon, CouponUser, SubscribedVideo, UserSymptom,
-    Setting, Disclaimer, PushNotification, File, Currency, RefundLog, 
-    Invoice, HomeContent, LoginHistory, Page, Category, Faq, TherapistApplication
+    Setting, Disclaimer, PushNotification, File, Currency, RefundLog,
+    Invoice, HomeContent, LoginHistory, Page, Category, Faq, TherapistApplication,
+    Language, TherapistInvite
 )
 
 class TherapistEarningSerializer(serializers.ModelSerializer):
@@ -172,5 +174,73 @@ class TherapistApplicationSerializer(serializers.ModelSerializer):
     def get_certifications_url(self, obj):
         from core.s3_utils import get_file_url
         return get_file_url(obj.certifications_file)
+
+
+class LanguageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Language
+        fields = ('id', 'name', 'code')
+
+
+class TherapistInviteSerializer(serializers.ModelSerializer):
+    status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TherapistInvite
+        fields = ('id', 'email', 'token', 'expires_at', 'used', 'status', 'created_on', 'created_by')
+        read_only_fields = ('token', 'created_on')
+
+    def get_status(self, obj):
+        if obj.used:
+            return 'used'
+        if obj.is_expired():
+            return 'expired'
+        return 'pending'
+
+
+class TherapistOnboardingSerializer(serializers.Serializer):
+    full_name = serializers.CharField(max_length=50, required=True)
+    email = serializers.EmailField(required=True)
+    password = serializers.CharField(required=True, write_only=True, min_length=8)
+    experience = serializers.IntegerField(required=True, min_value=0, max_value=50)
+    sessions_completed = serializers.IntegerField(required=True, min_value=0)
+    language_id = serializers.IntegerField(required=True)
+    symptoms = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        default=list
+    )
+
+    def validate_password(self, value):
+        """Enforce strong password: uppercase, lowercase, digit, special char."""
+        if not any(c.isupper() for c in value):
+            raise serializers.ValidationError(
+                "Password must contain at least one uppercase letter."
+            )
+        if not any(c.islower() for c in value):
+            raise serializers.ValidationError(
+                "Password must contain at least one lowercase letter."
+            )
+        if not any(c.isdigit() for c in value):
+            raise serializers.ValidationError(
+                "Password must contain at least one digit."
+            )
+        if not any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?' for c in value):
+            raise serializers.ValidationError(
+                "Password must contain at least one special character."
+            )
+        return value
+
+    def validate_language_id(self, value):
+        if not Language.objects.filter(id=value, state_id=Language.STATE_ACTIVE).exists():
+            raise serializers.ValidationError("Invalid language selection.")
+        return value
+
+    def validate_symptoms(self, value):
+        """Ensure all symptom IDs are valid."""
+        for sid in value:
+            if not Symptom.objects.filter(id=sid, state_id=Symptom.STATE_ACTIVE).exists():
+                raise serializers.ValidationError(f"Invalid symptom ID: {sid}")
+        return value
 
 
