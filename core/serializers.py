@@ -179,7 +179,7 @@ class TherapistApplicationSerializer(serializers.ModelSerializer):
 class LanguageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Language
-        fields = ('id', 'name', 'code')
+        fields = ('id', 'name', 'code', 'state_id')
 
 
 class TherapistInviteSerializer(serializers.ModelSerializer):

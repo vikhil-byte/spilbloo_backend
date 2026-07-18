@@ -396,10 +396,14 @@ class TherapistApplicationViewSet(viewsets.ModelViewSet):
             logger.exception("Failed to queue therapist application emails Celery task: %s", str(e))
 
 
-class LanguageViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Language.objects.filter(state_id=Language.STATE_ACTIVE).order_by('name')
+class LanguageViewSet(viewsets.ModelViewSet):
+    queryset = Language.objects.all().order_by('name')
     serializer_class = LanguageSerializer
-    permission_classes = [AllowAny]
+
+    def get_permissions(self):
+        if self.request.method in SAFE_METHODS:
+            return [AllowAny()]
+        return [IsAdminUser()]
 
 
 class TherapistInviteViewSet(viewsets.ModelViewSet):
