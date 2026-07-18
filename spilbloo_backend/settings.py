@@ -291,6 +291,7 @@ CELERY_TIMEZONE = TIME_ZONE
 EMAIL_SERVICE_PROVIDER = os.environ.get('EMAIL_SERVICE_PROVIDER', 'smtp') # options: smtp, ses, console
 
 # SMTP settings
+SITE_URL = os.environ.get('SITE_URL', '')
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = os.environ.get('EMAIL_HOST', 'localhost')
 EMAIL_PORT = int(os.environ.get('EMAIL_PORT', 587))
