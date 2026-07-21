@@ -28,7 +28,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-=3g+043(r&e=g1&ixq3w3*+6n&t$-&n&p+78(-w-0g3%k$5$l%")
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = "django-insecure-dev-key-not-for-production"
+    else:
+        raise ValueError("SECRET_KEY environment variable is required in production")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DEBUG", "True") == "True"
@@ -128,12 +133,8 @@ if os.environ.get("USE_SQLITE") == "1":
         "NAME": os.environ.get("SQLITE_DB_PATH", str(BASE_DIR / "db.sqlite3")),
     }
 
-import sys
-if 'test' in sys.argv:
-    DATABASES['default'] = {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': ':memory:',
-    }
+# Note: For test DB override, use settings_test.py via:
+#   python manage.py test --settings=spilbloo_backend.settings_test
 
 
 
