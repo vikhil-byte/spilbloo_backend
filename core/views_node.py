@@ -441,25 +441,40 @@ class SendPushNotificationView(NodeBaseAPIView):
             chat_id = request.data.get("chat_id", "")
             type_id = request.data.get("type_id", "0")
 
+            logger.info("SendPushNotification: to_id=%s title=%r chat_id=%s type_id=%s", to_id, title, chat_id, type_id)
+
             if not to_id:
+                logger.warning("SendPushNotification: missing to_id")
                 return Response(node_error("Missing to_id", 400), status=400)
 
             tokens = ApiAccessToken.objects.filter(created_by_id=to_id)
+            token_count = tokens.count()
+            logger.info("SendPushNotification: found %d ApiAccessToken records for user_id=%s", token_count, to_id)
+
             if not tokens.exists():
+                logger.warning("SendPushNotification: no ApiAccessToken records for user_id=%s", to_id)
                 return Response(node_error("Error sending push notification", 400), status=400)
 
             data = {"chat_id": str(chat_id), "type_id": str(type_id)}
             sent_count = 0
             for t in tokens:
+                logger.info("SendPushNotification: token_record id=%s device_token=%s... platform=%s",
+                    t.id, (t.device_token or "")[:30], getattr(t, 'platform', 'N/A'))
                 if t.device_token:
                     if _send_fcm(t.device_token, title, title, data=data):
                         sent_count += 1
+                    else:
+                        logger.warning("SendPushNotification: _send_fcm returned False for token %s...", (t.device_token or "")[:20])
+                else:
+                    logger.warning("SendPushNotification: device_token is empty for token_record id=%s", t.id)
 
+            logger.info("SendPushNotification: sent %d/%d notifications", sent_count, token_count)
             return Response(
                 node_success("Push notification sent successfully", sent_count, 200),
                 status=200,
             )
         except Exception:
+            logger.exception("SendPushNotification: unexpected error")
             return Response(node_error("Error sending push notification", 400), status=400)
 
 
