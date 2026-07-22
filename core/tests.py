@@ -216,3 +216,33 @@ class SeedDataCommandTests(TestCase):
             self.assertTrue(Language.objects.filter(name=lang).exists(), f"Language '{lang}' missing")
 
 
+from unittest.mock import patch
+from django.contrib.auth import get_user_model
+
+class PushNotificationTokenResolutionTests(TestCase):
+    def test_send_push_notification_resolves_all_device_tokens_and_logs(self):
+        User = get_user_model()
+        user = User.objects.create_user(
+            email="pushtest@spilbloo.com",
+            password="Password@123",
+            full_name="Push Test User",
+            token="user_direct_token_123"
+        )
+        from core.models import ApiAccessToken
+        ApiAccessToken.objects.create(
+            created_by=user,
+            device_token="db_device_token_456",
+            device_type="1"
+        )
+
+        with patch("availability.views._send_fcm", return_value=True) as mock_send_fcm:
+            from availability.views import send_push_notification
+            send_push_notification(user, "Test Title", "Test Description")
+
+            # Should be called for both direct token and db ApiAccessToken token
+            self.assertEqual(mock_send_fcm.call_count, 2)
+            called_tokens = {call.args[0] for call in mock_send_fcm.call_args_list}
+            self.assertEqual(called_tokens, {"user_direct_token_123", "db_device_token_456"})
+
+
+
