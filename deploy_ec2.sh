@@ -24,47 +24,55 @@ if ! command -v docker &> /dev/null; then
         sudo systemctl enable docker
     else
         sudo apt-get update
-        sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-        sudo apt-get update
         sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     fi
     sudo usermod -aG docker $USER
     echo "[+] Docker installed successfully!"
 fi
 
-# 2. Ensure Docker Compose v2 and buildx plugins are installed
-# Docker looks for CLI plugins in multiple directories — install into all of them.
-install_plugin() {
-    local name="$1"
-    local url="$2"
-    local dest="$3"
-    if [ ! -f "$dest" ]; then
-        sudo mkdir -p "$(dirname "$dest")"
-        sudo curl -SL "$url" -o "$dest"
-        sudo chmod +x "$dest"
-        echo "[+] Installed $name to $dest"
-    fi
-}
-
+# 2. Detect the correct architecture for plugin downloads
 ARCH=$(uname -m)
-COMPOSE_URL="https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${ARCH}"
-BUILDX_URL="https://github.com/docker/buildx/releases/latest/download/buildx-linux-${ARCH}"
+if [ "$ARCH" = "x86_64" ]; then
+    PLUGIN_ARCH="amd64"
+elif [ "$ARCH" = "aarch64" ]; then
+    PLUGIN_ARCH="arm64"
+else
+    PLUGIN_ARCH="$ARCH"
+fi
 
-# Install into all known Docker plugin search paths
+# 3. Install Docker Compose v2 plugin into all known plugin directories
+COMPOSE_URL="https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${PLUGIN_ARCH}"
 for PLUGIN_DIR in "/usr/local/lib/docker/cli-plugins" "/usr/libexec/docker/cli-plugins" "$HOME/.docker/cli-plugins"; do
-    install_plugin "docker-compose" "$COMPOSE_URL" "$PLUGIN_DIR/docker-compose"
-    install_plugin "docker-buildx"  "$BUILDX_URL"  "$PLUGIN_DIR/docker-buildx"
+    echo "[-] Installing docker-compose to $PLUGIN_DIR..."
+    sudo mkdir -p "$PLUGIN_DIR"
+    sudo curl -SL "$COMPOSE_URL" -o "$PLUGIN_DIR/docker-compose"
+    sudo chmod +x "$PLUGIN_DIR/docker-compose"
 done
 
-# 3. Verify
+# 4. Install Docker Buildx plugin into all known plugin directories
+BUILDX_URL="https://github.com/docker/buildx/releases/latest/download/buildx-linux-${PLUGIN_ARCH}"
+for PLUGIN_DIR in "/usr/local/lib/docker/cli-plugins" "/usr/libexec/docker/cli-plugins" "$HOME/.docker/cli-plugins"; do
+    echo "[-] Installing docker-buildx to $PLUGIN_DIR..."
+    sudo mkdir -p "$PLUGIN_DIR"
+    sudo curl -SL "$BUILDX_URL" -o "$PLUGIN_DIR/docker-buildx"
+    sudo chmod +x "$PLUGIN_DIR/docker-buildx"
+done
 
-echo "[-] Docker version: $(docker --version)"
-echo "[-] Docker Compose: $(docker compose version)"
-echo "[-] Docker Buildx: $(docker buildx version)"
+# 5. Verify
+echo "[-] Docker: $(docker --version)"
+echo "[-] Compose: $(docker compose version)"
 
-# 4. Check for .env file
+# Verify buildx works (skip if unavailable — some setups don't need it)
+if docker buildx version &> /dev/null; then
+    echo "[-] Buildx: $(docker buildx version)"
+else
+    echo "[!] docker buildx not available, checking if build works without it..."
+    # Try creating the builder explicitly
+    docker buildx create --name default --use 2>/dev/null || true
+    docker buildx install 2>/dev/null || true
+fi
+
+# 6. Check for .env file
 if [ ! -f .env ]; then
     echo "[!] WARNING: .env file not found in $(pwd)"
     echo "Please create a .env file containing your secrets and configuration."
@@ -72,7 +80,7 @@ if [ ! -f .env ]; then
 fi
 chmod 600 .env
 
-# 5. Pull and Build Containers
+# 7. Pull and Build Containers
 echo "[-] Building and launching Docker containers ($COMPOSE_FILE)..."
 docker compose -f $COMPOSE_FILE down --remove-orphans || true
 docker compose -f $COMPOSE_FILE up -d --build
