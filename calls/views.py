@@ -5,6 +5,7 @@ from rest_framework.views import APIView
 from django.utils import timezone
 from .models import Call
 from .serializers import CallSerializer
+from availability.views import send_push_notification
 from availability.models import SlotBooking, Notification
 from accounts.models import User
 import logging
@@ -58,6 +59,7 @@ class JoinView(APIView):
                     title=message,
                     model_type='Call'
                 )
+                send_push_notification(receiver_user, "Incoming Call", message)
 
             return Response({
                 "message": "Joined Successfully.",

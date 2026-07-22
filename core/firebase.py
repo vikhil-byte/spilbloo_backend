@@ -1,8 +1,49 @@
 import os
 import json
 import logging
+import base64
 
 logger = logging.getLogger(__name__)
+
+
+def _load_firebase_credentials(credentials_cls):
+    """Load and sanitize Firebase credentials dict from base64 env, file path, or raw JSON env."""
+    b64_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_BASE64", "").strip("'\" \t\r\n")
+    cred_path = os.environ.get("FIREBASE_CREDENTIALS_PATH", "").strip("'\" \t\r\n")
+    raw_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip("'\" \t\r\n")
+    cert_dict = None
+
+    if b64_json:
+        logger.info("[FCM Config] Loading Firebase credentials from FIREBASE_SERVICE_ACCOUNT_BASE64 env var")
+        try:
+            decoded_json = base64.b64decode(b64_json).decode("utf-8")
+            cert_dict = json.loads(decoded_json)
+        except Exception as exc:
+            logger.error("[FCM Config Error] Failed to decode FIREBASE_SERVICE_ACCOUNT_BASE64: %s", exc)
+
+    if not cert_dict and cred_path and os.path.exists(cred_path):
+        logger.info("[FCM Config] Loading Firebase credentials from file: %s", cred_path)
+        with open(cred_path, "r", encoding="utf-8") as f:
+            cert_dict = json.load(f)
+
+    if not cert_dict and raw_json:
+        logger.info("[FCM Config] Loading Firebase credentials from FIREBASE_SERVICE_ACCOUNT_JSON env var (len=%d)", len(raw_json))
+        cert_dict = json.loads(raw_json)
+
+    if not cert_dict:
+        logger.error("[FCM Config Error] No valid credentials configured. Check FIREBASE_SERVICE_ACCOUNT_BASE64, FIREBASE_CREDENTIALS_PATH, or FIREBASE_SERVICE_ACCOUNT_JSON.")
+        return None
+
+    # Sanitize private key PEM formatting issues automatically
+    if "private_key" in cert_dict and isinstance(cert_dict["private_key"], str):
+        pk = cert_dict["private_key"]
+        pk = pk.replace("\\n", "\n")
+        pk = pk.replace("-----BEGIN PRIVATE KEY-----n", "-----BEGIN PRIVATE KEY-----\n")
+        pk = pk.replace("=n-----END PRIVATE KEY-----", "=\n-----END PRIVATE KEY-----")
+        pk = pk.replace("KEY-----n", "KEY-----\n")
+        cert_dict["private_key"] = pk
+
+    return credentials_cls.Certificate(cert_dict)
 
 
 def _send_fcm(token, title, body, data=None):
@@ -10,46 +51,46 @@ def _send_fcm(token, title, body, data=None):
 
     Returns True on success, False on failure (credentials missing, send error, etc.).
     """
-    data = data or {}
+    raw_data = data or {}
+    # FCM data values must be strings
+    data = {str(k): str(v) for k, v in raw_data.items()}
+
+    logger.debug("[FCM Dispatch Start] Token: %s... | Title: %r | Body: %r | Payload: %s",
+                 token[:25] if token else "EMPTY", title, body, json.dumps(data))
+
+    if not token:
+        logger.warning("[FCM Abort] No target device_token provided.")
+        return False
+
     try:
         import firebase_admin
         from firebase_admin import credentials, messaging
-    except Exception:
-        logger.exception("firebase-admin package not available")
+    except Exception as exc:
+        logger.exception("[FCM Error] firebase-admin package import failed: %s", exc)
         return False
 
     try:
         app = firebase_admin.get_app()
-        logger.info("FCM: reusing existing firebase app")
+        logger.debug("[FCM] Reusing existing firebase App instance.")
     except Exception:
         app = None
 
     try:
         if app is None:
-            cred_path = os.environ.get("FIREBASE_CREDENTIALS_PATH", "")
-            if cred_path and os.path.exists(cred_path):
-                logger.info("FCM: initializing from credentials file: %s", cred_path)
-                cred = credentials.Certificate(cred_path)
-                app = firebase_admin.initialize_app(cred)
-            else:
-                service_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
-                if not service_json:
-                    logger.error("FCM: no credentials configured — both FIREBASE_CREDENTIALS_PATH and FIREBASE_SERVICE_ACCOUNT_JSON are empty/missing")
-                    return False
-                logger.info("FCM: initializing from FIREBASE_SERVICE_ACCOUNT_JSON (length=%d, starts_with=%s)", len(service_json), service_json[:30])
-                cred = credentials.Certificate(json.loads(service_json))
-                app = firebase_admin.initialize_app(cred)
-            logger.info("FCM: firebase app initialized successfully, project_id=%s", cred.project_id)
+            cred = _load_firebase_credentials(credentials)
+            if not cred:
+                return False
+            app = firebase_admin.initialize_app(cred)
+            logger.info("[FCM Config Success] Firebase App initialized. Project ID: %s", getattr(cred, 'project_id', 'unknown'))
 
-        logger.info("FCM: sending notification token=%s... title=%r body=%r data=%s", token[:20] if token else "None", title, body, json.dumps(data))
         msg = messaging.Message(
             token=token,
             notification=messaging.Notification(title=title, body=body),
             data=data,
         )
         response = messaging.send(msg, app=app)
-        logger.info("FCM: send SUCCESS message_id=%s", response)
+        logger.info("[FCM Send SUCCESS] Message ID: %s | Token Prefix: %s...", response, token[:20])
         return True
-    except Exception:
-        logger.exception("FCM: send FAILED token=%s...", token[:20] if token else "None")
+    except Exception as exc:
+        logger.exception("[FCM Send FAILED] Target Token: %s... | Error: %s", token[:20] if token else "None", exc)
         return False

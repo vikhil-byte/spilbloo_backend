@@ -3,7 +3,7 @@ from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
 from core.models import (
     Symptom, NodeSubscriptionPlan, HomeCard, DailyCheckinQuestion, DailyCheckinAnswer,
-    TherapistApplication
+    TherapistApplication, Language
 )
 
 User = get_user_model()
@@ -16,20 +16,34 @@ class Command(BaseCommand):
 
         # Seed Symptoms
         self.stdout.write("Seeding symptoms...")
-        if not Symptom.objects.exists():
-            symptoms = [
-                "Anger management",
-                "Specific phobia",
-                "Social anxiety",
-                "Sleep difficulties",
-                "Sexual abuse",
-                "Past trauma",
-                "Family conflict",
-                "Low self-esteem"
-            ]
-            for sym in symptoms:
-                Symptom.objects.create(title=sym, state_id=1, type_id=0)
-            self.stdout.write(self.style.SUCCESS("  + Seeded symptoms."))
+        symptoms = [
+            "Depression & Anxiety",
+            "Relationship & Marriage",
+            "Stress & Burnout",
+            "Trauma & Abuse",
+            "Sleep Issues",
+            "Addiction",
+            "Parenting",
+            "Women's Health",
+            "OCD",
+            "Bipolar Disorder",
+            "Social Anxiety & Phobias",
+            "Grief & Loss",
+            "Sexual Wellness",
+            "Academic & Career Stress",
+            "Just Need Someone to Talk To",
+        ]
+        symptoms_seeded_count = 0
+        for sym in symptoms:
+            _, created = Symptom.objects.get_or_create(
+                title=sym,
+                defaults={'state_id': Symptom.STATE_ACTIVE, 'type_id': 0}
+            )
+            if created:
+                symptoms_seeded_count += 1
+
+        if symptoms_seeded_count > 0:
+            self.stdout.write(self.style.SUCCESS(f"  + Seeded {symptoms_seeded_count} symptoms."))
         else:
             self.stdout.write("  Symptoms already seeded.")
 
@@ -177,7 +191,49 @@ class Command(BaseCommand):
                     token='mock_device_token'
                 )
                 self.stdout.write(self.style.SUCCESS(f"  + Created therapist user: {email}"))
-            else:
-                self.stdout.write(f"  Therapist user {email} already exists.")
+        # Seed Indian Languages
+        self.stdout.write("Seeding Indian languages...")
+        languages = [
+            ("English", "en"),
+            ("Hindi", "hi"),
+            ("Bengali", "bn"),
+            ("Marathi", "mr"),
+            ("Telugu", "te"),
+            ("Tamil", "ta"),
+            ("Gujarati", "gu"),
+            ("Urdu", "ur"),
+            ("Kannada", "kn"),
+            ("Odia", "or"),
+            ("Malayalam", "ml"),
+            ("Punjabi", "pa"),
+            ("Assamese", "as"),
+            ("Maithili", "mai"),
+            ("Santali", "sat"),
+            ("Kashmiri", "ks"),
+            ("Nepali", "ne"),
+            ("Konkani", "kok"),
+            ("Dogri", "doi"),
+            ("Manipuri", "mni"),
+            ("Bodo", "brx"),
+            ("Sanskrit", "sa"),
+            ("Sindhi", "sd"),
+            ("Bhojpuri", "bho"),
+            ("Marwari", "mwr"),
+            ("Tulu", "tcy"),
+            ("Chhattisgarhi", "hne"),
+        ]
+        langs_seeded_count = 0
+        for lang_name, lang_code in languages:
+            _, created = Language.objects.get_or_create(
+                name=lang_name,
+                defaults={'code': lang_code, 'state_id': Language.STATE_ACTIVE}
+            )
+            if created:
+                langs_seeded_count += 1
+
+        if langs_seeded_count > 0:
+            self.stdout.write(self.style.SUCCESS(f"  + Seeded {langs_seeded_count} Indian languages."))
+        else:
+            self.stdout.write("  Indian languages already seeded.")
 
         self.stdout.write(self.style.SUCCESS("Database seeding completed successfully!"))

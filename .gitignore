@@ -1,6 +1,8 @@
-# Local env files
+# Local env & credential files
 .env
 .env.*
+firebase-credentials.json
+*-credentials.json
 
 # Python
 __pycache__/

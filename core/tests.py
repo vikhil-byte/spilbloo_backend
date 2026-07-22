@@ -175,3 +175,74 @@ class TherapistApplicationTests(APITestCase):
         response = self.client.post(f"/api/core/therapist-applications/{self.application.id}/send-schedule-email/")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+
+class SeedDataCommandTests(TestCase):
+    def test_seed_data_command_seeds_symptoms_and_languages(self):
+        from django.core.management import call_command
+        from core.models import Symptom, Language
+
+        call_command('seed_data')
+
+        expected_symptoms = [
+            "Depression & Anxiety",
+            "Relationship & Marriage",
+            "Stress & Burnout",
+            "Trauma & Abuse",
+            "Sleep Issues",
+            "Addiction",
+            "Parenting",
+            "Women's Health",
+            "OCD",
+            "Bipolar Disorder",
+            "Social Anxiety & Phobias",
+            "Grief & Loss",
+            "Sexual Wellness",
+            "Academic & Career Stress",
+            "Just Need Someone to Talk To",
+        ]
+        self.assertEqual(Symptom.objects.count(), 15)
+        for sym in expected_symptoms:
+            self.assertTrue(Symptom.objects.filter(title=sym).exists(), f"Symptom '{sym}' missing")
+
+        expected_languages = [
+            "English", "Hindi", "Bengali", "Marathi", "Telugu", "Tamil",
+            "Gujarati", "Urdu", "Kannada", "Odia", "Malayalam", "Punjabi",
+            "Assamese", "Maithili", "Santali", "Kashmiri", "Nepali", "Konkani",
+            "Dogri", "Manipuri", "Bodo", "Sanskrit", "Sindhi", "Bhojpuri",
+            "Marwari", "Tulu", "Chhattisgarhi"
+        ]
+        self.assertEqual(Language.objects.count(), 27)
+        for lang in expected_languages:
+            self.assertTrue(Language.objects.filter(name=lang).exists(), f"Language '{lang}' missing")
+
+
+from unittest.mock import patch
+from django.contrib.auth import get_user_model
+
+class PushNotificationTokenResolutionTests(TestCase):
+    def test_send_push_notification_resolves_all_device_tokens_and_logs(self):
+        User = get_user_model()
+        user = User.objects.create_user(
+            email="pushtest@spilbloo.com",
+            password="Password@123",
+            full_name="Push Test User",
+            token="user_direct_token_123"
+        )
+        from core.models import ApiAccessToken
+        ApiAccessToken.objects.create(
+            created_by=user,
+            device_token="db_device_token_456",
+            device_type="1"
+        )
+
+        with patch("availability.views._send_fcm", return_value=True) as mock_send_fcm:
+            from availability.views import send_push_notification
+            send_push_notification(user, "Test Title", "Test Description")
+
+            # Should be called for both direct token and db ApiAccessToken token
+            self.assertEqual(mock_send_fcm.call_count, 2)
+            called_tokens = {call.args[0] for call in mock_send_fcm.call_args_list}
+            self.assertEqual(called_tokens, {"user_direct_token_123", "db_device_token_456"})
+
+
+
