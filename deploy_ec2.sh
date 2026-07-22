@@ -34,40 +34,37 @@ if ! command -v docker &> /dev/null; then
     echo "[+] Docker installed successfully!"
 fi
 
-# 2. Ensure Docker Compose v2 plugin is available
-# Install into both user and root plugin paths so it works with and without sudo
-COMPOSE_PLUGIN_PATH="/usr/local/lib/docker/cli-plugins/docker-compose"
-if [ ! -f "$COMPOSE_PLUGIN_PATH" ]; then
-    echo "[-] Installing Docker Compose v2 plugin..."
-    sudo mkdir -p /usr/local/lib/docker/cli-plugins
-    sudo curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" -o "$COMPOSE_PLUGIN_PATH"
-    sudo chmod +x "$COMPOSE_PLUGIN_PATH"
-    echo "[+] Docker Compose v2 installed successfully!"
-fi
-
-# Also ensure it's symlinked for the root user (Amazon Linux yum docker uses /usr/libexec)
-if [ ! -f /usr/libexec/docker/cli-plugins/docker-compose ]; then
-    sudo mkdir -p /usr/libexec/docker/cli-plugins
-    sudo ln -sf "$COMPOSE_PLUGIN_PATH" /usr/libexec/docker/cli-plugins/docker-compose 2>/dev/null || true
-fi
-
-# 3. Ensure buildx is available
-BUILDX_PLUGIN_PATH="/usr/local/lib/docker/cli-plugins/docker-buildx"
-if ! docker buildx version &> /dev/null; then
-    echo "[-] Installing Docker Buildx plugin..."
-    sudo curl -SL "https://github.com/docker/buildx/releases/latest/download/buildx-linux-$(uname -m)" -o "$BUILDX_PLUGIN_PATH"
-    sudo chmod +x "$BUILDX_PLUGIN_PATH"
-    if [ -d /usr/libexec/docker/cli-plugins ]; then
-        sudo ln -sf "$BUILDX_PLUGIN_PATH" /usr/libexec/docker/cli-plugins/docker-buildx 2>/dev/null || true
+# 2. Ensure Docker Compose v2 and buildx plugins are installed
+# Docker looks for CLI plugins in multiple directories — install into all of them.
+install_plugin() {
+    local name="$1"
+    local url="$2"
+    local dest="$3"
+    if [ ! -f "$dest" ]; then
+        sudo mkdir -p "$(dirname "$dest")"
+        sudo curl -SL "$url" -o "$dest"
+        sudo chmod +x "$dest"
+        echo "[+] Installed $name to $dest"
     fi
-    echo "[+] Docker Buildx installed successfully!"
-fi
+}
 
-# 4. Verify compose works
-echo "[-] Verifying Docker Compose..."
-docker compose version
+ARCH=$(uname -m)
+COMPOSE_URL="https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${ARCH}"
+BUILDX_URL="https://github.com/docker/buildx/releases/latest/download/buildx-linux-${ARCH}"
 
-# 5. Check for .env file
+# Install into all known Docker plugin search paths
+for PLUGIN_DIR in "/usr/local/lib/docker/cli-plugins" "/usr/libexec/docker/cli-plugins" "$HOME/.docker/cli-plugins"; do
+    install_plugin "docker-compose" "$COMPOSE_URL" "$PLUGIN_DIR/docker-compose"
+    install_plugin "docker-buildx"  "$BUILDX_URL"  "$PLUGIN_DIR/docker-buildx"
+done
+
+# 3. Verify
+
+echo "[-] Docker version: $(docker --version)"
+echo "[-] Docker Compose: $(docker compose version)"
+echo "[-] Docker Buildx: $(docker buildx version)"
+
+# 4. Check for .env file
 if [ ! -f .env ]; then
     echo "[!] WARNING: .env file not found in $(pwd)"
     echo "Please create a .env file containing your secrets and configuration."
@@ -75,7 +72,7 @@ if [ ! -f .env ]; then
 fi
 chmod 600 .env
 
-# 6. Pull and Build Containers
+# 5. Pull and Build Containers
 echo "[-] Building and launching Docker containers ($COMPOSE_FILE)..."
 docker compose -f $COMPOSE_FILE down --remove-orphans || true
 docker compose -f $COMPOSE_FILE up -d --build
