@@ -5,6 +5,37 @@
 
 set -e
 
+# Wrapper function to support compose and buildx plugins when the main docker CLI fails to detect them
+docker() {
+    if [ "$1" = "compose" ]; then
+        shift
+        if [ -f /usr/libexec/docker/cli-plugins/docker-compose ]; then
+            /usr/libexec/docker/cli-plugins/docker-compose "$@"
+        elif [ -f /usr/local/lib/docker/cli-plugins/docker-compose ]; then
+            /usr/local/lib/docker/cli-plugins/docker-compose "$@"
+        elif [ -f "$HOME/.docker/cli-plugins/docker-compose" ]; then
+            "$HOME/.docker/cli-plugins/docker-compose" "$@"
+        elif command -v docker-compose &> /dev/null; then
+            docker-compose "$@"
+        else
+            command docker compose "$@"
+        fi
+    elif [ "$1" = "buildx" ]; then
+        shift
+        if [ -f /usr/libexec/docker/cli-plugins/docker-buildx ]; then
+            /usr/libexec/docker/cli-plugins/docker-buildx "$@"
+        elif [ -f /usr/local/lib/docker/cli-plugins/docker-buildx ]; then
+            /usr/local/lib/docker/cli-plugins/docker-buildx "$@"
+        elif [ -f "$HOME/.docker/cli-plugins/docker-buildx" ]; then
+            "$HOME/.docker/cli-plugins/docker-buildx" "$@"
+        else
+            command docker buildx "$@"
+        fi
+    else
+        command docker "$@"
+    fi
+}
+
 COMPOSE_FILE="docker-compose.yml"
 ENV_LABEL="Staging"
 
