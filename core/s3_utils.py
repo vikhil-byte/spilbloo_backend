@@ -43,8 +43,13 @@ def upload_to_s3(file_obj, object_name):
 def get_file_url(file_path):
     if not file_path:
         return None
+
+    # If full S3 URL is stored, extract the key so we can generate a presigned URL for private buckets
     if file_path.startswith('http://') or file_path.startswith('https://'):
-        return file_path
+        if '.amazonaws.com/' in file_path:
+            file_path = file_path.split('.amazonaws.com/')[-1]
+        else:
+            return file_path
     
     bucket_name = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', '')
     if bucket_name:
