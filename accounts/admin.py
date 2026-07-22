@@ -5,10 +5,27 @@ from .models import User, HaLogins
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 
-class CustomUserCreationForm(UserCreationForm):
+class CustomUserCreationForm(forms.ModelForm):
+    password = forms.CharField(widget=forms.PasswordInput, label="Password")
+    password_2 = forms.CharField(widget=forms.PasswordInput, label="Password confirmation", help_text="Enter the same password as above, for verification.")
+
     class Meta:
         model = User
         fields = ('email',)
+
+    def clean_password_2(self):
+        password = self.cleaned_data.get("password")
+        password_2 = self.cleaned_data.get("password_2")
+        if password and password_2 and password != password_2:
+            raise forms.ValidationError("Passwords don't match")
+        return password_2
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        user.set_password(self.cleaned_data["password"])
+        if commit:
+            user.save()
+        return user
 
 class CustomUserChangeForm(UserChangeForm):
     class Meta:
@@ -37,7 +54,7 @@ class UserAdmin(BaseUserAdmin):
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('email', 'password'),
+            'fields': ('email', 'password', 'password_2'),
         }),
     )
 
