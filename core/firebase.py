@@ -8,9 +8,9 @@ logger = logging.getLogger(__name__)
 
 def _load_firebase_credentials(credentials_cls):
     """Load and sanitize Firebase credentials dict from base64 env, file path, or raw JSON env."""
-    b64_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_BASE64", "").strip()
-    cred_path = os.environ.get("FIREBASE_CREDENTIALS_PATH", "").strip()
-    raw_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+    b64_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_BASE64", "").strip("'\" \t\r\n")
+    cred_path = os.environ.get("FIREBASE_CREDENTIALS_PATH", "").strip("'\" \t\r\n")
+    raw_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip("'\" \t\r\n")
     cert_dict = None
 
     if b64_json:
