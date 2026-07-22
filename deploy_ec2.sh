@@ -54,6 +54,17 @@ if ! docker compose version &> /dev/null; then
     fi
 
     sudo usermod -aG docker $USER
+
+    # Wait for Docker daemon to be ready after install/upgrade
+    echo "[-] Waiting for Docker daemon to start..."
+    for i in $(seq 1 15); do
+        if docker info &> /dev/null; then
+            echo "[+] Docker daemon is ready"
+            break
+        fi
+        sleep 1
+    done
+
     echo "[+] Docker + Compose + Buildx installed successfully!"
 fi
 
