@@ -175,3 +175,44 @@ class TherapistApplicationTests(APITestCase):
         response = self.client.post(f"/api/core/therapist-applications/{self.application.id}/send-schedule-email/")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+
+class SeedDataCommandTests(TestCase):
+    def test_seed_data_command_seeds_symptoms_and_languages(self):
+        from django.core.management import call_command
+        from core.models import Symptom, Language
+
+        call_command('seed_data')
+
+        expected_symptoms = [
+            "Depression & Anxiety",
+            "Relationship & Marriage",
+            "Stress & Burnout",
+            "Trauma & Abuse",
+            "Sleep Issues",
+            "Addiction",
+            "Parenting",
+            "Women's Health",
+            "OCD",
+            "Bipolar Disorder",
+            "Social Anxiety & Phobias",
+            "Grief & Loss",
+            "Sexual Wellness",
+            "Academic & Career Stress",
+            "Just Need Someone to Talk To",
+        ]
+        self.assertEqual(Symptom.objects.count(), 15)
+        for sym in expected_symptoms:
+            self.assertTrue(Symptom.objects.filter(title=sym).exists(), f"Symptom '{sym}' missing")
+
+        expected_languages = [
+            "English", "Hindi", "Bengali", "Marathi", "Telugu", "Tamil",
+            "Gujarati", "Urdu", "Kannada", "Odia", "Malayalam", "Punjabi",
+            "Assamese", "Maithili", "Santali", "Kashmiri", "Nepali", "Konkani",
+            "Dogri", "Manipuri", "Bodo", "Sanskrit", "Sindhi", "Bhojpuri",
+            "Marwari", "Tulu", "Chhattisgarhi"
+        ]
+        self.assertEqual(Language.objects.count(), 27)
+        for lang in expected_languages:
+            self.assertTrue(Language.objects.filter(name=lang).exists(), f"Language '{lang}' missing")
+
+

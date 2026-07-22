@@ -35,20 +35,51 @@ def send_event_email(to_email, subject, message):
     )
 
 
+from core.models import RefundLog, ApiAccessToken
+
 def send_push_notification(user, title, description):
     if not user:
+        logger.warning("[Push Notify Abort] No user object passed to send_push_notification.")
         return
-    token = getattr(user, "device_token", "") if hasattr(user, "device_token") else ""
-    sent = False
-    if token:
-        sent = _send_fcm(token, title, description)
-    logger.info(
-        "push notify user_id=%s has_device_token=%s sent=%s title=%s",
-        user.id,
-        bool(token),
-        sent,
-        title,
-    )
+
+    logger.info("[Push Notify Request] Target User ID: %s (%s) | Title: %r", user.id, getattr(user, 'email', 'N/A'), title)
+
+    # 1. Resolve tokens from direct attributes & ApiAccessToken table
+    target_tokens = set()
+
+    direct_device_token = getattr(user, "device_token", "") or ""
+    if direct_device_token:
+        target_tokens.add(direct_device_token)
+
+    user_token = getattr(user, "token", "") or ""
+    if user_token and user_token != direct_device_token:
+        target_tokens.add(user_token)
+
+    db_access_tokens = ApiAccessToken.objects.filter(created_by=user)
+    db_token_count = db_access_tokens.count()
+    for tok_rec in db_access_tokens:
+        if tok_rec.device_token:
+            target_tokens.add(tok_rec.device_token)
+
+    logger.info("[Push Notify Token Discovery] User ID: %s | Direct Token Found: %s | ApiAccessToken Records: %d | Total Unique Tokens: %d",
+                user.id, bool(direct_device_token), db_token_count, len(target_tokens))
+
+    if not target_tokens:
+        logger.warning("[Push Notify Warning] No device tokens found for User ID: %s", user.id)
+        return
+
+    # 2. Dispatch FCM to resolved tokens
+    sent_count = 0
+    fail_count = 0
+    for tok in target_tokens:
+        success = _send_fcm(tok, title, description)
+        if success:
+            sent_count += 1
+        else:
+            fail_count += 1
+
+    logger.info("[Push Notify Summary] User ID: %s | Title: %r | Sent Succeeded: %d | Failed: %d",
+                user.id, title, sent_count, fail_count)
 
 class AddScheduleView(APIView):
     permission_classes = (IsAuthenticated,)
