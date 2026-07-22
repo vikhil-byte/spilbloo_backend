@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated
 from django.contrib.auth import get_user_model
+from django.http import Http404
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -23,11 +24,15 @@ from django.utils import timezone
 from django.contrib.auth import authenticate
 from django.core.cache import cache
 from django.core.mail import send_mail
+from django.template.loader import render_to_string
 from django.conf import settings
+
 from plans.models import Plan, SubscribedPlan
 from django.core import signing
 import hashlib
 import secrets
+from core.email_service import get_email_client
+
 
 logger = logging.getLogger(__name__)
 
@@ -42,15 +47,24 @@ def _normalize_email(value) -> str:
 def send_otp_via_email(email, otp):
     subject = "Spilbloo OTP Verification"
     message = f"Your OTP is {otp}. It is valid for 10 minutes."
+    
+    context = {
+        "subject": subject,
+        "otp": otp
+    }
+    html_content = render_to_string("emails/otp_email.html", context)
+    
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
-    sent = False
-    try:
-        send_mail(subject, message, from_email, [email], fail_silently=False)
-        sent = True
-    except Exception:
-        # Keep auth flow resilient even when SMTP is not configured.
-        pass
+    get_email_client().send_email(
+        subject=subject,
+        body=message,
+        to_email=email,
+        from_email=from_email,
+        html_body=html_content
+    )
     logger.info("OTP email log: otp=%s", otp)
+
+
 
 
 def _password_reset_cache_key(user_id: int) -> str:
@@ -79,10 +93,12 @@ def send_password_reset_email(email: str, reset_link: str):
         "This link expires in 30 minutes."
     )
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
-    try:
-        send_mail(subject, message, from_email, [email], fail_silently=False)
-    except Exception:
-        logger.info("Password reset email fallback log: email=%s", email)
+    get_email_client().send_email(
+        subject=subject,
+        body=message,
+        to_email=email,
+        from_email=from_email
+    )
 
 
 def _otp_cache_key(user_id: int) -> str:
@@ -216,6 +232,27 @@ def _legacy_user_detail(user):
             "plan_detail": plan_detail,
         }
 
+    # Fetch user symptoms
+    user_symptoms_qs = UserSymptom.objects.filter(created_by=user, state_id=1).select_related('symptom')
+    symptoms_list = [SymptomSerializer(us.symptom).data for us in user_symptoms_qs if us.symptom]
+
+    # Check profile completeness (PHP checks if date_of_birth is empty)
+    is_profile_completed = 1 if getattr(user, "date_of_birth", None) else 0
+
+    created_on_str = ""
+    if getattr(user, "created_on", None):
+        try:
+            created_on_str = user.created_on.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            pass
+
+    dob_str = ""
+    if getattr(user, "date_of_birth", None):
+        try:
+            dob_str = user.date_of_birth.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+
     return {
         "id": user.id,
         "email": user.email or "",
@@ -224,6 +261,8 @@ def _legacy_user_detail(user):
         "last_name": getattr(user, "last_name", "") or "",
         "role_id": user.role_id,
         "state_id": user.state_id,
+        "is_superuser": getattr(user, "is_superuser", False),
+        "permissions": list(user.get_all_permissions()) if hasattr(user, "get_all_permissions") else [],
         "contact_no": getattr(user, "contact_no", "") or "",
         "address": getattr(user, "address", "") or "",
         "city": getattr(user, "city", "") or "",
@@ -233,13 +272,40 @@ def _legacy_user_detail(user):
         "provider": 0,
         "isOnline": _safe_str(getattr(user, "online", "") or ""),
         "otp_verified": otp_verified,
-        "otp": _safe_str(getattr(user, "otp", "") or ""),
+        #"otp": _safe_str(getattr(user, "otp", "") or "") if settings.DEBUG else "",
         "is_ios_app_update": False,
         "is_subscribed_user": bool(active_paid_subscription),
         "is_buy_subscripion": bool(active_paid_subscription),
         "is_buy_video_credits": False,
         "video_credits": 0,
         "subscribed_plan": subscribed_plan or {},
+        "language": getattr(user, "language", "") or "",
+        "affirmation_for_the_day": user.get_affirmation_for_the_day(),
+        # Added legacy fields for PHP compatibility
+        "about_me": getattr(user, "about_me", "") or "",
+        "age_group": getattr(user, "age_group", "") or "Not Defined",
+        "created_on": created_on_str,
+        "date_of_birth": dob_str,
+        "email_type": 0,
+        "experience": getattr(user, "experience", 0) or 0,
+        "gender": getattr(user, "gender", 0) or 0,
+        "inr_payment_bottom_sheet_url": "",
+        "is_android_under_maintenance": 0,
+        "is_app_update": False,
+        "is_available": 1 if getattr(user, "is_available", True) else 0,
+        "is_consent_accept": getattr(user, "is_consent_accept", 0) or 0,
+        "is_ios_under_maintenance": 0,
+        "is_notify": 1 if getattr(user, "push_enabled", 1) else 0,
+        "is_profile_completed": is_profile_completed,
+        "qualification": getattr(user, "qualification", "") or "",
+        "show_inr_payment_bottom_sheet": 0,
+        "show_usd_payment_bottom_sheet": 0,
+        "symptoms": symptoms_list,
+        "therapist_gender": getattr(user, "therapist_gender", 0) or 0,
+        "timezone": getattr(user, "timezone", "") or "",
+        "tos": getattr(user, "tos", "") or "",
+        "type_id": getattr(user, "type_id", 0) or 0,
+        "usd_payment_bottom_sheet_url": "",
     }
 
 class RegisterView(generics.CreateAPIView):
@@ -248,6 +314,7 @@ class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
 
     def create(self, request, *args, **kwargs):
+        logger.info("RegisterView request data: %s", request.data)
         if not request.data:
             logger.warning("Signup rejected: empty payload")
             return Response({"error": "Data not posted."}, status=status.HTTP_400_BAD_REQUEST)
@@ -268,6 +335,18 @@ class RegisterView(generics.CreateAPIView):
             or request.data.get("User[password]")
             or user_payload.get("password")
         )
+        normalized_data["first_name"] = (
+            request.data.get("first_name")
+            or request.data.get("User[first_name]")
+            or user_payload.get("first_name")
+            or ""
+        ).strip()
+        normalized_data["last_name"] = (
+            request.data.get("last_name")
+            or request.data.get("User[last_name]")
+            or user_payload.get("last_name")
+            or ""
+        ).strip()
         normalized_data["full_name"] = (
             request.data.get("full_name")
             or request.data.get("User[full_name]")
@@ -276,14 +355,13 @@ class RegisterView(generics.CreateAPIView):
                 filter(
                     None,
                     [
-                        request.data.get("User[first_name]", "").strip(),
-                        request.data.get("User[last_name]", "").strip(),
-                        (user_payload.get("first_name") or "").strip(),
-                        (user_payload.get("last_name") or "").strip(),
+                        normalized_data["first_name"],
+                        normalized_data["last_name"],
                     ],
                 )
-            ).strip()
-        )
+            )
+        ).strip()
+
         normalized_data["role_id"] = (
             request.data.get("role_id")
             or request.data.get("User[role_id]")
@@ -359,7 +437,7 @@ class RegisterView(generics.CreateAPIView):
 
         return Response({
             "message": "Please verify your OTP.",
-            "detail": UserSerializer(user).data
+            "detail": _legacy_user_detail(user)
         }, status=status.HTTP_200_OK)
 
 class VerifyOtpView(APIView):
@@ -397,7 +475,7 @@ class VerifyOtpView(APIView):
                 "message": "Your account successfully verified!",
                 "access-token": str(refresh.access_token),
                 "refresh-token": str(refresh),
-                "detail": UserSerializer(user).data
+                "detail": _legacy_user_detail(user)
             }, status=status.HTTP_200_OK)
         else:
             return Response({"error": "Incorrect OTP"}, status=status.HTTP_400_BAD_REQUEST)
@@ -482,13 +560,13 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 return legacy_version_gate_error
 
             # Role Check (Mirroring legacy behavior).
-            if int(user.role_id) != role_id:
+            if not user.is_staff and int(user.role_id) != role_id:
                 if role_id == User.ROLE_DOCTER:
                     return Response({"error": "You are not allowed to login in therapist section with user credentials."}, status=status.HTTP_400_BAD_REQUEST)
                 return Response({"error": "You are not allowed to login in user section with therapist credentials."}, status=status.HTTP_400_BAD_REQUEST)
 
             # Legacy LoginForm.loginuser() blocks admin logins in API flow.
-            if user.role_id == User.ROLE_ADMIN:
+            if user.role_id == User.ROLE_ADMIN and not user.is_staff:
                 return Response({"error": "You are not allowed to login."}, status=status.HTTP_400_BAD_REQUEST)
 
             # Legacy branch parity:
@@ -499,7 +577,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                     return Response(
                         {
                             "message": "Details already exist. You need to verify your otp first",
-                            "detail": UserSerializer(user).data,
+                            "detail": _legacy_user_detail(user),
                         },
                         status=status.HTTP_200_OK,
                     )
@@ -512,7 +590,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 send_otp_via_email(user.email, otp)
                 return Response({
                     "message": "Please verify your OTP.",
-                    "detail": UserSerializer(user).data
+                    "detail": _legacy_user_detail(user)
                 }, status=status.HTTP_200_OK)
 
             auth_user = authenticate(request, username=email, password=password) or authenticate(request, email=email, password=password)
@@ -527,7 +605,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 "message": "Login Successfully",
                 "access-token": str(refresh.access_token),
                 "refresh-token": str(refresh),
-                "detail": UserSerializer(auth_user).data
+                "detail": _legacy_user_detail(auth_user)
             }
 
             # OTP challenge for newer versions (legacy behavior).
@@ -673,17 +751,199 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
     def get_object(self):
         return self.request.user
 
-    def update(self, request, *args, **kwargs):
-        # PHP: actionUpdateProfile allows updating user details
-        partial = kwargs.pop('partial', False)
+    def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
-
         return Response({
-            "detail": serializer.data
+            "detail": _legacy_user_detail(instance)
         }, status=status.HTTP_200_OK)
+
+    def update(self, request, *args, **kwargs):
+        logger.info("UserProfileView request data: %s, files: %s", request.data, request.FILES)
+        try:
+            # PHP: actionUpdateProfile allows updating user details
+            partial = kwargs.pop('partial', False)
+            instance = self.get_object()
+
+            raw_data = request.data
+            
+            # Helper to get parameter by checking multiple legacy keys
+            def get_val(field_name):
+                # Check keys: field_name, User[field_name], User[field_name]:, User[field_name] 
+                keys_to_try = [
+                    field_name,
+                    f"User[{field_name}]",
+                    f"User[{field_name}]:",
+                    f"User[{field_name}] ",
+                ]
+                for k in keys_to_try:
+                    if k in raw_data:
+                        return raw_data[k]
+                
+                user_dict = raw_data.get("User")
+                if isinstance(user_dict, dict):
+                    return user_dict.get(field_name)
+                return None
+
+            # Extract normalized fields
+            full_name = get_val("full_name")
+            first_name = get_val("first_name")
+            last_name = get_val("last_name")
+            gender = get_val("gender")
+            therapist_gender = get_val("therapist_gender")
+            dob = get_val("date_of_birth") or get_val("dob")
+            email = get_val("email")
+            contact_no = get_val("contact_no") or get_val("phoneNumber")
+            longitude = get_val("longitude")
+            latitude = get_val("latitude")
+            address = get_val("address")
+            city = get_val("city")
+            country = get_val("country")
+            zipcode = get_val("zipcode")
+
+            # Update the model instance fields directly
+            if first_name is not None:
+                instance.first_name = first_name
+            if last_name is not None:
+                instance.last_name = last_name
+
+            if full_name is not None:
+                instance.full_name = full_name
+                # Split full_name into first and last name if they were not explicitly updated
+                if first_name is None and last_name is None:
+                    parts = full_name.strip().split(' ', 1)
+                    instance.first_name = parts[0]
+                    instance.last_name = parts[1] if len(parts) > 1 else ''
+            else:
+                if first_name is not None or last_name is not None:
+                    instance.full_name = f"{instance.first_name} {instance.last_name}".strip()
+
+            if gender is not None:
+                try:
+                    instance.gender = int(gender)
+                except (ValueError, TypeError):
+                    pass
+            if therapist_gender is not None:
+                try:
+                    instance.therapist_gender = int(therapist_gender)
+                except (ValueError, TypeError):
+                    pass
+            if dob is not None:
+                dob_str = str(dob).strip()
+                if dob_str and dob_str != "<null>":
+                    # Convert slashes to hyphens
+                    dob_str = dob_str.replace('/', '-')
+                    parts = dob_str.split('-')
+                    if len(parts) == 3:
+                        if len(parts[0]) == 4: # YYYY-MM-DD
+                            instance.date_of_birth = dob_str
+                        elif len(parts[2]) == 4: # DD-MM-YYYY or MM-DD-YYYY -> convert to YYYY-MM-DD
+                            instance.date_of_birth = f"{parts[2]}-{parts[1]}-{parts[0]}"
+                        else:
+                            instance.date_of_birth = dob_str
+                    else:
+                        instance.date_of_birth = dob_str
+                else:
+                    instance.date_of_birth = None
+            if email is not None:
+                instance.email = _normalize_email(email)
+            if contact_no is not None:
+                instance.contact_no = contact_no
+            if longitude is not None:
+                instance.longitude = longitude
+            if latitude is not None:
+                instance.latitude = latitude
+            if address is not None:
+                instance.address = address
+            if city is not None:
+                instance.city = city
+            if country is not None:
+                instance.country = country
+            if zipcode is not None:
+                instance.zipcode = zipcode
+
+            # Handle profile file upload (key may be 'profile_file' or 'User[profile_file]')
+            profile_file = request.FILES.get('profile_file') or request.FILES.get('User[profile_file]')
+            if profile_file:
+                from core.views import validate_file_extension
+                from rest_framework.exceptions import ValidationError as DRFValidationError
+                try:
+                    validate_file_extension(profile_file, {'.jpg', '.jpeg', '.png', '.webp'})
+                except DRFValidationError as ve:
+                    return Response({"error": ve.detail}, status=status.HTTP_400_BAD_REQUEST)
+
+                from core.s3_utils import upload_to_s3
+
+                filename = f"user-{instance.id}-profile-{profile_file.name}"
+                s3_key = upload_to_s3(profile_file, filename)
+                if s3_key:
+                    instance.profile_file = s3_key
+                else:
+                    return Response({"error": "S3 upload failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            from django.core.exceptions import ValidationError
+            try:
+                instance.save()
+            except ValidationError as e:
+                return Response({"error": e.messages}, status=status.HTTP_400_BAD_REQUEST)
+
+            return Response({
+                "detail": _legacy_user_detail(instance)
+            }, status=status.HTTP_200_OK)
+        except Exception as exc:
+            logger.exception("Error in UserProfileView.update")
+            return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request, *args, **kwargs):
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
+
+
+
+class UserImageView(APIView):
+    permission_classes = (AllowAny,)
+    authentication_classes = ()
+
+    def get(self, request, pk):
+        from urllib.parse import unquote
+        from django.http import HttpResponseRedirect
+        from django.conf import settings
+
+        file_name = request.GET.get('file') or request.query_params.get('file')
+        if not file_name:
+            try:
+                user = User.objects.get(pk=pk)
+                file_name = user.profile_file
+            except User.DoesNotExist:
+                return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not file_name:
+            return Response({"error": "Image file not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        file_name = unquote(file_name)
+
+        # Try S3 Proxy first if bucket is configured
+        bucket_name = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', '')
+        if bucket_name:
+            from core.s3_utils import get_s3_client
+            from django.http import StreamingHttpResponse
+            try:
+                s3 = get_s3_client()
+                s3_response = s3.get_object(Bucket=bucket_name, Key=file_name)
+                content_type = s3_response.get('ContentType', 'image/png')
+                response = StreamingHttpResponse(
+                    s3_response['Body'],
+                    content_type=content_type
+                )
+                if 'ContentLength' in s3_response:
+                    response['Content-Length'] = s3_response['ContentLength']
+                return response
+            except Exception as e:
+                logger.warning(f"Failed to stream from S3: {e}")
+                return Response({"error": "Image not found on S3"}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({"error": "S3 Storage not configured"}, status=status.HTTP_404_NOT_FOUND)
+
+
 
 
 class DetailView(generics.RetrieveAPIView):
@@ -691,12 +951,22 @@ class DetailView(generics.RetrieveAPIView):
     permission_classes = (AllowAny,)
     serializer_class = UserSerializer
 
+    def get_object(self):
+        pk = self.kwargs.get(self.lookup_url_kwarg) or self.request.query_params.get('id')
+        if pk is None:
+            raise Http404
+        queryset = self.get_queryset()
+        queryset = queryset.filter(pk=pk)
+        try:
+            return queryset.get()
+        except queryset.model.DoesNotExist:
+            raise Http404
+
     def retrieve(self, request, *args, **kwargs):
         try:
             instance = self.get_object()
-            serializer = self.get_serializer(instance)
-            return Response({"detail": serializer.data}, status=status.HTTP_200_OK)
-        except Exception:
+            return Response({"detail": _legacy_user_detail(instance)}, status=status.HTTP_200_OK)
+        except Http404:
             return Response({"error": "Data Not Found"}, status=status.HTTP_400_BAD_REQUEST)
 
 

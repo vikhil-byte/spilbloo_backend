@@ -17,11 +17,45 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import path, include
-from accounts.views import LogoutView
-from accounts.views import CardDeleteView
+from django.http import HttpResponse
+from accounts.views import LogoutView, CardDeleteView, UserImageView
+
+def robots_txt(request):
+    content = "User-agent: *\nDisallow: /admin/\nDisallow: /api/\nSitemap: https://spilbloo.com/sitemap.xml\n"
+    return HttpResponse(content, content_type="text/plain")
+
+def sitemap_xml(request):
+    content = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://spilbloo.com/</loc>
+    <priority>1.00</priority>
+  </url>
+  <url>
+    <loc>https://spilbloo.com/careers</loc>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://spilbloo.com/resources</loc>
+    <priority>0.80</priority>
+  </url>
+  <url>
+    <loc>https://spilbloo.com/privacy-policy</loc>
+    <priority>0.50</priority>
+  </url>
+  <url>
+    <loc>https://spilbloo.com/terms-of-use</loc>
+    <priority>0.50</priority>
+  </url>
+</urlset>"""
+    return HttpResponse(content, content_type="application/xml")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("robots.txt", robots_txt),
+    path("sitemap.xml", sitemap_xml),
+    path("user/image/<int:pk>", UserImageView.as_view(), name="user_image"),
+
     # iOS legacy compatibility alias (historical typo in client path).
     path("api/users/logout/", LogoutView.as_view()),
     # iOS legacy compatibility alias.
@@ -33,4 +67,5 @@ urlpatterns = [
     path("api/call/", include("calls.urls")),
     path("api/notification/", include("accounts.urls_notification")),
     path("node/", include("core.urls_node")),
+    path("api/core/", include("core.urls")),
 ]

@@ -1,0 +1,24 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="font-family: 'Crimson Pro', Georgia, serif; color: #1A2E26; margin: 0 0 16px 0; font-size: 24px; font-weight: 700; line-height: 1.2;">Your Spilbloo at Work Invoice</h2>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 12px 0; font-weight: 500;">Hi,</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 20px 0;">Please find attached your Spilbloo invoice for {{ invoice_month }} {{ invoice_year }}:</p>
+
+<div style="background-color: #E8F3EF; border: 1px solid rgba(76, 167, 123, 0.2); border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+  <p style="margin: 0 0 8px 0; font-size: 16px; font-weight: 700; color: #2F6C52;">Plan Name: {{ plan_name }}</p>
+  <p style="margin: 0 0 4px 0; font-size: 14px; color: #6B7C75;">
+    <strong style="color: #1A2E26;">Invoice Number:</strong> {{ invoice_id }}
+  </p>
+  <p style="margin: 0; font-size: 14px; color: #6B7C75;">
+    <strong style="color: #1A2E26;">Invoice Period:</strong> {{ invoice_month }} {{ invoice_year }}
+  </p>
+</div>
+
+<p style="color: #6B7C75; font-size: 14px; line-height: 22px; margin: 0 0 16px 0;">
+  The payable date is 10 days from receipt of this invoice.
+</p>
+<p style="color: #6B7C75; font-size: 14px; line-height: 22px; margin: 0;">
+  Thank you for subscribing to Spilbloo at Work!
+</p>
+{% endblock %}

@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
 from .models import DoctorSlot, SlotBooking, Slot, Notification, PrescriptionUpload
-from .serializers import DoctorSlotSerializer, SlotBookingSerializer
+from .serializers import DoctorSlotSerializer, SlotBookingSerializer, SlotSerializer
 from django.db import transaction
 from django.utils import timezone
 from core.models import RefundLog
@@ -12,6 +12,9 @@ from plans.models import SubscribedPlan
 from django.core.mail import send_mail
 from django.conf import settings
 import os
+from core.email_service import get_email_client
+from core.firebase import _send_fcm
+
 
 User = get_user_model()
 import json
@@ -24,46 +27,13 @@ def send_event_email(to_email, subject, message):
     if not to_email:
         return
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
-    try:
-        send_mail(subject, message, from_email, [to_email], fail_silently=False)
-    except Exception:
-        logger.info("email fallback log to=%s subject=%s", to_email, subject)
+    get_email_client().send_email(
+        subject=subject,
+        body=message,
+        to_email=to_email,
+        from_email=from_email
+    )
 
-
-def _send_fcm(token, title, description):
-    try:
-        import firebase_admin
-        from firebase_admin import credentials, messaging
-    except Exception:
-        return False
-
-    try:
-        app = firebase_admin.get_app()
-    except Exception:
-        app = None
-
-    try:
-        if app is None:
-            cred_path = os.environ.get("FIREBASE_CREDENTIALS_PATH", "")
-            if cred_path and os.path.exists(cred_path):
-                cred = credentials.Certificate(cred_path)
-                app = firebase_admin.initialize_app(cred)
-            else:
-                service_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
-                if not service_json:
-                    return False
-                cred = credentials.Certificate(json.loads(service_json))
-                app = firebase_admin.initialize_app(cred)
-
-        msg = messaging.Message(
-            token=token,
-            notification=messaging.Notification(title=title, body=description),
-            data={"title": title, "description": description},
-        )
-        messaging.send(msg, app=app)
-        return True
-    except Exception:
-        return False
 
 def send_push_notification(user, title, description):
     if not user:
@@ -85,7 +55,7 @@ class AddScheduleView(APIView):
 
     def post(self, request):
         doctor = request.user
-        availability_data = request.data.get('availability', '[]')
+        availability_data = request.data.get('DoctorSlot[availability]') or request.data.get('availability', '[]')
         
         try:
             availability_list = json.loads(availability_data)
@@ -126,9 +96,9 @@ class UpdateScheduleView(APIView):
 
     def post(self, request):
         doctor = request.user
-        start_time = request.data.get('start_time')
-        end_time = request.data.get('end_time')
-        availability_data = request.data.get('availability', '[]')
+        start_time = request.query_params.get('start_time') or request.data.get('start_time')
+        end_time = request.query_params.get('end_time') or request.data.get('end_time')
+        availability_data = request.data.get('DoctorSlot[availability]') or request.data.get('availability', '[]')
 
         if not start_time or not end_time:
             return Response({"error": "Start and End time required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -160,6 +130,29 @@ class UpdateScheduleView(APIView):
         except Exception:
             logger.exception("update-schedule failed for doctor_id=%s", getattr(doctor, "id", None))
             return Response({"error": "Unable to update availability."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SlotListView(APIView):
+    permission_classes = (AllowAny,)
+
+    def get(self, request):
+        start_time = request.query_params.get('start_time')
+        end_time = request.query_params.get('end_time')
+        page = request.query_params.get('page', 0)
+
+        # PHP: Slot::findActive() — active slot templates sorted by id ASC, paginated
+        queryset = Slot.objects.filter(state_id=1).order_by('id')
+
+        page_size = 100
+        start = int(page) * page_size
+        end = start + page_size
+        paginated = queryset[start:end]
+
+        serializer = SlotSerializer(
+            paginated, many=True,
+            context={'request': request, 'start_time': start_time, 'end_time': end_time}
+        )
+        return Response({"list": serializer.data}, status=status.HTTP_200_OK)
 
 
 class GetDoctorSlotView(APIView):
@@ -323,12 +316,29 @@ class PatientBookingListView(generics.ListAPIView):
         b_type = self.request.query_params.get('type') # UPCOMING/COMPLETED
         patient_id = self.request.query_params.get('patient_id')
 
+        logger.info(
+            "Fetching patient booking list: doctor_id=%s, patient_id=%s, type=%s, user_id=%s",
+            doctor_id,
+            patient_id,
+            b_type,
+            getattr(self.request.user, "id", None)
+        )
+
         qs = SlotBooking.objects.filter(created_by_id=patient_id, doctor_id=doctor_id)
         if str(b_type) == '1': # UPCOMING
             qs = qs.filter(state_id__in=[2, 3]) # REQUEST, ACCEPT
         elif str(b_type) == '2': # COMPLETED
             qs = qs.filter(state_id__in=[4, 5]) # CANCELLED, COMPLETED
         return qs.order_by('-id')
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        logger.info(
+            "PatientBookingListView response: status_code=%s, data=%s",
+            response.status_code,
+            response.data
+        )
+        return response
 
 class DoctorBookingReqView(generics.ListAPIView):
     permission_classes = (IsAuthenticated,)

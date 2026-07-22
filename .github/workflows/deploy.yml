@@ -1,0 +1,68 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+jobs:
+  deploy_dev:
+    name: Deploy to Staging
+    if: github.ref == 'refs/heads/dev'
+    environment: dev
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Staging Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/spilbloo_backend
+
+            # Fetch and reset local changes to dev branch
+            git fetch origin dev
+            git reset --hard origin/dev
+
+            # Write environment variables from dev environment secret
+            echo "${{ secrets.ENV_FILE }}" > .env
+
+            # Deploy
+            chmod +x deploy_ec2.sh
+            ./deploy_ec2.sh
+
+  deploy_prod:
+    name: Deploy to Production
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Production Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_PROD_HOST }}
+          username: ${{ secrets.EC2_PROD_USERNAME }}
+          key: ${{ secrets.EC2_PROD_SSH_KEY }}
+          script: |
+            cd ~/spilbloo_backend
+
+            # Fetch and reset local changes to main branch
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Write environment variables from production environment secret
+            echo "${{ secrets.ENV_FILE }}" > .env
+
+            # Deploy using production compose file
+            chmod +x deploy_ec2.sh
+            ./deploy_ec2.sh --prod

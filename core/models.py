@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 
 User = settings.AUTH_USER_MODEL
 
@@ -949,7 +950,7 @@ class Faq(models.Model):
 
 class NodeSubscriptionPlan(models.Model):
     """
-    Unmanaged compatibility model for legacy StarterNode table.
+    Managed compatibility model for legacy table.
     """
 
     id = models.BigAutoField(primary_key=True)
@@ -963,13 +964,13 @@ class NodeSubscriptionPlan(models.Model):
     plan_type = models.TextField(blank=True, null=True)
 
     class Meta:
-        managed = False
+        managed = True
         db_table = "tbl_subscription_plan"
 
 
 class NodeUserSelectedTherapistPlan(models.Model):
     """
-    Unmanaged compatibility model for legacy StarterNode table.
+    Managed compatibility model for legacy table.
     """
 
     id = models.BigAutoField(primary_key=True)
@@ -979,5 +980,209 @@ class NodeUserSelectedTherapistPlan(models.Model):
     selected_on = models.DateTimeField(blank=True, null=True)
 
     class Meta:
-        managed = False
+        managed = True
         db_table = "tbl_user_selected_therapist_plan"
+
+
+class HomeCard(models.Model):
+    id = models.AutoField(primary_key=True)
+    title = models.CharField(max_length=255, blank=True, null=True)
+    description = models.TextField(blank=True, null=True)
+    img_url_path = models.CharField(max_length=255, blank=True, null=True)
+    is_active = models.IntegerField(default=1)
+    position = models.IntegerField(default=0)
+    card_type = models.CharField(max_length=50, blank=True, null=True)
+
+    class Meta:
+        managed = True
+        db_table = "tbl_home_card"
+
+
+class DailyJournal(models.Model):
+    id = models.AutoField(primary_key=True)
+    entry_date = models.DateField(default=timezone.now)
+    journal = models.TextField(blank=True, null=True)
+    question_id = models.IntegerField(blank=True, null=True)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, db_column="created_by_id", related_name="daily_journals")
+    created_on = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        managed = True
+        db_table = "tbl_daily_journal"
+
+
+class DailyCheckinQuestion(models.Model):
+    id = models.AutoField(primary_key=True)
+    question = models.TextField(blank=True, null=True)
+    title = models.CharField(max_length=255, blank=True, null=True)
+    is_active = models.IntegerField(default=1)
+    created_on = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        managed = True
+        db_table = "tbl_daily_checkin_question"
+
+
+class DailyCheckinAnswer(models.Model):
+    id = models.AutoField(primary_key=True)
+    question_id = models.IntegerField(blank=True, null=True)
+    answer = models.TextField(blank=True, null=True)
+    score = models.IntegerField(default=0)
+    journal_question_id = models.IntegerField(blank=True, null=True)
+    created_on = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        managed = True
+        db_table = "tbl_daily_checkin_answer"
+
+
+class DailyCheckinQuestionAndAnswer(models.Model):
+    id = models.AutoField(primary_key=True)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, db_column="created_by_id", related_name="daily_qnas")
+    qna_map = models.JSONField(blank=True, null=True)
+    entry_date = models.DateField(auto_now_add=True)
+
+    class Meta:
+        managed = True
+        db_table = "tbl_daily_checkin_question_and_answer"
+
+
+class UserAppReview(models.Model):
+    id = models.AutoField(primary_key=True)
+    rating = models.IntegerField(blank=True, null=True)
+    review = models.TextField(blank=True, null=True)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, db_column="created_by_id", related_name="app_reviews")
+
+    class Meta:
+        managed = True
+        db_table = "tbl_user_app_review"
+
+
+class ChatsHistory(models.Model):
+    id = models.AutoField(primary_key=True)
+    user_id = models.IntegerField(blank=True, null=True)
+    chats_message = models.TextField(blank=True, null=True)
+    created_on = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        managed = True
+        db_table = "tbl_chats_history"
+
+
+class ApiAccessToken(models.Model):
+    id = models.AutoField(primary_key=True)
+    access_token = models.CharField(max_length=256, default="")
+    device_token = models.CharField(max_length=256, default="")
+    device_name = models.CharField(max_length=256, blank=True, null=True)
+    device_type = models.CharField(max_length=256, default="")
+    type_id = models.IntegerField(default=0)
+    created_on = models.DateTimeField(default=timezone.now)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, db_column="created_by_id", related_name="api_access_tokens", null=True, blank=True)
+
+    class Meta:
+        managed = True
+        db_table = "tbl_api_access_token"
+
+
+class TherapistApplication(models.Model):
+    STATE_INACTIVE = 0
+    STATE_ACCEPT = 1
+    STATE_REJECT = 2
+    STATE_ADD = 3
+    STATE_POOL = 4
+
+    STATE_CHOICES = (
+        (STATE_INACTIVE, 'New'),
+        (STATE_ACCEPT, 'Accept'),
+        (STATE_REJECT, 'Reject'),
+        (STATE_ADD, 'Added'),
+        (STATE_POOL, 'Pool'),
+    )
+
+    name = models.CharField(max_length=30)
+    email = models.EmailField(max_length=255)
+    contact_no = models.CharField(max_length=32)
+    address = models.CharField(max_length=512)
+    experience = models.CharField(max_length=64)
+    qualification = models.CharField(max_length=128)
+    rci_registered = models.CharField(max_length=16) # "Yes" or "No"
+    employment_status = models.CharField(max_length=128)
+    modalities = models.TextField() # Modalities as comma separated string
+    hours_available = models.CharField(max_length=128)
+    days_available = models.CharField(max_length=128)
+    motivation = models.TextField()
+    distress_situation = models.TextField()
+    
+    resume_file = models.CharField(max_length=1024)
+    certifications_file = models.CharField(max_length=1024, blank=True, null=True)
+    rci_file = models.CharField(max_length=1024, blank=True, null=True)
+    linkedin_profile = models.CharField(max_length=1024, blank=True, null=True)
+
+    language = models.ForeignKey(
+        'Language', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='therapist_applications'
+    )
+    symptoms = models.TextField(blank=True, null=True)  # JSON array of symptom IDs
+
+    consent_given = models.BooleanField(default=False)
+    consent_date_time = models.DateTimeField(null=True, blank=True)
+
+    state_id = models.SmallIntegerField(choices=STATE_CHOICES, default=STATE_INACTIVE)
+    type_id = models.SmallIntegerField(default=0)
+
+    created_on = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_therapist_applications')
+
+    class Meta:
+        db_table = 'tbl_therapist_application'
+
+    def __str__(self):
+        return self.name
+
+
+class Language(models.Model):
+    STATE_INACTIVE = 0
+    STATE_ACTIVE = 1
+
+    STATE_CHOICES = (
+        (STATE_INACTIVE, 'Inactive'),
+        (STATE_ACTIVE, 'Active'),
+    )
+
+    name = models.CharField(max_length=100, unique=True)
+    code = models.CharField(max_length=10, blank=True, null=True)
+    state_id = models.SmallIntegerField(choices=STATE_CHOICES, default=STATE_ACTIVE)
+    created_on = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'tbl_language'
+        verbose_name = 'Language'
+        verbose_name_plural = 'Languages'
+
+    def __str__(self):
+        return self.name
+
+
+class TherapistInvite(models.Model):
+    email = models.EmailField(max_length=255)
+    token = models.UUIDField(unique=True, default=None)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='created_therapist_invites'
+    )
+    created_on = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'tbl_therapist_invite'
+        verbose_name = 'Therapist Invite'
+        verbose_name_plural = 'Therapist Invites'
+
+    def is_expired(self):
+        return timezone.now() > self.expires_at
+
+    def __str__(self):
+        return f"{self.email} ({'used' if self.used else 'pending'})"
+
+

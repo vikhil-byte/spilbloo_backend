@@ -1,0 +1,26 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="font-family: 'Crimson Pro', Georgia, serif; color: #1A2E26; margin: 0 0 16px 0; font-size: 24px; font-weight: 700; line-height: 1.2;">Application Received</h2>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 12px 0; font-weight: 500;">Dear {{ name }},</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">
+  Thank you for your interest in joining our team at Spilbloo as a Mental Health Therapist.
+</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">
+  We appreciate the time and effort you have taken to submit your application. Your profile is currently under review by our clinical team. As part of our selection process, shortlisted candidates may be invited for further stages, which include a clinical interview, written assessment, and discussion regarding availability and role expectations.
+</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">
+  We are committed to maintaining high standards of ethical and evidence-based care and therefore conduct a thorough review of every application.
+</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
+  If your qualifications and experience align with our current requirements, a member of our team will reach out regarding the next steps.
+</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
+  Thank you once again for considering us as a part of your professional journey.
+</p>
+
+<p style="color: #6B7C75; font-size: 14px; line-height: 22px; margin: 0; padding-top: 16px; border-top: 1px solid #E8F3EF;">
+  Warm regards,<br>
+  <strong>Spilbloo Career</strong>
+</p>
+{% endblock %}

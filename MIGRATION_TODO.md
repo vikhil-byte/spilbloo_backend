@@ -118,11 +118,86 @@ The backend depends heavily on the following exact third-party services:
   * Python Logging is routed to standard output for Docker log tracking.
   * The `docker-compose.yml` handles linking PostgreSQL and Django automatically.
 * **Action Items:**
+* **Action Items:**
   * Ensure Docker Desktop is running on your machine.
   * [x] Create or update the `.env` file in the root directory (ensure `DEBUG=False` for production).
   * Run `docker-compose up -d --build` from the root directory.
   * The `entrypoint.sh` script will automatically wait for the DB, create the tables via `makemigrations`/`migrate`, collect static files for Nginx, and start the Gunicorn server at `http://localhost:80`.
-  * *Next Phase*: Export data from the old PHP database and import it into Django.
+  
+### **Database Migration & SQL Import Steps (Staging & Production)**
+When importing or restoring a database dump (like `clean_import.sql`) on a new server (staging or prod), the running Django/Celery containers will detect an empty database on startup and automatically execute `migrate` and `seed_data`. This populates tables like `tbl_symptom` with default records, causing `duplicate key` violations when the SQL dump is imported.
+
+To perform a clean database import on a production/staging machine:
+
+1. **Stop the Django & Celery services** (keep the database running):
+   ```bash
+   sudo docker-compose stop web celery_worker celery_beat
+   ```
+
+2. **Clean the database schema**:
+   If the database was already created with dirty template files or existing tables, drop and recreate the `public` schema:
+   ```bash
+   sudo docker-compose exec -T db psql -U db_user -d therapy_app_db -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO db_user;"
+   ```
+
+3. **Verify the database is empty**:
+   ```bash
+   sudo docker-compose exec -T db psql -U db_user -d therapy_app_db -c "\dt"
+   ```
+
+4. **Start the containers briefly to generate empty schemas** (or run `migrate` manually inside a temporary context):
+   Since migrations must run to establish the schema structure before the SQL data is inserted, run the migrations:
+   ```bash
+   # Temporarily start web to run migrations, then stop it immediately before it seeds data:
+   sudo docker-compose start web && sudo docker-compose exec -T web python manage.py migrate && sudo docker-compose stop web
+   ```
+
+5. **Wipe the seeded data**:
+   Because the container startup runs the `seed_data` script, truncate the seeded tables to ensure they are 100% empty for the SQL dump:
+   ```bash
+   sudo docker-compose exec -T db psql -U db_user -d therapy_app_db -c "TRUNCATE TABLE tbl_symptom, tbl_subscription_plan, tbl_home_card, tbl_daily_checkin_question, tbl_daily_checkin_answer, tbl_user, tbl_age_group, tbl_assigned_therapist, tbl_best_doctor, tbl_call, tbl_category, tbl_chats_history, tbl_company, tbl_company_coupon, tbl_company_coupon_invoice, tbl_company_monthly_invoice, tbl_contact_form, tbl_coupon, tbl_coupon_user, tbl_currency, tbl_daily_checkin_question_and_answer, tbl_daily_journal, tbl_disclaimer, tbl_doctor_reason, tbl_doctor_request, tbl_doctor_slot, tbl_emergency_resource, tbl_faq, tbl_feed, tbl_file, tbl_home_content, tbl_invoice, tbl_login_history, tbl_notification, tbl_page, tbl_plan, tbl_prescription_upload, tbl_push_notification, tbl_refund_log, tbl_setting, tbl_slot, tbl_slot_booking, tbl_subscribed_plan, tbl_subscribed_video, tbl_therapist_earning, tbl_user_app_review, tbl_user_groups, tbl_user_selected_therapist_plan, tbl_user_symptom, tbl_user_user_permissions, tbl_video_coupon, tbl_video_plan CASCADE;"
+   ```
+
+6. **Import the SQL dump**:
+   ```bash
+   sudo docker-compose exec -T db psql -U db_user -d therapy_app_db < /home/ubuntu/clean_import.sql
+   ```
+
+7. **Start all services back up**:
+   ```bash
+   sudo docker-compose start web celery_worker celery_beat
+   ```
+
+8. **Reset sequence primary key counts**:
+   Django's auto-increment fields must be synchronized with the imported IDs.
+   * **For Django-managed apps**:
+     ```bash
+     sudo docker-compose exec -T web python manage.py sqlsequencereset accounts availability calls company plans | sudo docker-compose exec -T db psql -U db_user -d therapy_app_db
+     ```
+   * **For the `core` app** (must be run manually to avoid errors on unmanaged view models):
+     ```bash
+     sudo docker-compose exec -T db psql -U db_user -d therapy_app_db -c "
+     SELECT setval('tbl_login_history_id_seq', COALESCE((SELECT MAX(id) FROM tbl_login_history), 0) + 1, false);
+     SELECT setval('tbl_invoice_id_seq', COALESCE((SELECT MAX(id) FROM tbl_invoice), 0) + 1, false);
+     SELECT setval('tbl_file_id_seq', COALESCE((SELECT MAX(id) FROM tbl_file), 0) + 1, false);
+     SELECT setval('tbl_feed_id_seq', COALESCE((SELECT MAX(id) FROM tbl_feed), 0) + 1, false);
+     SELECT setval('tbl_doctor_request_id_seq', COALESCE((SELECT MAX(id) FROM tbl_doctor_request), 0) + 1, false);
+     SELECT setval('tbl_contact_form_id_seq', COALESCE((SELECT MAX(id) FROM tbl_contact_form), 0) + 1, false);
+     SELECT setval('tbl_best_doctor_id_seq', COALESCE((SELECT MAX(id) FROM tbl_best_doctor), 0) + 1, false);
+     SELECT setval('tbl_assigned_therapist_id_seq', COALESCE((SELECT MAX(id) FROM tbl_assigned_therapist), 0) + 1, false);
+     SELECT setval('tbl_age_group_id_seq', COALESCE((SELECT MAX(id) FROM tbl_age_group), 0) + 1, false);
+     SELECT setval('tbl_refund_log_id_seq', COALESCE((SELECT MAX(id) FROM tbl_refund_log), 0) + 1, false);
+     SELECT setval('tbl_setting_id_seq', COALESCE((SELECT MAX(id) FROM tbl_setting), 0) + 1, false);
+     SELECT setval('tbl_symptom_id_seq', COALESCE((SELECT MAX(id) FROM tbl_symptom), 0) + 1, false);
+     SELECT setval('tbl_therapist_earning_id_seq', COALESCE((SELECT MAX(id) FROM tbl_therapist_earning), 0) + 1, false);
+     SELECT setval('tbl_user_symptom_id_seq', COALESCE((SELECT MAX(id) FROM tbl_user_symptom), 0) + 1, false);
+     SELECT setval('tbl_video_coupon_id_seq', COALESCE((SELECT MAX(id) FROM tbl_video_coupon), 0) + 1, false);
+     SELECT setval('tbl_video_plan_id_seq', COALESCE((SELECT MAX(id) FROM tbl_video_plan), 0) + 1, false);
+     SELECT setval('tbl_subscribed_video_id_seq', COALESCE((SELECT MAX(id) FROM tbl_subscribed_video), 0) + 1, false);
+     SELECT setval('tbl_coupon_user_id_seq', COALESCE((SELECT MAX(id) FROM tbl_coupon_user), 0) + 1, false);
+     SELECT setval('tbl_home_content_id_seq', COALESCE((SELECT MAX(id) FROM tbl_home_content), 0) + 1, false);
+     "
+     ```
 
 ## 3. Frontend Integration 🌐
 * **Current State:** The React (`spilbloo-site`) frontend expects the old PHP routes/payloads.
@@ -130,3 +205,4 @@ The backend depends heavily on the following exact third-party services:
   * Update React API calls to target the new Django endpoints (`/api/...`).
   * Verify payload structures natively match between the Django serializers and the React state.
   * Test JWT authentication flows (`access` / `refresh` tokens) from frontend to backend.
+

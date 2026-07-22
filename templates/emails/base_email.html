@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}{{ subject }}{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,600;0,700;1,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body style="margin: 0; padding: 0; background-color: #FBF6F2; font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #FBF6F2; padding: 40px 10px;">
+    <tr>
+      <td align="center">
+        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 520px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 30px rgba(47, 108, 82, 0.04); border: 1px solid #E8F3EF; border-collapse: separate;">
+          
+          <!-- Header Banner -->
+          <tr>
+            <td style="background-color: #E8F3EF; padding: 36px 20px; text-align: center; border-bottom: 1px solid rgba(47, 108, 82, 0.08);">
+              <a href="https://spilbloo.com" style="text-decoration: none; display: inline-block;">
+                <img src="https://www.spilbloo.com/logo.png" style="height: 35px; width: auto; border: none; outline: none; display: block; margin: 0 auto;" alt="Spilbloo">
+              </a>
+            </td>
+          </tr>
+          
+          <!-- Body Content Block -->
+          <tr>
+            <td style="padding: 40px 35px;">
+              {% block content %}{% endblock %}
+            </td>
+          </tr>
+          
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #E8F3EF; padding: 28px 30px; text-align: center; border-top: 1px solid rgba(47, 108, 82, 0.08);">
+              <p style="color: #6B7C75; font-size: 13px; margin: 0 0 12px 0; font-weight: 500;">&copy; 2026 Spilbloo. All rights reserved.</p>
+              
+              <table border="0" cellpadding="0" cellspacing="0" align="center" style="margin-bottom: 16px;">
+                <tr>
+                  <td style="padding: 0 10px;">
+                    <a href="https://www.instagram.com/spilbloo" target="_blank" style="color: #2F6C52; text-decoration: none; font-size: 13px; font-weight: 600;">Instagram</a>
+                  </td>
+                  <td style="padding: 0 10px; color: #6B7C75; font-size: 13px;">&bull;</td>
+                  <td style="padding: 0 10px;">
+                    <a href="https://www.facebook.com/spilbloo" target="_blank" style="color: #2F6C52; text-decoration: none; font-size: 13px; font-weight: 600;">Facebook</a>
+                  </td>
+                  <td style="padding: 0 10px; color: #6B7C75; font-size: 13px;">&bull;</td>
+                  <td style="padding: 0 10px;">
+                    <a href="https://www.linkedin.com/company/spilbloo" target="_blank" style="color: #2F6C52; text-decoration: none; font-size: 13px; font-weight: 600;">LinkedIn</a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="color: #6B7C75; font-size: 12px; margin: 0; font-weight: 500;">
+                <a href="https://spilbloo.com" style="color: #2F6C52; text-decoration: none; margin: 0 8px;">Website</a> &bull;
+                <a href="https://spilbloo.com/privacy" style="color: #2F6C52; text-decoration: none; margin: 0 8px;">Privacy Policy</a> &bull;
+                <a href="mailto:contact@spilbloo.com" style="color: #2F6C52; text-decoration: none; margin: 0 8px;">Support</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

@@ -1,0 +1,66 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="font-family: 'Crimson Pro', Georgia, serif; color: #1A2E26; margin: 0 0 16px 0; font-size: 24px; font-weight: 700; line-height: 1.2;">New Therapist Application</h2>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">
+  A new therapist application has been submitted. Below are the details:
+</p>
+
+<table style="border-collapse: collapse; width: 100%; margin-bottom: 24px;" cellpadding="8">
+  <tr>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #1A2E26; font-weight: 600;" width="40%">Name:</td>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #6B7C75;" width="60%">{{ name }}</td>
+  </tr>
+  <tr>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #1A2E26; font-weight: 600;" width="40%">Email:</td>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #6B7C75;" width="60%">{{ email }}</td>
+  </tr>
+  <tr>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #1A2E26; font-weight: 600;" width="40%">Contact No:</td>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #6B7C75;" width="60%">{{ contact_no }}</td>
+  </tr>
+  <tr>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #1A2E26; font-weight: 600;" width="40%">Address:</td>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #6B7C75;" width="60%">{{ address }}</td>
+  </tr>
+  <tr>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #1A2E26; font-weight: 600;" width="40%">Experience:</td>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #6B7C75;" width="60%">{{ experience }}</td>
+  </tr>
+  <tr>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #1A2E26; font-weight: 600;" width="40%">Qualification:</td>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #6B7C75;" width="60%">{{ qualification }}</td>
+  </tr>
+  <tr>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #1A2E26; font-weight: 600;" width="40%">RCI Registered:</td>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #6B7C75;" width="60%">{{ rci_registered }}</td>
+  </tr>
+  <tr>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #1A2E26; font-weight: 600;" width="40%">Employment Status:</td>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #6B7C75;" width="60%">{{ employment_status }}</td>
+  </tr>
+  <tr>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #1A2E26; font-weight: 600;" width="40%">Hours Available:</td>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #6B7C75;" width="60%">{{ hours_available }}</td>
+  </tr>
+  <tr>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #1A2E26; font-weight: 600;" width="40%">Days Available:</td>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #6B7C75;" width="60%">{{ days_available }}</td>
+  </tr>
+  <tr>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #1A2E26; font-weight: 600;" width="40%">LinkedIn Profile:</td>
+    <td style="border-bottom: 1px solid #E8F3EF; color: #6B7C75;" width="60%">
+      {% if linkedin_profile %}
+        <a href="{{ linkedin_profile }}" style="color: #2F6C52;">{{ linkedin_profile }}</a>
+      {% else %}
+        None
+      {% endif %}
+    </td>
+  </tr>
+</table>
+
+<p style="color: #6B7C75; font-size: 14px; line-height: 22px; margin: 0; padding-top: 16px; border-top: 1px solid #E8F3EF;">
+  Warm regards,<br>
+  <strong>Spilbloo Platform</strong>
+</p>
+{% endblock %}

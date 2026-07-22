@@ -9,7 +9,7 @@ from celery import shared_task
 # Django Models
 from availability.models import SlotBooking, Notification
 from accounts.models import User
-from core.models import RefundLog, Notification, PushNotification, TherapistEarning, AssignedTherapist
+from core.models import RefundLog, PushNotification, TherapistEarning, AssignedTherapist
 from plans.models import SubscribedPlan, Coupon
 from company.models import Company, CompanyCoupon, MonthlyInvoice, CouponInvoice
 from calls.models import Call
@@ -685,3 +685,177 @@ def generate_un_limited_coupon_invoice():
         invoice.state_id = 1 # INITIATED
         invoice.save(update_fields=['state_id'])
         logger.info(f"Generated Unlimited Invoice for {invoice.coupon_code}")
+
+
+@shared_task
+def send_therapist_application_emails(application_id):
+    """
+    Asynchronously sends confirmation email to the applicant and 
+    notification email to founder@spilbloo.com for therapist application.
+    """
+    from core.models import TherapistApplication
+    from core.email_service import get_email_client
+    from django.conf import settings
+    from django.template.loader import render_to_string
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Running send_therapist_application_emails task for app: {application_id}")
+
+    try:
+        instance = TherapistApplication.objects.get(id=application_id)
+    except TherapistApplication.DoesNotExist:
+        logger.error(f"TherapistApplication with ID {application_id} does not exist.")
+        return
+
+    try:
+        # 1. Email to Applicant
+        subject = "Thank you for your application to Spilbloo"
+        context = {"name": instance.name}
+        html_content = render_to_string("emails/therapist_application_confirmation.html", context)
+        
+        from django.utils.html import strip_tags
+        body = strip_tags(html_content).strip()
+        
+        from_email = "careers@spilbloo.com"
+        client = get_email_client()
+        
+        client.send_email(
+            subject=subject,
+            body=body,
+            to_email=instance.email,
+            from_email=from_email,
+            html_body=html_content,
+            bcc=[from_email]
+        )
+        logger.info("Sent confirmation email to applicant: %s (BCC: %s)", instance.email, from_email)
+
+        # 2. Email to Career Team (Notification)
+        subject_admin = f"New Therapist Application - {instance.name}"
+        body_admin = f"A new therapist application has been submitted by {instance.name} ({instance.email}). Please check the admin dashboard for details."
+        
+        context_admin = {
+            "name": instance.name,
+            "email": instance.email,
+            "contact_no": instance.contact_no,
+            "address": instance.address,
+            "experience": instance.experience,
+            "qualification": instance.qualification,
+            "rci_registered": instance.rci_registered,
+            "employment_status": instance.employment_status,
+            "hours_available": instance.hours_available,
+            "days_available": instance.days_available,
+            "linkedin_profile": instance.linkedin_profile
+        }
+        html_content_admin = render_to_string("emails/therapist_application_notification_admin.html", context_admin)
+        
+        client.send_email(
+            subject=subject_admin,
+            body=body_admin,
+            to_email="careers@spilbloo.com",
+            from_email=from_email,
+            html_body=html_content_admin,
+            cc=["sarah@spilbloo.com"]
+        )
+        logger.info("Sent notification email to careers@spilbloo.com (CC: sarah@spilbloo.com)")
+    except Exception as e:
+        logger.exception("Failed to send therapist application emails: %s", str(e))
+
+
+@shared_task
+def send_therapist_application_status_email(application_id, status_id):
+    """
+    Asynchronously sends accept (shortlisted) or reject email to the applicant.
+    """
+    from core.models import TherapistApplication
+    from core.email_service import get_email_client
+    from django.template.loader import render_to_string
+    from django.utils.html import strip_tags
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Running send_therapist_application_status_email task for app: {application_id}, status: {status_id}")
+
+    try:
+        instance = TherapistApplication.objects.get(id=application_id)
+    except TherapistApplication.DoesNotExist:
+        logger.error(f"TherapistApplication with ID {application_id} does not exist.")
+        return
+
+    try:
+        from_email = "careers@spilbloo.com"
+        client = get_email_client()
+        context = {"name": instance.name}
+
+        if status_id == 1: # Accept
+            subject = "Your Application Has Been Shortlisted – Mental Health Therapist at Spilbloo"
+            html_content = render_to_string("emails/therapist_application_accepted.html", context)
+        elif status_id == 2: # Reject
+            subject = "Update on Your Application – Mental Health Therapist at Spilbloo"
+            html_content = render_to_string("emails/therapist_application_rejected.html", context)
+        else:
+            logger.warning(f"Unknown status_id {status_id} for application {application_id}")
+            return
+
+        body = strip_tags(html_content).strip()
+
+        client.send_email(
+            subject=subject,
+            body=body,
+            to_email=instance.email,
+            from_email=from_email,
+            html_body=html_content,
+            cc=["sarah@spilbloo.com"],
+            bcc=[from_email]
+        )
+        logger.info(f"Sent status email (status: {status_id}) to applicant: {instance.email} with CC: sarah@spilbloo.com, BCC: {from_email}")
+    except Exception as e:
+        logger.exception("Failed to send therapist application status email: %s", str(e))
+
+
+@shared_task
+def send_therapist_application_schedule_email(application_id):
+    """
+    Asynchronously sends schedule interview email to the applicant.
+    """
+    from core.models import TherapistApplication
+    from core.email_service import get_email_client
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Running send_therapist_application_schedule_email task for app: {application_id}")
+
+    try:
+        instance = TherapistApplication.objects.get(id=application_id)
+    except TherapistApplication.DoesNotExist:
+        logger.error(f"TherapistApplication with ID {application_id} does not exist.")
+        return
+
+    from django.template.loader import render_to_string
+    from django.utils.html import strip_tags
+
+    first_name = instance.name.split()[0] if instance.name else ""
+
+    subject = "Schedule Your Interview | Spilbloo"
+    context = {"name": first_name}
+    html_content = render_to_string("emails/therapist_application_schedule.html", context)
+    body = strip_tags(html_content).strip()
+
+    try:
+        from_email = "careers@spilbloo.com"
+        client = get_email_client()
+        client.send_email(
+            subject=subject,
+            body=body,
+            to_email=instance.email,
+            from_email=from_email,
+            html_body=html_content,
+            cc=["sarah@spilbloo.com"],
+            bcc=[from_email]
+        )
+        logger.info(f"Sent schedule interview email to applicant: {instance.email} with CC: sarah@spilbloo.com, BCC: {from_email}")
+    except Exception as e:
+        logger.exception("Failed to send therapist application schedule email: %s", str(e))
+
+
+

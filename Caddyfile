@@ -1,0 +1,16 @@
+{$DOMAIN_NAME} {
+    # Proxy all requests to Gunicorn
+    reverse_proxy web:8000
+
+    # Serve static files directly
+    handle_path /static/* {
+        root * /app/staticfiles
+        file_server
+    }
+
+    # Serve media files directly
+    handle_path /media/* {
+        root * /app/media
+        file_server
+    }
+}

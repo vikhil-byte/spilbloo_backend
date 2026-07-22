@@ -1,0 +1,29 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="font-family: 'Crimson Pro', Georgia, serif; color: #1A2E26; margin: 0 0 16px 0; font-size: 24px; font-weight: 700; line-height: 1.2;">You're Invited to Join Spilbloo</h2>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 12px 0; font-weight: 500;">Dear Therapist,</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">
+  We're pleased to invite you to join the Spilbloo team as a Mental Health Therapist.
+</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">
+  Please complete your onboarding by clicking the button below. This link will expire on <strong>{{ expires_at }}</strong>.
+</p>
+<p style="text-align: center; margin: 32px 0;">
+  <a href="{{ onboarding_url }}" style="display: inline-block; padding: 14px 32px; background-color: #1A2E26; color: #FFFFFF; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px;">
+    Complete Your Onboarding
+  </a>
+</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">
+  If the button above doesn't work, you can copy and paste this link into your browser:<br>
+  <a href="{{ onboarding_url }}" style="color: #1A2E26; word-break: break-all;">{{ onboarding_url }}</a>
+</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
+  During onboarding, you'll set up your profile, add your qualifications, upload your resume and certifications, and select your areas of expertise.
+</p>
+
+<p style="color: #6B7C75; font-size: 14px; line-height: 22px; margin: 0; padding-top: 16px; border-top: 1px solid #E8F3EF;">
+  Warm regards,<br>
+  <strong>Spilbloo Team</strong>
+</p>
+{% endblock %}

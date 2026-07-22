@@ -1,14 +1,15 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    TherapistEarningViewSet, ContactFormViewSet, DoctorReasonViewSet, 
-    SymptomViewSet, DoctorRequestViewSet, FeedViewSet, 
-    EmergencyResourceViewSet, AgeGroupViewSet, AssignedTherapistViewSet, 
-    BestDoctorViewSet, VideoPlanViewSet, VideoCouponViewSet, 
+    TherapistEarningViewSet, ContactFormViewSet, DoctorReasonViewSet,
+    SymptomViewSet, DoctorRequestViewSet, FeedViewSet,
+    EmergencyResourceViewSet, AgeGroupViewSet, AssignedTherapistViewSet,
+    BestDoctorViewSet, VideoPlanViewSet, VideoCouponViewSet,
     CouponUserViewSet, SubscribedVideoViewSet, UserSymptomViewSet,
-    SettingViewSet, DisclaimerViewSet, PushNotificationViewSet, 
-    FileViewSet, CurrencyViewSet, RefundLogViewSet, InvoiceViewSet, 
-    HomeContentViewSet, LoginHistoryViewSet
+    SettingViewSet, DisclaimerViewSet, PushNotificationViewSet,
+    FileViewSet, CurrencyViewSet, RefundLogViewSet, InvoiceViewSet,
+    HomeContentViewSet, LoginHistoryViewSet, TherapistApplicationViewSet,
+    TherapistInviteViewSet, TherapistOnboardingView, LanguageViewSet
 )
 
 router = DefaultRouter()
@@ -36,7 +37,11 @@ router.register(r'refund-logs', RefundLogViewSet)
 router.register(r'invoices', InvoiceViewSet)
 router.register(r'home-contents', HomeContentViewSet)
 router.register(r'login-histories', LoginHistoryViewSet)
+router.register(r'therapist-applications', TherapistApplicationViewSet)
+router.register(r'therapist-invites', TherapistInviteViewSet)
+router.register(r'languages', LanguageViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('therapist-onboarding/', TherapistOnboardingView.as_view(), name='therapist_onboarding'),
 ]

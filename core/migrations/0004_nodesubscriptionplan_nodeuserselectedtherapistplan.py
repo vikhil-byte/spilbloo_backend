@@ -25,7 +25,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'tbl_subscription_plan',
-                'managed': False,
+                'managed': True,
             },
         ),
         migrations.CreateModel(
@@ -39,7 +39,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'tbl_user_selected_therapist_plan',
-                'managed': False,
+                'managed': True,
             },
         ),
     ]

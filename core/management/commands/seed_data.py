@@ -1,202 +1,183 @@
 import json
 from django.core.management.base import BaseCommand
-from django.db import connection
 from django.contrib.auth import get_user_model
+from core.models import (
+    Symptom, NodeSubscriptionPlan, HomeCard, DailyCheckinQuestion, DailyCheckinAnswer,
+    TherapistApplication
+)
 
 User = get_user_model()
 
 class Command(BaseCommand):
-    help = "Seeds the database with mock data and sets up legacy raw-SQL compatibility tables."
+    help = "Seeds the database with mock data using Django's ORM."
 
     def handle(self, *args, **options):
         self.stdout.write(self.style.SUCCESS("Starting database seeding process..."))
 
-        # 1. Alter tbl_user to add legacy columns if they don't exist
-        self.stdout.write("Checking and adding legacy fields to tbl_user...")
-        with connection.cursor() as cursor:
-            cursor.execute("ALTER TABLE tbl_user ADD COLUMN IF NOT EXISTS qualification VARCHAR(255);")
-            cursor.execute("ALTER TABLE tbl_user ADD COLUMN IF NOT EXISTS experience INTEGER DEFAULT 0;")
-            cursor.execute("ALTER TABLE tbl_user ADD COLUMN IF NOT EXISTS online VARCHAR(50) DEFAULT 'no';")
-            cursor.execute("ALTER TABLE tbl_user ADD COLUMN IF NOT EXISTS is_available BOOLEAN DEFAULT TRUE;")
-            cursor.execute("ALTER TABLE tbl_user ADD COLUMN IF NOT EXISTS token VARCHAR(255) DEFAULT '';")
-
-        # 2. Create missing raw-SQL tables
-        self.stdout.write("Creating missing legacy tables...")
-        with connection.cursor() as cursor:
-            # tbl_home_card
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tbl_home_card (
-                    id SERIAL PRIMARY KEY,
-                    title VARCHAR(255),
-                    description TEXT,
-                    img_url_path VARCHAR(255),
-                    is_active INTEGER DEFAULT 1,
-                    position INTEGER DEFAULT 0,
-                    card_type VARCHAR(50)
-                );
-            """)
-
-            # tbl_daily_journal
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tbl_daily_journal (
-                    id SERIAL PRIMARY KEY,
-                    entry_date DATE DEFAULT CURRENT_DATE,
-                    journal TEXT,
-                    question_id INTEGER,
-                    created_by_id INTEGER
-                );
-            """)
-
-            # tbl_daily_checkin_question
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tbl_daily_checkin_question (
-                    id SERIAL PRIMARY KEY,
-                    question TEXT,
-                    is_active INTEGER DEFAULT 1
-                );
-            """)
-
-            # tbl_daily_checkin_answer
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tbl_daily_checkin_answer (
-                    id SERIAL PRIMARY KEY,
-                    question_id INTEGER,
-                    answer TEXT
-                );
-            """)
-
-            # tbl_daily_checkin_question_and_answer
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tbl_daily_checkin_question_and_answer (
-                    id SERIAL PRIMARY KEY,
-                    created_by_id INTEGER,
-                    qna_map JSONB,
-                    entry_date DATE DEFAULT CURRENT_DATE
-                );
-            """)
-
-            # tbl_user_app_review
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tbl_user_app_review (
-                    id SERIAL PRIMARY KEY,
-                    rating INTEGER,
-                    review TEXT,
-                    created_by_id INTEGER
-                );
-            """)
-
-            # tbl_chats_history
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tbl_chats_history (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER,
-                    chats_message TEXT,
-                    created_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-
-            # tbl_user_selected_therapist_plan
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tbl_user_selected_therapist_plan (
-                    id SERIAL PRIMARY KEY,
-                    user_id BIGINT,
-                    therapist_id BIGINT,
-                    plan_id BIGINT,
-                    selected_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-
-            # tbl_subscription_plan
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tbl_subscription_plan (
-                    id SERIAL PRIMARY KEY,
-                    plan_name VARCHAR(255),
-                    plan_description TEXT,
-                    plan_weekly_price DECIMAL(10, 2),
-                    plan_duration INTEGER,
-                    total_price DECIMAL(10, 2),
-                    doctor_price DECIMAL(10, 2),
-                    no_of_free_trial_days INTEGER,
-                    plan_type VARCHAR(50)
-                );
-            """)
-
-            # tbl_api_access_token
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tbl_api_access_token (
-                    id SERIAL PRIMARY KEY,
-                    created_by_id INTEGER,
-                    device_token VARCHAR(255)
-                );
-            """)
-
-        # 3. Seed initial / mock data
-        self.stdout.write("Seeding data into tables...")
-
         # Seed Symptoms
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) FROM tbl_symptom;")
-            if cursor.fetchone()[0] == 0:
-                symptoms = ["Anger management", "Specific phobia", "Social anxiety", "Sleep difficulties", "Sexual abuse", "Past trauma", "Family conflict", "Low self-esteem"]
-                for sym in symptoms:
-                    cursor.execute("INSERT INTO tbl_symptom (title, state_id, type_id, created_on) VALUES (%s, 1, 0, NOW());", [sym])
-                self.stdout.write(self.style.SUCCESS("  + Seeded symptoms."))
+        self.stdout.write("Seeding symptoms...")
+        if not Symptom.objects.exists():
+            symptoms = [
+                "Anger management",
+                "Specific phobia",
+                "Social anxiety",
+                "Sleep difficulties",
+                "Sexual abuse",
+                "Past trauma",
+                "Family conflict",
+                "Low self-esteem"
+            ]
+            for sym in symptoms:
+                Symptom.objects.create(title=sym, state_id=1, type_id=0)
+            self.stdout.write(self.style.SUCCESS("  + Seeded symptoms."))
+        else:
+            self.stdout.write("  Symptoms already seeded.")
 
         # Seed Subscription Plans
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) FROM tbl_subscription_plan;")
-            if cursor.fetchone()[0] == 0:
-                cursor.execute("""
-                    INSERT INTO tbl_subscription_plan (plan_name, plan_description, plan_weekly_price, plan_duration, total_price, doctor_price, no_of_free_trial_days, plan_type)
-                    VALUES 
-                    ('Weekly Basic Plan', 'Standard access to premium therapy services.', 500.00, 7, 500.00, 350.00, 3, 'weekly'),
-                    ('Monthly Premium Plan', 'Full 24/7 access to select therapists.', 1800.00, 30, 1800.00, 1400.00, 7, 'monthly');
-                """)
-                self.stdout.write(self.style.SUCCESS("  + Seeded subscription plans."))
+        self.stdout.write("Seeding subscription plans...")
+        if not NodeSubscriptionPlan.objects.exists():
+            NodeSubscriptionPlan.objects.create(
+                plan_name='Weekly Basic Plan',
+                plan_description='Standard access to premium therapy services.',
+                plan_weekly_price=500.00,
+                plan_duration=7,
+                total_price=500.00,
+                doctor_price=350.00,
+                no_of_free_trial_days=3,
+                plan_type='weekly'
+            )
+            NodeSubscriptionPlan.objects.create(
+                plan_name='Monthly Premium Plan',
+                plan_description='Full 24/7 access to select therapists.',
+                plan_weekly_price=1800.00,
+                plan_duration=30,
+                total_price=1800.00,
+                doctor_price=1400.00,
+                no_of_free_trial_days=7,
+                plan_type='monthly'
+            )
+            self.stdout.write(self.style.SUCCESS("  + Seeded subscription plans."))
+        else:
+            self.stdout.write("  Subscription plans already seeded.")
 
         # Seed Home Cards
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) FROM tbl_home_card;")
-            if cursor.fetchone()[0] == 0:
-                cursor.execute("""
-                    INSERT INTO tbl_home_card (title, description, img_url_path, is_active, position, card_type)
-                    VALUES 
-                    ('Welcome to Spilbloo!', 'Start your mental health journey today with certified therapists.', '/media/cards/welcome.png', 1, 1, 'info'),
-                    ('Daily Check-in Reminder', 'Do not forget to complete your daily check-in to track progress.', '/media/cards/checkin.png', 1, 2, 'alert');
-                """)
-                self.stdout.write(self.style.SUCCESS("  + Seeded home cards."))
+        self.stdout.write("Seeding home cards...")
+        if not HomeCard.objects.exists():
+            HomeCard.objects.create(
+                title='Welcome to Spilbloo!',
+                description='Start your mental health journey today with certified therapists.',
+                img_url_path='/media/cards/welcome.png',
+                is_active=1,
+                position=1,
+                card_type='info'
+            )
+            HomeCard.objects.create(
+                title='Daily Check-in Reminder',
+                description='Do not forget to complete your daily check-in to track progress.',
+                img_url_path='/media/cards/checkin.png',
+                is_active=1,
+                position=2,
+                card_type='alert'
+            )
+            self.stdout.write(self.style.SUCCESS("  + Seeded home cards."))
+        else:
+            self.stdout.write("  Home cards already seeded.")
 
         # Seed Daily Check-in Q&A
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) FROM tbl_daily_checkin_question;")
-            if cursor.fetchone()[0] == 0:
-                cursor.execute("INSERT INTO tbl_daily_checkin_question (id, question, is_active) VALUES (1, 'How are you feeling today?', 1);")
-                cursor.execute("INSERT INTO tbl_daily_checkin_question (id, question, is_active) VALUES (2, 'Did you sleep well last night?', 1);")
-                
-                cursor.execute("INSERT INTO tbl_daily_checkin_answer (question_id, answer) VALUES (1, 'Excellent'), (1, 'Good'), (1, 'Neutral'), (1, 'Bad');")
-                cursor.execute("INSERT INTO tbl_daily_checkin_answer (question_id, answer) VALUES (2, 'Yes'), (2, 'No'), (2, 'Somewhat');")
-                self.stdout.write(self.style.SUCCESS("  + Seeded daily check-in Q&A questions."))
+        self.stdout.write("Seeding daily check-in questions & answers...")
+        if not DailyCheckinQuestion.objects.exists():
+            DailyCheckinQuestion.objects.create(id=1, question='How are you feeling today?', is_active=1)
+            DailyCheckinQuestion.objects.create(id=2, question='Did you sleep well last night?', is_active=1)
+
+            DailyCheckinAnswer.objects.create(question_id=1, answer='Excellent')
+            DailyCheckinAnswer.objects.create(question_id=1, answer='Good')
+            DailyCheckinAnswer.objects.create(question_id=1, answer='Neutral')
+            DailyCheckinAnswer.objects.create(question_id=1, answer='Bad')
+
+            DailyCheckinAnswer.objects.create(question_id=2, answer='Yes')
+            DailyCheckinAnswer.objects.create(question_id=2, answer='No')
+            DailyCheckinAnswer.objects.create(question_id=2, answer='Somewhat')
+            self.stdout.write(self.style.SUCCESS("  + Seeded daily check-in Q&A questions."))
+        else:
+            self.stdout.write("  Daily check-in questions already seeded.")
+
+        # Seed Therapist Applications
+        self.stdout.write("Seeding therapist applications...")
+        if not TherapistApplication.objects.exists():
+            TherapistApplication.objects.create(
+                name='Dr. Aarav Mehta',
+                email='aarav.mehta@example.com',
+                contact_no='+919876543210',
+                address='Flat 402, Green Glen Layout, Bellandur, Bengaluru',
+                experience='5 years',
+                qualification="Master's Degree (Psychology)",
+                rci_registered='Yes',
+                employment_status='Self-employed / Private Practice',
+                modalities='Cognitive Behavioral Therapy (CBT), Trauma-Informed Care',
+                hours_available='20-30 hours',
+                days_available='Flexible (All days)',
+                motivation='I want to reach more people and provide convenient online counseling through Spilbloo.',
+                distress_situation='A client reached out in high distress. I acknowledged their feelings, slowed the conversation down, and guided them using calming ground techniques.',
+                linkedin_profile='https://linkedin.com/in/aaravmehta',
+                state_id=0, # New
+            )
+            TherapistApplication.objects.create(
+                name='Pooja Sharma',
+                email='pooja.sharma@example.com',
+                contact_no='+919999888777',
+                address='742 Evergreen Terrace, Mumbai',
+                experience='3 years',
+                qualification='M.Phil in Clinical Psychology',
+                rci_registered='Yes',
+                employment_status='Employed Full-time',
+                modalities='Acceptance and Commitment Therapy (ACT), Dialectical Behavior Therapy (DBT)',
+                hours_available='10-20 hours',
+                days_available='Weekends only',
+                motivation='Interested in working with a platform that values professional supervision and high-quality telehealth care.',
+                distress_situation='Used empathetic validation and crisis-escalation screening protocols in text format to ensure safety.',
+                linkedin_profile='https://linkedin.com/in/poojasharma',
+                state_id=1, # Accept
+            )
+            TherapistApplication.objects.create(
+                name='Vikram Singh',
+                email='vikram.singh@example.com',
+                contact_no='+919876543219',
+                address='Park Avenue, Block C, Delhi',
+                experience='Less than 1 year',
+                qualification="Bachelor's Degree",
+                rci_registered='No',
+                employment_status='Not currently employed',
+                modalities='Cognitive Behavioral Therapy (CBT)',
+                hours_available='30-40 hours',
+                days_available='Weekdays only',
+                motivation='Looking to start my professional journey in a supportive remote counseling environment.',
+                distress_situation='Helped client identify stressors and construct a self-care list during a challenging period.',
+                state_id=2, # Reject
+            )
+            self.stdout.write(self.style.SUCCESS("  + Seeded therapist applications."))
+        else:
+            self.stdout.write("  Therapist applications already seeded.")
 
         # Seed Therapist Users
         self.stdout.write("Creating therapist users...")
         therapist_emails = ["therapist1@spilbloo.com", "therapist2@spilbloo.com"]
         for idx, email in enumerate(therapist_emails, start=1):
             if not User.objects.filter(email=email).exists():
-                user = User.objects.create_user(
+                User.objects.create_user(
                     email=email,
                     password="Password@123",
                     full_name=f"Dr. Therapist {idx}",
                     role_id=5, # Doctor / Therapist
                     about_me="Dedicated licensed clinical therapist helping patients achieve mental well-being.",
-                    contact_no=f"+91987654321{idx}"
+                    contact_no=f"+91987654321{idx}",
+                    qualification='Ph.D. in Clinical Psychology',
+                    experience=8,
+                    online='yes',
+                    is_available=True,
+                    token='mock_device_token'
                 )
-                # Add raw columns details
-                with connection.cursor() as cursor:
-                    cursor.execute("""
-                        UPDATE tbl_user 
-                        SET qualification = 'Ph.D. in Clinical Psychology', experience = 8, online = 'yes', is_available = TRUE, token = 'mock_device_token'
-                        WHERE id = %s;
-                    """, [user.id])
                 self.stdout.write(self.style.SUCCESS(f"  + Created therapist user: {email}"))
+            else:
+                self.stdout.write(f"  Therapist user {email} already exists.")
 
         self.stdout.write(self.style.SUCCESS("Database seeding completed successfully!"))

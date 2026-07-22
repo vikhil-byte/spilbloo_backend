@@ -28,19 +28,35 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-=3g+043(r&e=g1&ixq3w3*+6n&t$-&n&p+78(-w-0g3%k$5$l%"
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = "django-insecure-dev-key-not-for-production"
+    else:
+        raise ValueError("SECRET_KEY environment variable is required in production")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DEBUG", "True") == "True"
 
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "*").split(",")
 
+CSRF_TRUSTED_ORIGINS = [
+    f"https://{host.strip()}" for host in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if host.strip()
+]
+# Fallback using DOMAIN_NAME environment variable
+domain_name = os.environ.get("DOMAIN_NAME")
+if domain_name:
+    CSRF_TRUSTED_ORIGINS.append(f"https://{domain_name}")
+    CSRF_TRUSTED_ORIGINS.append(f"http://{domain_name}")
+
 if not DEBUG:
     SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "False") == "True"
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = SECURE_SSL_REDIRECT
+    CSRF_COOKIE_SECURE = SECURE_SSL_REDIRECT
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
+
 
 
 # Application definition
@@ -81,8 +97,9 @@ ROOT_URLCONF = "spilbloo_backend.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
+
         "OPTIONS": {
             "context_processors": [
                 "django.template.context_processors.request",
@@ -109,6 +126,36 @@ DATABASES = {
         "PORT": os.environ.get("DB_PORT", "5432"),
     }
 }
+
+if os.environ.get("USE_SQLITE") == "1":
+    DATABASES["default"] = {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": os.environ.get("SQLITE_DB_PATH", str(BASE_DIR / "db.sqlite3")),
+    }
+
+# Note: For test DB override, use settings_test.py via:
+#   python manage.py test --settings=spilbloo_backend.settings_test
+
+
+
+# Cache configuration
+# Use Redis when running inside Docker/production to share state (like OTPs) across multiple Gunicorn workers.
+# Fallback to local memory cache for local development.
+if os.environ.get("DB_HOST") == "db" or "REDIS_URL" in os.environ:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": os.environ.get("REDIS_URL", "redis://redis:6379/1"),
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "spilbloo-local-cache",
+        }
+    }
+
 
 
 # Default primary key field type
@@ -196,13 +243,37 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 AUTH_USER_MODEL = "accounts.User"
 
 # CORS
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = [
+    org.strip() for org in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if org.strip()
+]
+if not CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://spilbloo.com",
+        "https://www.spilbloo.com",
+        "https://dev.spilbloo.com",
+        "https://www.dev.spilbloo.com",
+    ]
+CORS_ALLOW_ALL_ORIGINS = os.environ.get("CORS_ALLOW_ALL_ORIGINS", "True" if DEBUG else "False") == "True"
 
 # REST Framework
 REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
     'DEFAULT_AUTHENTICATION_CLASSES': (
+        'core.node_auth.NodeHeaderTokenAuthentication',
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     )
+}
+
+from datetime import timedelta
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=14),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
 }
 
 # Payments
@@ -216,3 +287,31 @@ CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
+
+# Email Configuration
+EMAIL_SERVICE_PROVIDER = os.environ.get('EMAIL_SERVICE_PROVIDER', 'smtp') # options: smtp, ses, console
+
+# SMTP settings
+SITE_URL = os.environ.get('SITE_URL', '')
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'localhost')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', 587))
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True') == 'True'
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'no-reply@spilbloo.com')
+
+# AWS SES credentials (direct API mode)
+AWS_SES_REGION_NAME = os.environ.get('AWS_SES_REGION_NAME', 'us-east-1')
+AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID', None)
+AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY', None)
+
+# AWS S3 Settings
+AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME', '')
+AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME', 'us-east-1')
+AWS_S3_ENDPOINT_URL = os.environ.get('AWS_S3_ENDPOINT_URL', None)
+AWS_S3_PUBLIC_URL = os.environ.get('AWS_S3_PUBLIC_URL', None)
+
+
+
+

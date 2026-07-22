@@ -124,7 +124,7 @@ class AuthenticateSubscriptionSecurityTests(APITestCase):
         )
 
     @override_settings(RAZORPAY_KEY_ID="test_key", RAZORPAY_KEY_SECRET="test_secret")
-    @patch("plans.views.razorpay_client.utility.verify_payment_signature")
+    @patch("plans.views.razorpay_client.utility.verify_subscription_payment_signature")
     def test_authenticate_subscription_rejects_invalid_signature(self, mock_verify):
         mock_verify.side_effect = Exception("bad sig")
         SubscribedPlan.objects.create(
@@ -148,9 +148,9 @@ class AuthenticateSubscriptionSecurityTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"], "Payment verification failed.")
-
+ 
     @override_settings(RAZORPAY_KEY_ID="test_key", RAZORPAY_KEY_SECRET="test_secret")
-    @patch("plans.views.razorpay_client.utility.verify_payment_signature")
+    @patch("plans.views.razorpay_client.utility.verify_subscription_payment_signature")
     def test_authenticate_subscription_idempotent_success(self, mock_verify):
         mock_verify.return_value = None
         sub = SubscribedPlan.objects.create(
@@ -219,7 +219,7 @@ class VideoPlanPurchaseFlowTests(APITestCase):
         self.assertEqual(float(check.data["final_amount"]), float(buy.data["final_amount"]))
         self.assertTrue(SubscribedVideo.objects.filter(created_by=self.user, plan=self.plan).exists())
         self.user.refresh_from_db()
-        self.assertEqual(self.user.video_credit, 5)
+        self.assertEqual(int(self.user.video_credit), 5)
 
     def test_buy_video_plan_with_coupon_persists_coupon_user(self):
         coupon = VideoCoupon.objects.create(

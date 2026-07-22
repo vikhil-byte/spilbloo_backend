@@ -101,3 +101,202 @@ class ForgotResetPasswordTests(APITestCase):
         )
         self.assertEqual(expired.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(expired.data["error"], "Invalid reset link.")
+
+
+class LanguageAndAffirmationTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="patient_lang@spilbloo.local",
+            password="Pass@123",
+            full_name="Patient Lang",
+            role_id=4,  # Patient role
+            state_id=User.STATE_ACTIVE,
+            language="es",
+            activation_key="testtoken123"
+        )
+
+    def test_user_serializer_contains_language(self):
+        from accounts.serializers import UserSerializer
+        serializer = UserSerializer(self.user)
+        self.assertIn("language", serializer.data)
+        self.assertEqual(serializer.data["language"], "es")
+
+        # Test normalization of null language to empty string
+        self.user.language = None
+        self.user.save()
+        serializer_null = UserSerializer(self.user)
+        self.assertEqual(serializer_null.data["language"], "")
+
+    def test_legacy_user_detail_contains_language_and_affirmation(self):
+        from accounts.views import _legacy_user_detail
+        detail = _legacy_user_detail(self.user)
+        self.assertIn("language", detail)
+        self.assertEqual(detail["language"], "es")
+        self.assertIn("affirmation_for_the_day", detail)
+        self.assertTrue(len(detail["affirmation_for_the_day"]) > 0)
+        self.assertIn("gender", detail)
+        self.assertIn("therapist_gender", detail)
+        self.assertIn("is_profile_completed", detail)
+        self.assertIn("symptoms", detail)
+        self.assertIn("about_me", detail)
+        self.assertIn("created_on", detail)
+
+    def test_cards_view_response_contains_affirmation(self):
+        from unittest.mock import patch
+        with patch("core.models.HomeCard.objects.filter") as mock_filter:
+            mock_filter.return_value = []
+            self.client.credentials(HTTP_AUTHORIZATION="Bearer testtoken123", HTTP_USER_ID=str(self.user.id))
+            response = self.client.get("/node/cards")
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertIn("results", response.data)
+            self.assertIn("affirmation", response.data["results"])
+            self.assertIn("cards", response.data["results"])
+            self.assertTrue(len(response.data["results"]["affirmation"]) > 0)
+
+    def test_daily_qna_contains_questions_and_opinions(self):
+        from core.models import DailyCheckinQuestion, DailyCheckinAnswer
+        q = DailyCheckinQuestion.objects.create(question="How do you feel today?", is_active=1)
+        ans = DailyCheckinAnswer.objects.create(question_id=q.id, answer="Good", score=5, journal_question_id=1)
+        
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer testtoken123", HTTP_USER_ID=str(self.user.id))
+        response = self.client.get("/node/daily-qna")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("results", response.data)
+        self.assertIn("question_and_answers", response.data["results"])
+        
+        qnas = response.data["results"]["question_and_answers"]
+        self.assertTrue(len(qnas) > 0)
+        
+        first_q = qnas[0]
+        self.assertEqual(first_q["id"], q.id)
+        self.assertEqual(first_q["question"], "How do you feel today?")
+        self.assertIn("created_on", first_q)
+        self.assertIn("answers", first_q)
+        
+        first_ans = first_q["answers"][0]
+        self.assertEqual(first_ans["id"], ans.id)
+        self.assertEqual(first_ans["answer"], "Good")
+        self.assertEqual(first_ans["score"], 5)
+        self.assertEqual(first_ans["journal_question_id"], 1)
+        self.assertIn("created_on", first_ans)
+
+    def test_add_user_answers_success(self):
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer testtoken123", HTTP_USER_ID=str(self.user.id))
+        payload = {
+            "user_id": self.user.id,
+            "qna_map": [
+                {"id": 1, "question": "Question 1", "answer": "Answer 1"}
+            ]
+        }
+        response = self.client.post("/node/add-user-answers", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        from core.models import DailyCheckinQuestionAndAnswer
+        qna = DailyCheckinQuestionAndAnswer.objects.filter(created_by=self.user).first()
+        self.assertIsNotNone(qna)
+        self.assertEqual(qna.qna_map, payload["qna_map"])
+
+    def test_add_user_answers_string_user_id(self):
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer testtoken123", HTTP_USER_ID=str(self.user.id))
+        payload = {
+            "user_id": str(self.user.id),
+            "qna_map": [
+                {"id": 1, "question": "Question 1", "answer": "Answer 1"}
+            ]
+        }
+        response = self.client.post("/node/add-user-answers", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_add_user_answers_missing_user_id(self):
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer testtoken123", HTTP_USER_ID=str(self.user.id))
+        payload = {
+            "qna_map": [
+                {"id": 1, "question": "Question 1", "answer": "Answer 1"}
+            ]
+        }
+        response = self.client.post("/node/add-user-answers", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        from core.models import DailyCheckinQuestionAndAnswer
+        qna = DailyCheckinQuestionAndAnswer.objects.filter(created_by=self.user).first()
+        self.assertIsNotNone(qna)
+        self.assertEqual(qna.qna_map, payload["qna_map"])
+
+
+
+
+class UserProfileUpdateTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="profile_tester@spilbloo.local",
+            password="Pass@123",
+            full_name="Profile Tester",
+            role_id=User.ROLE_PATIENT,
+            state_id=User.STATE_ACTIVE,
+        )
+        self.client.force_authenticate(user=self.user)
+        self.url = reverse("user_profile")
+
+    def test_update_profile_date_slashes_yyyy_mm_dd(self):
+        response = self.client.post(self.url, {"date_of_birth": "2008/06/03"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(str(self.user.date_of_birth), "2008-06-03")
+
+    def test_update_profile_date_slashes_dd_mm_yyyy(self):
+        response = self.client.post(self.url, {"date_of_birth": "03/06/2008"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(str(self.user.date_of_birth), "2008-06-03")
+
+    def test_update_profile_date_standard(self):
+        response = self.client.post(self.url, {"date_of_birth": "2008-06-03"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(str(self.user.date_of_birth), "2008-06-03")
+
+    def test_update_profile_date_invalid_format_returns_400(self):
+        response = self.client.post(self.url, {"date_of_birth": "not-a-date"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("error", response.data)
+
+    def test_update_profile_syncs_first_last_name_from_full_name(self):
+        response = self.client.post(self.url, {"full_name": "John Doe"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, "John")
+        self.assertEqual(self.user.last_name, "Doe")
+        self.assertEqual(response.data["detail"]["first_name"], "John")
+        self.assertEqual(response.data["detail"]["last_name"], "Doe")
+
+    def test_update_profile_syncs_full_name_from_first_last_name(self):
+        response = self.client.post(self.url, {"first_name": "Jane", "last_name": "Smith", "full_name": None}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.full_name, "Jane Smith")
+        self.assertEqual(response.data["detail"]["full_name"], "Jane Smith")
+
+
+class UserRegisterTests(APITestCase):
+    def test_signup_saves_first_name_and_last_name(self):
+        payload = {
+            "User[first_name]": "Alice",
+            "User[last_name]": "Wonderland",
+            "User[email]": "alice@spilbloo.local",
+            "User[full_name]": "Alice Wonderland",
+            "User[password]": "Pass@123"
+        }
+        response = self.client.post("/api/user/signup/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        user = User.objects.get(email="alice@spilbloo.local")
+        self.assertEqual(user.first_name, "Alice")
+        self.assertEqual(user.last_name, "Wonderland")
+        self.assertEqual(user.full_name, "Alice Wonderland")
+        
+        self.assertEqual(response.data["detail"]["first_name"], "Alice")
+        self.assertEqual(response.data["detail"]["last_name"], "Wonderland")
+
+
+
+

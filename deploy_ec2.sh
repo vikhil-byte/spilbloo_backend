@@ -1,10 +1,19 @@
 #!/bin/bash
 # deploy_ec2.sh
 # Deployment helper script for running spilbloo_backend on AWS EC2 (Ubuntu).
+# Usage: ./deploy_ec2.sh [--prod]
 
 set -e
 
-echo "=== Spilbloo Backend EC2 Deploy Tool ==="
+COMPOSE_FILE="docker-compose.yml"
+ENV_LABEL="Staging"
+
+if [ "$1" = "--prod" ]; then
+    COMPOSE_FILE="docker-compose.prod.yml"
+    ENV_LABEL="Production"
+fi
+
+echo "=== Spilbloo Backend EC2 Deploy ($ENV_LABEL) ==="
 
 # 1. Install Docker & Docker Compose if missing
 if ! command -v docker &> /dev/null; then
@@ -30,25 +39,15 @@ fi
 if [ ! -f .env ]; then
     echo "[!] WARNING: .env file not found in $(pwd)"
     echo "Please create a .env file containing your secrets and configuration."
-    echo "Example configurations needed:"
-    echo "  DEBUG=False"
-    echo "  ALLOWED_HOSTS=yourdomain.com,your-ec2-ip"
-    echo "  POSTGRES_DB=therapy_app_db"
-    echo "  POSTGRES_USER=db_user"
-    echo "  POSTGRES_PASSWORD=secure_password_here"
-    echo "  DB_HOST=db"
-    echo "  DB_PORT=5432"
-    echo "  RAZORPAY_KEY_ID=..."
-    echo "  RAZORPAY_KEY_SECRET=..."
-    echo ""
     exit 1
 fi
+chmod 600 .env
 
 # 3. Pull and Build Containers
-echo "[-] Building and launching Docker containers..."
-sudo docker-compose down --remove-orphans || true
-sudo docker-compose up -d --build
+echo "[-] Building and launching Docker containers ($COMPOSE_FILE)..."
+sudo docker-compose -f $COMPOSE_FILE down --remove-orphans || true
+sudo docker-compose -f $COMPOSE_FILE up -d --build
 
-echo "=== Deployment Completed Successfully ==="
-echo "You can check the running containers using: sudo docker-compose ps"
-echo "You can view the logs using: sudo docker-compose logs -f"
+echo "=== $ENV_LABEL Deployment Completed Successfully ==="
+echo "You can check the running containers using: sudo docker-compose -f $COMPOSE_FILE ps"
+echo "You can view the logs using: sudo docker-compose -f $COMPOSE_FILE logs -f"

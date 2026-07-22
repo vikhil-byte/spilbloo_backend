@@ -1,0 +1,26 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="font-family: 'Crimson Pro', Georgia, serif; color: #1A2E26; margin: 0 0 16px 0; font-size: 24px; font-weight: 700; line-height: 1.2;">Application Shortlisted</h2>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 12px 0; font-weight: 500;">Dear {{ name }},</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">
+  Thank you for applying for the Mental Health Therapist position at Spilbloo.
+</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">
+  We are pleased to inform you that your profile has been shortlisted, and we would like to move forward with the next stage of our selection process.
+</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">
+  The next step will be [Interview/Assessment/Screening Call], where we will discuss your experience, therapeutic approach, and your interest in working with clients through our text-based mental wellness platform.
+</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
+  Our team will reach out shortly with further details regarding the schedule and process.
+</p>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 24px 0;">
+  We appreciate your interest in Spilbloo and look forward to learning more about you.
+</p>
+
+<p style="color: #6B7C75; font-size: 14px; line-height: 22px; margin: 0; padding-top: 16px; border-top: 1px solid #E8F3EF;">
+  Warm regards,<br>
+  <strong>Spilbloo Career</strong>
+</p>
+{% endblock %}

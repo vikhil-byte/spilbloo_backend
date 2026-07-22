@@ -1,0 +1,33 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="font-family: 'Crimson Pro', Georgia, serif; color: #1A2E26; margin: 0 0 16px 0; font-size: 24px; font-weight: 700; line-height: 1.2; text-align: center;">New Payment Methods Added!</h2>
+<p style="color: #2F6C52; font-size: 17px; font-weight: 700; text-align: center; margin: 0 0 12px 0;">
+  We've made it easier for you to try Spilbloo!
+</p>
+<p style="color: #1A2E26; font-weight: 700; font-size: 15px; text-align: center; margin: 0 0 16px 0;">
+  You can now use any of the following payment methods:
+</p>
+
+<div style="background-color: #E8F3EF; border: 1px solid rgba(76, 167, 123, 0.2); border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 24px;">
+  <p style="margin: 4px 0; font-size: 15px; color: #1A2E26; font-weight: 600;">&bull; Debit/Credit Cards</p>
+  <p style="margin: 4px 0; font-size: 15px; color: #1A2E26; font-weight: 600;">&bull; UPI (Gpay, Paytm, PhonePe & more)</p>
+  <p style="margin: 4px 0; font-size: 15px; color: #1A2E26; font-weight: 600;">&bull; Netbanking</p>
+  <p style="margin: 4px 0; font-size: 15px; color: #1A2E26; font-weight: 600;">&bull; E-Wallets</p>
+  <p style="margin: 4px 0; font-size: 15px; color: #1A2E26; font-weight: 600;">&bull; Buy Now Pay Later (LazyPay, Simpl & more)</p>
+</div>
+
+<p style="color: #2F6C52; font-weight: 700; font-size: 15px; text-align: center; margin: 0 0 24px 0; line-height: 22px;">
+  Use code <strong style="color: #4CA77B; font-size: 17px;">FIRST</strong> to get ₹1000 off on any Spilbloo Plus plans or <strong style="color: #4CA77B; font-size: 17px;">FIRSTLITE</strong> to get ₹250 off on any Spilbloo Lite plans for your first subscription!
+</p>
+
+<table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 24px;">
+  <tr>
+    <td align="center">
+      <a href="https://spilbloo.com" style="display: inline-block; padding: 12px 36px; background-color: #2F6C52; color: #ffffff; border-radius: 12px; text-decoration: none; font-weight: 600; font-size: 16px; border: 1px solid #2F6C52; transition: background-color 0.3s ease;">
+        Try Now!
+      </a>
+    </td>
+  </tr>
+</table>
+{% endblock %}

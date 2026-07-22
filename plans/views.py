@@ -179,12 +179,12 @@ class PlanListView(generics.ListAPIView):
     def get_queryset(self):
         type_id = self.request.query_params.get('type_id', 0)
         currency = self.request.query_params.get('currency', 'INR')
-        qs = Plan.objects.filter(state_id=1, plan_type=1, type_id=1, currency_code=currency) # 1=Paid, 1=Visible
+        qs = Plan.objects.filter(state_id=1, plan_type=0, type_id=0, currency_code=currency) # 0=Paid, 0=Visible
         
-        if str(type_id) == '1': # PLAN_VIDEO_AND_TEXT
-            qs = qs.filter(no_of_video_session__gt=0)
-        elif str(type_id) == '2': # PLAN_TEXT
+        if str(type_id) == '1': # PLAN_TEXT (Lite)
             qs = qs.filter(no_of_video_session=0)
+        elif str(type_id) == '2': # PLAN_VIDEO_AND_TEXT (Plus)
+            qs = qs.filter(no_of_video_session__gt=0)
             
         return qs.order_by('-is_recommended')
 
@@ -203,11 +203,11 @@ class CompanyUserPlanListView(generics.ListAPIView):
         email = getattr(user, "email", "") or ""
         domain = email.split("@")[-1].lower() if "@" in email else ""
         if not domain:
-            return Plan.objects.filter(state_id=1, plan_type=1, type_id=1).order_by("-is_recommended")
+            return Plan.objects.filter(state_id=1, plan_type=0, type_id=0).order_by("-is_recommended")
 
         company = Company.objects.filter(state_id=Company.STATE_ACTIVE, email_domain__iexact=domain).first()
         if not company:
-            return Plan.objects.filter(state_id=1, plan_type=1, type_id=1).order_by("-is_recommended")
+            return Plan.objects.filter(state_id=1, plan_type=0, type_id=0).order_by("-is_recommended")
 
         coupon_plan_ids = CompanyCoupon.objects.filter(
             company=company,
@@ -384,7 +384,39 @@ class AuthenticateSubscriptionView(APIView):
             sub_id,
             bool(transaction_id),
         )
+        logger.info("authenticate-subscription params: data=%s query_params=%s", request.data, request.query_params)
         
+        razorpay_payment_id = (
+            request.data.get('razorpay_payment_id')
+            or request.data.get('SubscribedPlan[transaction_id]')
+            or request.data.get('transaction_id')
+            or request.query_params.get('razorpay_payment_id')
+        )
+        razorpay_signature = (
+            request.data.get('razorpay_signature')
+            or request.data.get('SubscribedPlan[signature]')
+            or request.data.get('signature')
+            or request.query_params.get('razorpay_signature')
+        )
+
+        logger.info("authenticate-subscription extracted: razorpay_payment_id=%s razorpay_signature=%s", razorpay_payment_id, razorpay_signature)
+
+        if _is_live_razorpay_subscription(sub_id):
+            if not razorpay_payment_id or not razorpay_signature:
+                logger.warning("authenticate-subscription validation failed: missing signature or payment_id")
+                return Response({"error": "Payment verification failed."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                logger.info("authenticate-subscription verifying signature for sub_id=%s", sub_id)
+                razorpay_client.utility.verify_subscription_payment_signature({
+                    'razorpay_subscription_id': sub_id,
+                    'razorpay_payment_id': razorpay_payment_id,
+                    'razorpay_signature': razorpay_signature
+                })
+                logger.info("authenticate-subscription verification successful")
+            except Exception as e:
+                logger.warning("authenticate-subscription signature verification failed: %s", str(e))
+                return Response({"error": "Payment verification failed."}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             plan = Plan.objects.get(plan_id=plan_id_str)
             with transaction.atomic():

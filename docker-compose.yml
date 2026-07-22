@@ -3,15 +3,17 @@ version: '3.8'
 services:
   db:
     image: postgres:15
+    restart: unless-stopped
     volumes:
       - postgres_data:/var/lib/postgresql/data
     env_file:
       - .env
-    ports:
-      - "5432:5432"
+    expose:
+      - "5432"
 
   web:
     build: .
+    restart: unless-stopped
     volumes:
       - .:/app
       - static_volume:/app/staticfiles
@@ -20,17 +22,21 @@ services:
       - "8000"
     env_file:
       - .env
+    environment:
+      - RUN_MIGRATIONS=true
     depends_on:
       - db
       - redis
 
   redis:
     image: redis:alpine
-    ports:
-      - "6379:6379"
+    restart: unless-stopped
+    expose:
+      - "6379"
 
   celery_worker:
     build: .
+    restart: unless-stopped
     command: celery -A spilbloo_backend worker --loglevel=info
     volumes:
       - .:/app
@@ -42,6 +48,7 @@ services:
 
   celery_beat:
     build: .
+    restart: unless-stopped
     command: celery -A spilbloo_backend beat -l info
     volumes:
       - .:/app
@@ -51,13 +58,20 @@ services:
       - db
       - redis
 
-  nginx:
-    build: ./nginx
-    volumes:
-      - static_volume:/app/staticfiles
-      - media_volume:/app/media
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN_NAME=${DOMAIN_NAME}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
     depends_on:
       - web
 
@@ -65,3 +79,5 @@ volumes:
   postgres_data:
   static_volume:
   media_volume:
+  caddy_data:
+  caddy_config:

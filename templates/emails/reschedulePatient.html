@@ -1,0 +1,24 @@
+{% extends "emails/base_email.html" %}
+
+{% block content %}
+<h2 style="font-family: 'Crimson Pro', Georgia, serif; color: #1A2E26; margin: 0 0 16px 0; font-size: 24px; font-weight: 700; line-height: 1.2;">Video Session Rescheduled</h2>
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">{{ therapist_name }} has rescheduled your video session!</p>
+
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 8px 0;">Your video session that was previously scheduled for:</p>
+<div style="background-color: #FBF6F2; border: 1px solid #E8F3EF; border-radius: 12px; padding: 12px 16px; text-align: center; margin-bottom: 20px;">
+  <p style="margin: 0; font-size: 14px; font-weight: 600; color: #6B7C75; text-decoration: line-through;">
+    {{ old_session_date }} ({{ old_session_day }})<br>
+    {{ old_session_start_time }} – {{ old_session_end_time }}
+  </p>
+</div>
+
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0 0 8px 0;">Has now been moved to:</p>
+<div style="background-color: #E8F3EF; border: 1px solid rgba(76, 167, 123, 0.2); border-radius: 12px; padding: 16px; text-align: center; margin-bottom: 24px;">
+  <p style="margin: 0; font-size: 16px; font-weight: 700; color: #2F6C52;">
+    {{ session_date }} ({{ session_day }})<br>
+    {{ session_start_time }} – {{ session_end_time }}
+  </p>
+</div>
+
+<p style="color: #6B7C75; font-size: 15px; line-height: 24px; margin: 0;">If this does not work for you, please reach out to {{ therapist_name }} to find a suitable time slot.</p>
+{% endblock %}

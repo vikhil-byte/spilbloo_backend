@@ -11,10 +11,15 @@ done
 echo "PostgreSQL started"
 
 # Apply database migrations
-echo "Apply database migrations"
-python manage.py makemigrations
-python manage.py migrate
-python manage.py seed_data
+if [ "$RUN_MIGRATIONS" = "true" ]; then
+  echo "Applying database migrations..."
+  python manage.py migrate --noinput
+
+  echo "Seeding database..."
+  python manage.py seed_data
+else
+  echo "Skipping migrations (RUN_MIGRATIONS != true)"
+fi
 
 # Start server
 echo "Starting server"
