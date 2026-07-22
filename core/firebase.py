@@ -1,27 +1,37 @@
 import os
 import json
 import logging
+import base64
 
 logger = logging.getLogger(__name__)
 
 
 def _load_firebase_credentials(credentials_cls):
-    """Load and sanitize Firebase credentials dict from file or env var."""
-    cred_path = os.environ.get("FIREBASE_CREDENTIALS_PATH", "")
+    """Load and sanitize Firebase credentials dict from base64 env, file path, or raw JSON env."""
+    b64_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_BASE64", "").strip()
+    cred_path = os.environ.get("FIREBASE_CREDENTIALS_PATH", "").strip()
+    raw_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
     cert_dict = None
 
-    if cred_path and os.path.exists(cred_path):
+    if b64_json:
+        logger.info("[FCM Config] Loading Firebase credentials from FIREBASE_SERVICE_ACCOUNT_BASE64 env var")
+        try:
+            decoded_json = base64.b64decode(b64_json).decode("utf-8")
+            cert_dict = json.loads(decoded_json)
+        except Exception as exc:
+            logger.error("[FCM Config Error] Failed to decode FIREBASE_SERVICE_ACCOUNT_BASE64: %s", exc)
+
+    if not cert_dict and cred_path and os.path.exists(cred_path):
         logger.info("[FCM Config] Loading Firebase credentials from file: %s", cred_path)
         with open(cred_path, "r", encoding="utf-8") as f:
             cert_dict = json.load(f)
-    else:
-        service_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
-        if service_json:
-            logger.info("[FCM Config] Loading Firebase credentials from FIREBASE_SERVICE_ACCOUNT_JSON env var (len=%d)", len(service_json))
-            cert_dict = json.loads(service_json)
+
+    if not cert_dict and raw_json:
+        logger.info("[FCM Config] Loading Firebase credentials from FIREBASE_SERVICE_ACCOUNT_JSON env var (len=%d)", len(raw_json))
+        cert_dict = json.loads(raw_json)
 
     if not cert_dict:
-        logger.error("[FCM Config Error] No credentials configured. Both FIREBASE_CREDENTIALS_PATH and FIREBASE_SERVICE_ACCOUNT_JSON are empty or missing.")
+        logger.error("[FCM Config Error] No valid credentials configured. Check FIREBASE_SERVICE_ACCOUNT_BASE64, FIREBASE_CREDENTIALS_PATH, or FIREBASE_SERVICE_ACCOUNT_JSON.")
         return None
 
     # Sanitize private key PEM formatting issues automatically
