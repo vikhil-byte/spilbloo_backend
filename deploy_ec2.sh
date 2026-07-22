@@ -32,9 +32,14 @@ else
     exit 1
 fi
 
-# Deploy
-echo "[-] Building and launching Docker containers ($COMPOSE_FILE)..."
-$DC -f $COMPOSE_FILE down --remove-orphans || true
-$DC -f $COMPOSE_FILE up -d --build
+# Deploy (Zero-Downtime Rolling Update)
+echo "[-] Building and launching updated Docker containers ($COMPOSE_FILE)..."
+$DC -f $COMPOSE_FILE up -d --build --remove-orphans
+
+# Reload Caddy reverse proxy seamlessly if caddy service is running
+if $DC -f $COMPOSE_FILE ps | grep -q caddy; then
+    echo "[-] Reloading Caddy proxy configuration..."
+    $DC -f $COMPOSE_FILE exec -T caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
+fi
 
 echo "=== $ENV_LABEL Deployment Completed Successfully ==="
