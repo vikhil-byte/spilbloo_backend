@@ -15,72 +15,61 @@ fi
 
 echo "=== Spilbloo Backend EC2 Deploy ($ENV_LABEL) ==="
 
-# 1. Install Docker if missing
-if ! command -v docker &> /dev/null; then
-    echo "[-] Installing Docker..."
-    if command -v yum &> /dev/null; then
+# 1. Install Docker + plugins if missing
+if ! docker compose version &> /dev/null; then
+    echo "[-] Docker Compose not available, installing..."
+
+    if command -v apt-get &> /dev/null; then
+        # Ubuntu / Debian — use official Docker repo
+        sudo apt-get update
+        sudo apt-get install -y ca-certificates curl
+        sudo install -m 0755 -d /etc/apt/keyrings
+        sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+        sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+        sudo apt-get update
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+    elif command -v yum &> /dev/null; then
+        # Amazon Linux / RHEL — install plugins manually
         sudo yum install -y docker
         sudo systemctl start docker
         sudo systemctl enable docker
-    else
-        sudo apt-get update
-        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+        ARCH=$(uname -m)
+        [ "$ARCH" = "x86_64" ] && ARCH="amd64"
+        [ "$ARCH" = "aarch64" ] && ARCH="arm64"
+
+        sudo mkdir -p /usr/local/lib/docker/cli-plugins
+        sudo curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${ARCH}" \
+            -o /usr/local/lib/docker/cli-plugins/docker-compose
+        sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+        sudo curl -fsSL "https://github.com/docker/buildx/releases/latest/download/buildx-linux-${ARCH}" \
+            -o /usr/local/lib/docker/cli-plugins/docker-buildx
+        sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
     fi
+
     sudo usermod -aG docker $USER
-    echo "[+] Docker installed successfully!"
+    echo "[+] Docker + Compose + Buildx installed successfully!"
 fi
 
-# 2. Detect the correct architecture for plugin downloads
-ARCH=$(uname -m)
-if [ "$ARCH" = "x86_64" ]; then
-    PLUGIN_ARCH="amd64"
-elif [ "$ARCH" = "aarch64" ]; then
-    PLUGIN_ARCH="arm64"
-else
-    PLUGIN_ARCH="$ARCH"
-fi
-
-# 3. Install Docker Compose v2 plugin into all known plugin directories
-COMPOSE_URL="https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${PLUGIN_ARCH}"
-for PLUGIN_DIR in "/usr/local/lib/docker/cli-plugins" "/usr/libexec/docker/cli-plugins" "$HOME/.docker/cli-plugins"; do
-    echo "[-] Installing docker-compose to $PLUGIN_DIR..."
-    sudo mkdir -p "$PLUGIN_DIR"
-    sudo curl -SL "$COMPOSE_URL" -o "$PLUGIN_DIR/docker-compose"
-    sudo chmod +x "$PLUGIN_DIR/docker-compose"
-done
-
-# 4. Install Docker Buildx plugin into all known plugin directories
-BUILDX_URL="https://github.com/docker/buildx/releases/latest/download/buildx-linux-${PLUGIN_ARCH}"
-for PLUGIN_DIR in "/usr/local/lib/docker/cli-plugins" "/usr/libexec/docker/cli-plugins" "$HOME/.docker/cli-plugins"; do
-    echo "[-] Installing docker-buildx to $PLUGIN_DIR..."
-    sudo mkdir -p "$PLUGIN_DIR"
-    sudo curl -SL "$BUILDX_URL" -o "$PLUGIN_DIR/docker-buildx"
-    sudo chmod +x "$PLUGIN_DIR/docker-buildx"
-done
-
-# 5. Verify
+# 2. Verify
 echo "[-] Docker: $(docker --version)"
 echo "[-] Compose: $(docker compose version)"
+echo "[-] Buildx: $(docker buildx version)"
 
-# Verify buildx works (skip if unavailable — some setups don't need it)
-if docker buildx version &> /dev/null; then
-    echo "[-] Buildx: $(docker buildx version)"
-else
-    echo "[!] docker buildx not available, checking if build works without it..."
-    # Try creating the builder explicitly
-    docker buildx create --name default --use 2>/dev/null || true
-    docker buildx install 2>/dev/null || true
-fi
-
-# 6. Check for .env file
+# 3. Check for .env file
 if [ ! -f .env ]; then
     echo "[!] WARNING: .env file not found in $(pwd)"
-    echo "Please create a .env file containing your secrets and configuration."
     exit 1
 fi
 chmod 600 .env
 
-# 7. Pull and Build Containers
+# 4. Deploy
 echo "[-] Building and launching Docker containers ($COMPOSE_FILE)..."
 docker compose -f $COMPOSE_FILE down --remove-orphans || true
 docker compose -f $COMPOSE_FILE up -d --build
