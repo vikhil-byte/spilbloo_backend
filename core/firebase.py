@@ -87,9 +87,19 @@ def _send_fcm(token, title, body, data=None):
         return True
     except Exception as exc:
         logger.exception("[FCM Send FAILED] Target Token: %s... | Error: %s", token[:20] if token else "None", exc)
-        # Auto-cleanup expired/unregistered token from database
         exc_str = str(exc)
         exc_type = type(exc).__name__
+
+        # If OAuth authentication fails (401 / ThirdPartyAuthError), delete stale app instance so next attempt re-authenticates
+        if "ThirdPartyAuthError" in exc_type or "Unauthorized" in exc_str or "401" in exc_str:
+            try:
+                if app:
+                    firebase_admin.delete_app(app)
+                    logger.warning("[FCM Reset] Deleted stale Firebase App instance to force credential re-authentication.")
+            except Exception as del_exc:
+                logger.warning("[FCM Reset Warning] Failed to delete Firebase App: %s", del_exc)
+
+        # Auto-cleanup expired/unregistered token from database
         if "Unregistered" in exc_type or "NotRegistered" in exc_str:
             try:
                 from core.models import ApiAccessToken
