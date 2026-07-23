@@ -65,7 +65,6 @@ def _send_fcm(token, title, body, data=None):
 
     try:
         app = firebase_admin.get_app()
-        logger.debug("[FCM] Reusing existing firebase App instance.")
     except Exception:
         app = None
 
@@ -74,8 +73,11 @@ def _send_fcm(token, title, body, data=None):
             cred = _load_firebase_credentials(credentials)
             if not cred:
                 return False
-            app = firebase_admin.initialize_app(cred)
-            logger.info("[FCM Config Success] Firebase App initialized. Project ID: %s", getattr(cred, 'project_id', 'unknown'))
+            try:
+                app = firebase_admin.initialize_app(cred)
+                logger.info("[FCM Config Success] Firebase App initialized.")
+            except ValueError:
+                app = firebase_admin.get_app()
 
         msg = messaging.Message(
             token=token,
@@ -86,18 +88,30 @@ def _send_fcm(token, title, body, data=None):
         logger.info("[FCM Send SUCCESS] Message ID: %s | Token Prefix: %s...", response, token[:20])
         return True
     except Exception as exc:
-        logger.exception("[FCM Send FAILED] Target Token: %s... | Error: %s", token[:20] if token else "None", exc)
         exc_str = str(exc)
         exc_type = type(exc).__name__
+        logger.exception("[FCM Send FAILED] Target Token: %s... | Error: %s", token[:20] if token else "None", exc)
 
-        # If OAuth authentication fails (401 / ThirdPartyAuthError), delete stale app instance so next attempt re-authenticates
+        # If OAuth authentication fails (401 / ThirdPartyAuthError), re-authenticate and retry
         if "ThirdPartyAuthError" in exc_type or "Unauthorized" in exc_str or "401" in exc_str:
+            logger.warning("[FCM Auth Retry] Re-authenticating credentials due to 401 error...")
             try:
                 if app:
                     firebase_admin.delete_app(app)
-                    logger.warning("[FCM Reset] Deleted stale Firebase App instance to force credential re-authentication.")
-            except Exception as del_exc:
-                logger.warning("[FCM Reset Warning] Failed to delete Firebase App: %s", del_exc)
+            except Exception:
+                pass
+
+            try:
+                cred = _load_firebase_credentials(credentials)
+                if cred:
+                    app = firebase_admin.initialize_app(cred)
+                    response = messaging.send(msg, app=app)
+                    logger.info("[FCM Send SUCCESS Retry] Message ID: %s | Token Prefix: %s...", response, token[:20])
+                    return True
+            except Exception as retry_exc:
+                logger.exception("[FCM Send Retry Failed] Error: %s", retry_exc)
+                exc_str = str(retry_exc)
+                exc_type = type(retry_exc).__name__
 
         # Auto-cleanup expired/unregistered token from database
         if "Unregistered" in exc_type or "NotRegistered" in exc_str:
