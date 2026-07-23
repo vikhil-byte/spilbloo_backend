@@ -37,24 +37,7 @@ def _load_firebase_credentials(credentials_cls):
         logger.error("[FCM Config Error] No valid credentials configured. Check FIREBASE_SERVICE_ACCOUNT_BASE64, FIREBASE_CREDENTIALS_PATH, or FIREBASE_SERVICE_ACCOUNT_JSON.")
         return None
 
-    try:
-        from google.oauth2 import service_account
-
-        class ExplicitFCMCredential(credentials_cls.Base):
-            def __init__(self, cert):
-                scopes = ["https://www.googleapis.com/auth/firebase.messaging"]
-                self._g_credential = service_account.Credentials.from_service_account_info(
-                    cert, scopes=scopes
-                )
-                self.project_id = cert.get("project_id")
-
-            def get_credential(self):
-                return self._g_credential
-
-        return ExplicitFCMCredential(cert_dict)
-    except Exception as exc:
-        logger.warning("[FCM Config Warning] Failed to build explicit FCM credential, falling back to Certificate: %s", exc)
-        return credentials_cls.Certificate(cert_dict)
+    return credentials_cls.Certificate(cert_dict)
 
 
 def _send_fcm(token, title, body, data=None):
