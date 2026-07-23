@@ -46,7 +46,75 @@ admin.site.register(DailyCheckinAnswer)
 admin.site.register(DailyCheckinQuestionAndAnswer)
 admin.site.register(UserAppReview)
 admin.site.register(ChatsHistory)
-admin.site.register(ApiAccessToken)
+
+# Optimized Custom ModelAdmins
+@admin.register(ApiAccessToken)
+class ApiAccessTokenAdmin(admin.ModelAdmin):
+    list_display = (
+        'id', 'user_info', 'device_type_badge', 'device_name',
+        'device_token_preview', 'access_token_preview', 'created_on'
+    )
+    list_filter = ('device_type', 'created_on')
+    search_fields = (
+        'created_by__email', 'created_by__full_name', 'created_by__id',
+        'device_token', 'access_token', 'device_name'
+    )
+    ordering = ('-id',)
+    raw_id_fields = ('created_by',)
+    actions = ['send_test_push_notification']
+
+    @admin.display(description="User")
+    def user_info(self, obj):
+        if obj.created_by:
+            return format_html(
+                "<strong>{}</strong><br><small style='color: #666;'>ID: {} | {}</small>",
+                obj.created_by.email or "No Email",
+                obj.created_by.id,
+                obj.created_by.full_name or ""
+            )
+        return "-"
+
+    @admin.display(description="Device Type")
+    def device_type_badge(self, obj):
+        dtype = str(obj.device_type or "").strip()
+        if dtype == "1":
+            return format_html("<span style='background:#e0f2fe; color:#0369a1; padding:2px 8px; border-radius:12px; font-weight:bold;'>📱 iOS</span>")
+        elif dtype == "2":
+            return format_html("<span style='background:#dcfce7; color:#15803d; padding:2px 8px; border-radius:12px; font-weight:bold;'>🤖 Android</span>")
+        return format_html("<span style='background:#f3f4f6; color:#374151; padding:2px 8px; border-radius:12px;'>Unknown ({})</span>", dtype)
+
+    @admin.display(description="Device Token")
+    def device_token_preview(self, obj):
+        if not obj.device_token:
+            return format_html("<span style='color:#ef4444;'>Empty</span>")
+        tok = obj.device_token
+        short_tok = f"{tok[:15]}...{tok[-10:]}" if len(tok) > 25 else tok
+        return format_html("<code title='{}'>{}</code>", tok, short_tok)
+
+    @admin.display(description="Access Token")
+    def access_token_preview(self, obj):
+        if not obj.access_token:
+            return format_html("<span style='color:#9ca3af;'>None</span>")
+        tok = obj.access_token
+        short_tok = f"{tok[:15]}..." if len(tok) > 15 else tok
+        return format_html("<code title='{}'>{}</code>", tok, short_tok)
+
+    @admin.action(description="🚀 Send Test Push Notification to selected devices")
+    def send_test_push_notification(self, request, queryset):
+        from core.firebase import _send_fcm
+        sent = 0
+        failed = 0
+        for record in queryset:
+            if record.device_token:
+                res = _send_fcm(record.device_token, "Admin Test Push", "This is a test notification sent from Admin Panel.")
+                if res:
+                    sent += 1
+                else:
+                    failed += 1
+        self.message_user(
+            request,
+            f"Push dispatch complete: {sent} succeeded, {failed} failed."
+        )
 
 # Optimized Custom ModelAdmins
 @admin.register(Feed)
