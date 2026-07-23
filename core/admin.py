@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.utils.html import format_html
+from django.utils.html import format_html, mark_safe
 from core.s3_utils import get_file_url
 from .models import (
     TherapistEarning, ContactForm, DoctorReason, Symptom, DoctorRequest,
@@ -78,15 +78,15 @@ class ApiAccessTokenAdmin(admin.ModelAdmin):
     def device_type_badge(self, obj):
         dtype = str(obj.device_type or "").strip()
         if dtype == "1":
-            return format_html("<span style='background:#e0f2fe; color:#0369a1; padding:2px 8px; border-radius:12px; font-weight:bold;'>📱 iOS</span>")
+            return mark_safe("<span style='background:#e0f2fe; color:#0369a1; padding:2px 8px; border-radius:12px; font-weight:bold;'>📱 iOS</span>")
         elif dtype == "2":
-            return format_html("<span style='background:#dcfce7; color:#15803d; padding:2px 8px; border-radius:12px; font-weight:bold;'>🤖 Android</span>")
+            return mark_safe("<span style='background:#dcfce7; color:#15803d; padding:2px 8px; border-radius:12px; font-weight:bold;'>🤖 Android</span>")
         return format_html("<span style='background:#f3f4f6; color:#374151; padding:2px 8px; border-radius:12px;'>Unknown ({})</span>", dtype)
 
     @admin.display(description="Device Token")
     def device_token_preview(self, obj):
         if not obj.device_token:
-            return format_html("<span style='color:#ef4444;'>Empty</span>")
+            return mark_safe("<span style='color:#ef4444;'>Empty</span>")
         tok = obj.device_token
         short_tok = f"{tok[:15]}...{tok[-10:]}" if len(tok) > 25 else tok
         return format_html("<code title='{}'>{}</code>", tok, short_tok)
@@ -94,7 +94,7 @@ class ApiAccessTokenAdmin(admin.ModelAdmin):
     @admin.display(description="Access Token")
     def access_token_preview(self, obj):
         if not obj.access_token:
-            return format_html("<span style='color:#9ca3af;'>None</span>")
+            return mark_safe("<span style='color:#9ca3af;'>None</span>")
         tok = obj.access_token
         short_tok = f"{tok[:15]}..." if len(tok) > 15 else tok
         return format_html("<code title='{}'>{}</code>", tok, short_tok)
