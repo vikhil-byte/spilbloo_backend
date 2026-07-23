@@ -320,3 +320,40 @@ class VerifyOtpStagingTests(APITestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.state_id, User.STATE_ACTIVE)
         self.assertIn("access-token", response.data)
+
+    def test_verify_otp_saves_api_access_token(self):
+        from core.models import ApiAccessToken
+        response = self.client.post(
+            self.verify_url,
+            {
+                "email": self.user.email,
+                "otp": "1234",
+                "device_token": "my_mobile_fcm_token_9999",
+                "device_type": "1"
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.token, "my_mobile_fcm_token_9999")
+        self.assertTrue(
+            ApiAccessToken.objects.filter(created_by=self.user, device_token="my_mobile_fcm_token_9999").exists()
+        )
+
+    def test_custom_token_refresh_updates_activation_key_and_api_access_token(self):
+        from rest_framework_simplejwt.tokens import RefreshToken
+        from core.models import ApiAccessToken
+        refresh = RefreshToken.for_user(self.user)
+        refresh_url = reverse("token_refresh")
+
+        response = self.client.post(
+            refresh_url,
+            {"refresh": str(refresh)},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("access-token", response.data)
+        
+        new_access_token = response.data["access-token"]
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.activation_key, new_access_token)

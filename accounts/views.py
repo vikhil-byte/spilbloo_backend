@@ -5,14 +5,14 @@ from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated
 from django.contrib.auth import get_user_model
 from django.http import Http404
 from rest_framework.views import APIView
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from .serializers import UserSerializer, RegisterSerializer, CustomTokenObtainPairSerializer
 from .models import HaLogins
 from core.models import (
     ContactForm, LoginHistory, Symptom, UserSymptom, AgeGroup, 
-    AssignedTherapist, Page, Faq
+    AssignedTherapist, Page, Faq, ApiAccessToken
 )
 from availability.models import Notification
 from core.serializers import SymptomSerializer, PageSerializer, FaqSerializer, TherapistEarningSerializer
@@ -130,6 +130,56 @@ def _mark_user_otp_verified(user) -> None:
         user.save()
         return
     cache.delete(_otp_cache_key(user.id))
+
+
+def _save_api_access_token(user, request_data, access_token_str=""):
+    """
+    Save device_token to user.token attribute and tbl_api_access_token (ApiAccessToken).
+    """
+    if not user or not request_data:
+        return
+
+    device_token = (
+        request_data.get("device_token")
+        or request_data.get("AccessToken[device_token]")
+        or request_data.get("LoginForm[device_token]")
+        or request_data.get("User[token]")
+        or request_data.get("token")
+    )
+    device_type = (
+        request_data.get("device_type")
+        or request_data.get("AccessToken[device_type]")
+        or request_data.get("LoginForm[device_type]")
+        or "1"
+    )
+    device_name = (
+        request_data.get("device_name")
+        or request_data.get("AccessToken[device_name]")
+        or request_data.get("LoginForm[device_name]")
+        or ""
+    )
+
+    if device_token and str(device_token).strip():
+        device_token_str = str(device_token).strip()
+
+        # Update direct user.token attribute if changed
+        if hasattr(user, "token") and getattr(user, "token", None) != device_token_str:
+            user.token = device_token_str
+            user.save(update_fields=["token"])
+
+        # Ensure device_token is reassigned if previously linked to another user
+        ApiAccessToken.objects.filter(device_token=device_token_str).exclude(created_by=user).delete()
+
+        # Update or create record in ApiAccessToken table (tbl_api_access_token)
+        ApiAccessToken.objects.update_or_create(
+            created_by=user,
+            device_token=device_token_str,
+            defaults={
+                "access_token": str(access_token_str),
+                "device_type": str(device_type),
+                "device_name": str(device_name),
+            }
+        )
 
 
 def _enforce_ios_version_gate(user, device_type: int, version: float):
@@ -466,6 +516,7 @@ class VerifyOtpView(APIView):
             user.activation_key = str(refresh.access_token)
             user.save()
             _mark_user_otp_verified(user)
+            _save_api_access_token(user, request.data, refresh.access_token)
 
             # Log history
             LoginHistory.objects.create(
@@ -531,6 +582,43 @@ class DoctorContactView(APIView):
                 "email": form.email
             }
         }, status=status.HTTP_200_OK)
+
+
+class CustomTokenRefreshView(TokenRefreshView):
+    def post(self, request, *args, **kwargs):
+        # Support legacy payload keys 'refresh-token' or 'refresh'
+        raw_refresh = request.data.get("refresh") or request.data.get("refresh-token") or request.data.get("refreshToken")
+        if raw_refresh and "refresh" not in request.data:
+            request.data["refresh"] = raw_refresh
+
+        response = super().post(request, *args, **kwargs)
+
+        if response.status_code == 200:
+            access_token = response.data.get("access") or response.data.get("access-token")
+            refresh_token_str = response.data.get("refresh") or raw_refresh
+
+            if access_token:
+                response.data["access-token"] = access_token
+            if refresh_token_str and "refresh-token" not in response.data:
+                response.data["refresh-token"] = refresh_token_str
+
+            try:
+                if raw_refresh:
+                    token_obj = RefreshToken(raw_refresh)
+                    user_id = token_obj.get("user_id")
+                    if user_id:
+                        user = User.objects.get(id=user_id)
+                        user.activation_key = str(access_token)
+                        user.save(update_fields=["activation_key"])
+
+                        ApiAccessToken.objects.filter(created_by=user).update(
+                            access_token=str(access_token)
+                        )
+                        _save_api_access_token(user, request.data, access_token)
+            except Exception as exc:
+                logger.warning("CustomTokenRefreshView token update warning: %s", exc)
+
+        return response
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -604,6 +692,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             # Legacy node auth checks activation_key as bearer token.
             auth_user.activation_key = str(refresh.access_token)
             auth_user.save(update_fields=["activation_key"])
+            _save_api_access_token(auth_user, request.data, refresh.access_token)
             response_data = {
                 "message": "Login Successfully",
                 "access-token": str(refresh.access_token),
@@ -718,6 +807,12 @@ class LogoutView(APIView):
             except (TokenError, AttributeError):
                 # AttributeError occurs if blacklist app isn't installed.
                 logger.warning("logout blacklist skipped for user_id=%s", getattr(user, "id", None))
+
+        # Legacy PHP line 464: AccessToken::deleteOldAppData($user->id);
+        ApiAccessToken.objects.filter(created_by=user).delete()
+        if hasattr(user, "token"):
+            user.token = ""
+            user.save(update_fields=["token"])
 
         if hasattr(user, "activation_key"):
             user.activation_key = None

@@ -87,4 +87,15 @@ def _send_fcm(token, title, body, data=None):
         return True
     except Exception as exc:
         logger.exception("[FCM Send FAILED] Target Token: %s... | Error: %s", token[:20] if token else "None", exc)
+        # Auto-cleanup expired/unregistered token from database
+        exc_str = str(exc)
+        exc_type = type(exc).__name__
+        if "Unregistered" in exc_type or "NotRegistered" in exc_str:
+            try:
+                from core.models import ApiAccessToken
+                deleted_count, _ = ApiAccessToken.objects.filter(device_token=token).delete()
+                if deleted_count:
+                    logger.info("[FCM Token Cleanup] Removed %d expired ApiAccessToken record(s) for token: %s...", deleted_count, token[:20])
+            except Exception as cleanup_err:
+                logger.warning("[FCM Token Cleanup Error] Failed to remove expired token: %s", cleanup_err)
         return False
