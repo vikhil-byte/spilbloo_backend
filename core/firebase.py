@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 def _load_firebase_credentials(credentials_cls):
-    """Load and sanitize Firebase credentials dict from base64 env, file path, or raw JSON env."""
+    """Load Firebase credentials dict from base64 env, file path, or raw JSON env."""
     b64_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_BASE64", "").strip("'\" \t\r\n")
     cred_path = os.environ.get("FIREBASE_CREDENTIALS_PATH", "").strip("'\" \t\r\n")
     raw_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip("'\" \t\r\n")
@@ -28,20 +28,14 @@ def _load_firebase_credentials(credentials_cls):
 
     if not cert_dict and raw_json:
         logger.info("[FCM Config] Loading Firebase credentials from FIREBASE_SERVICE_ACCOUNT_JSON env var (len=%d)", len(raw_json))
-        cert_dict = json.loads(raw_json)
+        try:
+            cert_dict = json.loads(raw_json)
+        except Exception as exc:
+            logger.error("[FCM Config Error] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON: %s", exc)
 
     if not cert_dict:
         logger.error("[FCM Config Error] No valid credentials configured. Check FIREBASE_SERVICE_ACCOUNT_BASE64, FIREBASE_CREDENTIALS_PATH, or FIREBASE_SERVICE_ACCOUNT_JSON.")
         return None
-
-    # Sanitize private key PEM formatting issues automatically
-    if "private_key" in cert_dict and isinstance(cert_dict["private_key"], str):
-        pk = cert_dict["private_key"]
-        pk = pk.replace("\\n", "\n")
-        pk = pk.replace("-----BEGIN PRIVATE KEY-----n", "-----BEGIN PRIVATE KEY-----\n")
-        pk = pk.replace("=n-----END PRIVATE KEY-----", "=\n-----END PRIVATE KEY-----")
-        pk = pk.replace("KEY-----n", "KEY-----\n")
-        cert_dict["private_key"] = pk
 
     return credentials_cls.Certificate(cert_dict)
 
