@@ -298,5 +298,25 @@ class UserRegisterTests(APITestCase):
         self.assertEqual(response.data["detail"]["last_name"], "Wonderland")
 
 
+class VerifyOtpStagingTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            email="otp_staging_user@spilbloo.local",
+            password="Password@123",
+            full_name="OTP Staging User",
+            role_id=User.ROLE_PATIENT,
+            state_id=0, # INACTIVE
+        )
+        self.verify_url = reverse("verify_otp")
 
-
+    def test_staging_bypasses_otp_with_1234(self):
+        response = self.client.post(
+            self.verify_url,
+            {"email": self.user.email, "otp": "1234"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.state_id, User.STATE_ACTIVE)
+        self.assertIn("access-token", response.data)
