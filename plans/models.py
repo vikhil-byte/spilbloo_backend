@@ -20,10 +20,12 @@ class Plan(models.Model):
     state_id = models.IntegerField(default=1) # 1=Active
     is_recommended = models.IntegerField(default=0)
     incentive_days = models.IntegerField(default=0)
+    discounted_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     video_description = models.TextField(null=True, blank=True)
 
     class Meta:
         db_table = 'tbl_plan'
+
 
 import logging
 
@@ -57,9 +59,11 @@ class SubscribedPlan(models.Model):
     final_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     
     coupon = models.CharField(max_length=255, null=True, blank=True)
+    coupon_discount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     coupon_free_trial_days = models.IntegerField(default=0)
     company_coupon = models.ForeignKey('company.CompanyCoupon', on_delete=models.SET_NULL, null=True, blank=True, related_name='subscriptions')
     type_id = models.IntegerField(default=0) # Coupon applied/not applied
+
 
     address = models.CharField(max_length=255, null=True, blank=True)
     city = models.CharField(max_length=255, null=True, blank=True)
@@ -72,7 +76,9 @@ class SubscribedPlan(models.Model):
     upcoming_plan_id = models.IntegerField(null=True, blank=True)
     upcoming_state = models.IntegerField(default=0)
 
+    created_on = models.DateTimeField(auto_now_add=True, null=True, blank=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='subscribed_plans')
+
 
     class Meta:
         db_table = 'tbl_subscribed_plan'
