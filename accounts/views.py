@@ -604,7 +604,8 @@ class CustomTokenRefreshView(TokenRefreshView):
 
             try:
                 if raw_refresh:
-                    token_obj = RefreshToken(raw_refresh)
+                    from rest_framework_simplejwt.tokens import UntypedToken
+                    token_obj = UntypedToken(raw_refresh)
                     user_id = token_obj.get("user_id")
                     if user_id:
                         user = User.objects.get(id=user_id)

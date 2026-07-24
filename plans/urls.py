@@ -4,7 +4,7 @@ from .views import (
     AuthenticateSubscriptionView, AuthenticateOneTimeSubView, CancelCompanyView,
     CancelView, BuyVideoPlanView, CheckBuyVideoPlanView, VideoPlanListView,
     ApplyCouponView, ApplyVideoCouponView, UpdateSubscriptionView,
-    FreeSubscriptionView, OneTimeSubscriptionView, CurrencyListView
+    FreeSubscriptionView, OneTimeSubscriptionView, CurrencyListView, RazorpayWebhookView
 )
 
 urlpatterns = [
@@ -29,4 +29,6 @@ urlpatterns = [
     path('update-subscription/', UpdateSubscriptionView.as_view(), name='update_subscription'),
     path('free-subscription/', FreeSubscriptionView.as_view(), name='free_subscription'),
     path('one-time-subscription/', OneTimeSubscriptionView.as_view(), name='one_time_subscription'),
+    path('razorpay-webhook/', RazorpayWebhookView.as_view(), name='razorpay_webhook'),
 ]
+
