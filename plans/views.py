@@ -84,7 +84,14 @@ def _is_free_trial_subscription(subscription) -> bool:
 
 
 def _cancel_razorpay_subscription(subscription_id: str, cancel_at_cycle_end: int):
-    razorpay_client.subscription.cancel(subscription_id, {"cancel_at_cycle_end": int(cancel_at_cycle_end)})
+    logger.info("[Razorpay API Cancel] Initiating subscription cancellation: sub_id=%s cancel_at_cycle_end=%d", subscription_id, cancel_at_cycle_end)
+    try:
+        res = razorpay_client.subscription.cancel(subscription_id, {"cancel_at_cycle_end": int(cancel_at_cycle_end)})
+        logger.info("[Razorpay API Cancel Success] sub_id=%s response=%s", subscription_id, json.dumps(res) if isinstance(res, dict) else str(res))
+    except Exception as exc:
+        logger.error("[Razorpay API Cancel Error] sub_id=%s cancel_at_cycle_end=%d error=%s", subscription_id, cancel_at_cycle_end, str(exc))
+        raise
+
 
 
 def _patch_razorpay_subscription_plan(subscription_id: str, plan_id: str, schedule_change_at: str):
@@ -589,11 +596,17 @@ class CancelView(APIView):
 
     def post(self, request, plan_id=None):
         plan_id = plan_id or request.data.get("plan_id") or request.query_params.get("plan_id")
-        if not plan_id:
-            return Response({"error": "plan_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         cancel_reason = request.data.get("cancel_reason") or "Cancelled by user"
+        user_id = getattr(request.user, "id", None)
+        logger.info("[CancelView Start] Request received: user_id=%s plan_id=%s cancel_reason=%r", user_id, plan_id, cancel_reason)
+
+        if not plan_id:
+            logger.warning("[CancelView Abort] Missing plan_id: user_id=%s", user_id)
+            return Response({"error": "plan_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
         plan = Plan.objects.filter(plan_id=plan_id).first()
         if not plan:
+            logger.warning("[CancelView Abort] Plan not found for plan_id=%s user_id=%s", plan_id, user_id)
             return Response({"error": "Plan not found."}, status=status.HTTP_400_BAD_REQUEST)
 
         subscription = (
@@ -606,39 +619,51 @@ class CancelView(APIView):
             .first()
         )
         if not subscription:
+            logger.warning("[CancelView Abort] No active or matching subscription found for user_id=%s plan_id=%s", user_id, plan_id)
             return Response({"error": "Subscription not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        logger.info("[CancelView Subscription Found] sub_db_id=%s subscription_id=%s current_state_id=%s current_upcoming_state=%s",
+                    subscription.id, subscription.subscription_id, subscription.state_id, subscription.upcoming_state)
 
         try:
             with transaction.atomic():
                 subscription = SubscribedPlan.objects.select_for_update().get(id=subscription.id)
 
-                # Mirror legacy behavior:
-                # - free-trial -> immediate cancel
-                # - otherwise cancel at cycle end
                 immediate_cancel = _is_free_trial_subscription(subscription)
                 next_upcoming_state = (
                     UPCOMING_STATE_IMMEDIATE_CANCELED if immediate_cancel else UPCOMING_STATE_CANCELED
                 )
+                cancel_cycle_flag = 0 if immediate_cancel else 1
+
+                logger.info("[CancelView Processing] sub_id=%s immediate_cancel=%s next_upcoming_state=%s cancel_cycle_flag=%s",
+                            subscription.subscription_id, immediate_cancel, next_upcoming_state, cancel_cycle_flag)
 
                 if _is_live_razorpay_subscription(subscription.subscription_id):
                     _cancel_razorpay_subscription(
                         subscription.subscription_id,
-                        cancel_at_cycle_end=0 if immediate_cancel else 1,
+                        cancel_at_cycle_end=cancel_cycle_flag,
                     )
+                else:
+                    logger.info("[CancelView Non-Live/Mock] Skipping Razorpay API call for sub_id=%s", subscription.subscription_id)
 
                 SubscribedPlan.objects.filter(created_by=request.user).update(upcoming_state=next_upcoming_state)
                 subscription.cancel_reason = cancel_reason
                 subscription.save(update_fields=["cancel_reason"])
 
+                logger.info("[CancelView Success] user_id=%s sub_id=%s upcoming_state_updated_to=%s",
+                            user_id, subscription.subscription_id, next_upcoming_state)
+
             return Response({"message": "Subscription cancelled successfully."}, status=status.HTTP_200_OK)
-        except Exception:
+        except Exception as exc:
             logger.exception(
-                "cancel-subscription failed user_id=%s plan_id=%s sub_id=%s",
-                getattr(request.user, "id", None),
+                "[CancelView Error] cancel-subscription failed user_id=%s plan_id=%s sub_id=%s error=%s",
+                user_id,
                 plan_id,
                 getattr(subscription, "subscription_id", None),
+                str(exc),
             )
             return Response({"error": "Unable to cancel subscription right now."}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class BuyVideoPlanView(APIView):
     permission_classes = (IsAuthenticated,)
@@ -1198,11 +1223,19 @@ class RazorpayWebhookView(APIView):
         subscribed_plan.save()
 
     def _handle_subscription_cancelled(self, subscribed_plan, sub_entity):
+        old_state_id = subscribed_plan.state_id
+        old_upcoming_state = subscribed_plan.upcoming_state
+        razorpay_status = sub_entity.get("status")
+
         subscribed_plan.upcoming_state = UPCOMING_STATE_CANCELED
-        # If Razorpay status is explicitly 'cancelled' (e.g. Cancel Immediately clicked in Razorpay Dashboard), mark state_id as cancelled (2) immediately
-        if sub_entity.get("status") == "cancelled":
+        if razorpay_status == "cancelled":
             subscribed_plan.state_id = 2  # Canceled immediately
+
         subscribed_plan.save()
+
+        logger.info("[Webhook Handle Cancelled] sub_id=%s razorpay_status=%s | state_id: %s -> %s | upcoming_state: %s -> %s",
+                    subscribed_plan.subscription_id, razorpay_status, old_state_id, subscribed_plan.state_id, old_upcoming_state, subscribed_plan.upcoming_state)
+
 
 
     def _handle_subscription_pending(self, subscribed_plan):
