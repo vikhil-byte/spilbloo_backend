@@ -25,10 +25,24 @@ class Plan(models.Model):
     class Meta:
         db_table = 'tbl_plan'
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 class SubscribedPlan(models.Model):
+    STATE_CREATED = 0
+    STATE_ACTIVE = 1
+    STATE_CANCELED = 2
+    STATE_PAYMENT_PENDING = 3
+
+    UPCOMING_STATE_NONE = 0
+    UPCOMING_STATE_UPCOMING = 2
+    UPCOMING_STATE_CANCELED = 4
+    UPCOMING_STATE_IMMEDIATE_CANCELED = 5
+
     plan = models.ForeignKey(Plan, on_delete=models.CASCADE, null=True, blank=True)
     plan_type = models.IntegerField(default=1)
-    state_id = models.IntegerField(default=1) # 1=Active, etc...
+    state_id = models.IntegerField(default=1) # 1=Active, 2=Canceled, 3=Pending
     
     start_date = models.DateTimeField(null=True, blank=True)
     end_date = models.DateTimeField(null=True, blank=True)
@@ -62,6 +76,61 @@ class SubscribedPlan(models.Model):
 
     class Meta:
         db_table = 'tbl_subscribed_plan'
+
+    @property
+    def is_terminal(self):
+        """Returns True if the subscription is in terminal CANCELED state."""
+        return self.state_id == self.STATE_CANCELED
+
+    def activate(self, start_date=None, end_date=None, renewal_date=None, transaction_id=None, plan=None):
+        """
+        Activates subscription. Fails safely if the subscription is in a terminal CANCELED state.
+        """
+        if self.is_terminal:
+            logger.warning("[SubscribedPlan.activate] Refusing to activate terminal canceled plan id=%s sub_id=%s", self.id, self.subscription_id)
+            return False
+
+        self.state_id = self.STATE_ACTIVE
+        if plan:
+            self.plan = plan
+        if start_date:
+            self.start_date = start_date
+        if end_date:
+            self.end_date = end_date
+        if renewal_date:
+            self.renewal_date = renewal_date
+        if transaction_id:
+            self.transaction_id = transaction_id
+        self.save()
+        logger.info("[SubscribedPlan.activate] Activated plan id=%s sub_id=%s state_id=%s", self.id, self.subscription_id, self.state_id)
+        return True
+
+    def mark_cancelled(self, immediate=False, reason=None):
+        """
+        Cancels subscription state cleanly.
+        - Sets upcoming_state to UPCOMING_STATE_CANCELED (4).
+        - If immediate=True, sets state_id to STATE_CANCELED (2).
+        """
+        old_state = self.state_id
+        old_upcoming = self.upcoming_state
+        self.upcoming_state = self.UPCOMING_STATE_CANCELED
+        if immediate:
+            self.state_id = self.STATE_CANCELED
+        if reason:
+            self.cancel_reason = reason
+        self.save()
+        logger.info("[SubscribedPlan.mark_cancelled] sub_id=%s immediate=%s | state_id: %s -> %s | upcoming_state: %s -> %s",
+                    self.subscription_id, immediate, old_state, self.state_id, old_upcoming, self.upcoming_state)
+        return True
+
+    def mark_pending(self):
+        """Sets plan state to PAYMENT_PENDING (3) if not terminal."""
+        if self.is_terminal:
+            return False
+        self.state_id = self.STATE_PAYMENT_PENDING
+        self.save()
+        return True
+
 
 class Coupon(models.Model):
     code = models.CharField(max_length=255, unique=True)

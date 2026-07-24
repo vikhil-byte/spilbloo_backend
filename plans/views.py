@@ -455,10 +455,10 @@ class AuthenticateSubscriptionView(APIView):
                     )
                     return Response({"error": "Subscription is already authenticated."}, status=status.HTTP_400_BAD_REQUEST)
 
-                subscribed_plan.state_id = 1  # STATE_ACTIVE
-                if transaction_id:
-                    subscribed_plan.transaction_id = transaction_id
-                subscribed_plan.save(update_fields=["state_id", "transaction_id"])
+                # Activate subscription through domain model method (safely protects terminal CANCELED states)
+                subscribed_plan.activate(transaction_id=transaction_id)
+
+
             logger.info(
                 "authenticate-subscription success: user_id=%s plan_id=%s sub_id=%s",
                 getattr(user, "id", None),
@@ -647,11 +647,11 @@ class CancelView(APIView):
                     logger.info("[CancelView Non-Live/Mock] Skipping Razorpay API call for sub_id=%s", subscription.subscription_id)
 
                 SubscribedPlan.objects.filter(created_by=request.user).update(upcoming_state=next_upcoming_state)
-                subscription.cancel_reason = cancel_reason
-                subscription.save(update_fields=["cancel_reason"])
+                subscription.mark_cancelled(immediate=immediate_cancel, reason=cancel_reason)
 
                 logger.info("[CancelView Success] user_id=%s sub_id=%s upcoming_state_updated_to=%s",
                             user_id, subscription.subscription_id, next_upcoming_state)
+
 
             return Response({"message": "Subscription cancelled successfully."}, status=status.HTTP_200_OK)
         except Exception as exc:
@@ -1178,22 +1178,16 @@ class RazorpayWebhookView(APIView):
     def _handle_subscription_charged(self, subscribed_plan, sub_entity, payload):
         plan_id_str = sub_entity.get("plan_id")
         plan = Plan.objects.filter(plan_id=plan_id_str).first() or subscribed_plan.plan
-        if plan:
-            subscribed_plan.plan = plan
 
         current_start = sub_entity.get("current_start")
         current_end = sub_entity.get("current_end")
         charge_at = sub_entity.get("charge_at")
 
-        if current_start:
-            subscribed_plan.start_date = datetime.fromtimestamp(current_start, tz=dt_timezone.utc)
-        if current_end:
-            subscribed_plan.end_date = datetime.fromtimestamp(current_end, tz=dt_timezone.utc)
-        if charge_at:
-            subscribed_plan.renewal_date = datetime.fromtimestamp(charge_at, tz=dt_timezone.utc)
+        start_dt = datetime.fromtimestamp(current_start, tz=dt_timezone.utc) if current_start else None
+        end_dt = datetime.fromtimestamp(current_end, tz=dt_timezone.utc) if current_end else None
+        renewal_dt = datetime.fromtimestamp(charge_at, tz=dt_timezone.utc) if charge_at else None
 
-        subscribed_plan.state_id = 1  # Active
-        subscribed_plan.save()
+        subscribed_plan.activate(start_date=start_dt, end_date=end_dt, renewal_date=renewal_dt, plan=plan)
 
         # Send invoice email if user email exists
         user = subscribed_plan.created_by
@@ -1205,53 +1199,33 @@ class RazorpayWebhookView(APIView):
     def _handle_subscription_activated(self, subscribed_plan, sub_entity):
         plan_id_str = sub_entity.get("plan_id")
         plan = Plan.objects.filter(plan_id=plan_id_str).first() or subscribed_plan.plan
-        if plan:
-            subscribed_plan.plan = plan
 
         current_start = sub_entity.get("current_start")
         current_end = sub_entity.get("current_end")
         charge_at = sub_entity.get("charge_at")
 
-        if current_start:
-            subscribed_plan.start_date = datetime.fromtimestamp(current_start, tz=dt_timezone.utc)
-        if current_end:
-            subscribed_plan.end_date = datetime.fromtimestamp(current_end, tz=dt_timezone.utc)
-        if charge_at:
-            subscribed_plan.renewal_date = datetime.fromtimestamp(charge_at, tz=dt_timezone.utc)
+        start_dt = datetime.fromtimestamp(current_start, tz=dt_timezone.utc) if current_start else None
+        end_dt = datetime.fromtimestamp(current_end, tz=dt_timezone.utc) if current_end else None
+        renewal_dt = datetime.fromtimestamp(charge_at, tz=dt_timezone.utc) if charge_at else None
 
-        subscribed_plan.state_id = 1  # Active
-        subscribed_plan.save()
+        subscribed_plan.activate(start_date=start_dt, end_date=end_dt, renewal_date=renewal_dt, plan=plan)
 
     def _handle_subscription_cancelled(self, subscribed_plan, sub_entity):
-        old_state_id = subscribed_plan.state_id
-        old_upcoming_state = subscribed_plan.upcoming_state
-        razorpay_status = sub_entity.get("status")
-
-        subscribed_plan.upcoming_state = UPCOMING_STATE_CANCELED
-        if razorpay_status == "cancelled":
-            subscribed_plan.state_id = 2  # Canceled immediately
-
-        subscribed_plan.save()
-
-        logger.info("[Webhook Handle Cancelled] sub_id=%s razorpay_status=%s | state_id: %s -> %s | upcoming_state: %s -> %s",
-                    subscribed_plan.subscription_id, razorpay_status, old_state_id, subscribed_plan.state_id, old_upcoming_state, subscribed_plan.upcoming_state)
-
-
+        is_immediate = (sub_entity.get("status") == "cancelled")
+        subscribed_plan.mark_cancelled(immediate=is_immediate)
 
     def _handle_subscription_pending(self, subscribed_plan):
-        subscribed_plan.state_id = 3  # Payment Pending
-        subscribed_plan.save()
+        subscribed_plan.mark_pending()
 
     def _handle_subscription_halted(self, subscribed_plan, sub_entity):
-        subscribed_plan.upcoming_state = UPCOMING_STATE_CANCELED
-        subscribed_plan.state_id = 2  # Canceled
-        subscribed_plan.save()
+        subscribed_plan.mark_cancelled(immediate=True, reason="Subscription payment halted")
 
         if _is_live_razorpay_subscription(subscribed_plan.subscription_id):
             try:
                 _cancel_razorpay_subscription(subscribed_plan.subscription_id, cancel_at_cycle_end=1)
             except Exception as exc:
                 logger.warning("Failed to cancel halted subscription %s on Razorpay: %s", subscribed_plan.subscription_id, exc)
+
 
     def _send_invoice_email(self, to_email, plan_title, invoice_id):
         try:
