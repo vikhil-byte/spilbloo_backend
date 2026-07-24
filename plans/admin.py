@@ -28,11 +28,13 @@ class SubscribedPlanAdmin(admin.ModelAdmin):
         "plan",
         "subscription_id",
         "state_id",
+        "upcoming_state",
         "plan_type",
         "final_price",
     )
     search_fields = ("subscription_id", "transaction_id", "created_by__email", "plan__plan_id")
-    list_filter = ("state_id", "plan_type")
+    list_filter = ("state_id", "upcoming_state", "plan_type")
+
 
 
 @admin.register(Coupon)
