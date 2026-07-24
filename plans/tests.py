@@ -321,6 +321,26 @@ class RazorpayWebhookViewTests(APITestCase):
         self.subscribed_plan.refresh_from_db()
         self.assertEqual(self.subscribed_plan.upcoming_state, 4)
 
+    def test_webhook_subscription_cancelled_immediate_updates_state_id(self):
+        payload = {
+            "event": "subscription.cancelled",
+            "payload": {
+                "subscription": {
+                    "entity": {
+                        "id": "sub_webhook_test_123",
+                        "status": "cancelled",
+                        "ended_at": 1784918626,
+                    }
+                }
+            }
+        }
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.subscribed_plan.refresh_from_db()
+        self.assertEqual(self.subscribed_plan.state_id, 2)
+        self.assertEqual(self.subscribed_plan.upcoming_state, 4)
+
+
     def test_webhook_subscription_pending_updates_state(self):
         payload = {
             "event": "subscription.pending",

@@ -1142,7 +1142,7 @@ class RazorpayWebhookView(APIView):
         elif event_name == "subscription.activated":
             self._handle_subscription_activated(subscribed_plan, sub_entity)
         elif event_name == "subscription.cancelled":
-            self._handle_subscription_cancelled(subscribed_plan)
+            self._handle_subscription_cancelled(subscribed_plan, sub_entity)
         elif event_name == "subscription.pending":
             self._handle_subscription_pending(subscribed_plan)
         elif event_name == "subscription.halted":
@@ -1194,13 +1194,16 @@ class RazorpayWebhookView(APIView):
         if charge_at:
             subscribed_plan.renewal_date = datetime.fromtimestamp(charge_at, tz=dt_timezone.utc)
 
-
         subscribed_plan.state_id = 1  # Active
         subscribed_plan.save()
 
-    def _handle_subscription_cancelled(self, subscribed_plan):
+    def _handle_subscription_cancelled(self, subscribed_plan, sub_entity):
         subscribed_plan.upcoming_state = UPCOMING_STATE_CANCELED
+        # If Razorpay status is explicitly 'cancelled' (e.g. Cancel Immediately clicked in Razorpay Dashboard), mark state_id as cancelled (2) immediately
+        if sub_entity.get("status") == "cancelled":
+            subscribed_plan.state_id = 2  # Canceled immediately
         subscribed_plan.save()
+
 
     def _handle_subscription_pending(self, subscribed_plan):
         subscribed_plan.state_id = 3  # Payment Pending
