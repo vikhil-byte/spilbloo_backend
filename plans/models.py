@@ -76,3 +76,14 @@ class Coupon(models.Model):
 
     class Meta:
         db_table = 'tbl_coupon'
+
+
+class WebhookLog(models.Model):
+    event = models.CharField(max_length=255, null=True, blank=True)
+    subscription_id = models.CharField(max_length=255, null=True, blank=True)
+    data = models.TextField(null=True, blank=True)
+    created_on = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'tbl_subscription_webhook_log'
+

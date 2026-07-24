@@ -8,7 +8,7 @@ from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from plans.models import Plan, SubscribedPlan
+from plans.models import Plan, SubscribedPlan, WebhookLog
 from core.models import VideoPlan, SubscribedVideo, VideoCoupon, CouponUser
 
 
@@ -292,6 +292,13 @@ class RazorpayWebhookViewTests(APITestCase):
         response = self.client.post(self.url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["status"], "success")
+
+        self.assertTrue(
+            WebhookLog.objects.filter(
+                event="subscription.charged",
+                subscription_id="sub_webhook_test_123",
+            ).exists()
+        )
 
         self.subscribed_plan.refresh_from_db()
         self.assertEqual(self.subscribed_plan.state_id, 1)

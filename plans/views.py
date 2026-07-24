@@ -6,7 +6,7 @@ from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated
 from django.db import transaction
 from django.utils import timezone
 from datetime import datetime, timedelta, timezone as dt_timezone
-from .models import Plan, SubscribedPlan, Coupon
+from .models import Plan, SubscribedPlan, Coupon, WebhookLog
 from core.models import VideoPlan, SubscribedVideo, VideoCoupon, CouponUser, Currency
 from .serializers import (
     PlanSerializer, SubscribedPlanSerializer, VideoPlanSerializer, 
@@ -1118,6 +1118,16 @@ class RazorpayWebhookView(APIView):
         subscription_id = sub_entity.get("id")
 
         logger.info("Razorpay webhook received event=%s subscription_id=%s", event_name, subscription_id)
+
+        try:
+            WebhookLog.objects.create(
+                event=event_name or "unknown",
+                subscription_id=subscription_id or "",
+                data=payload_bytes.decode("utf-8", errors="ignore"),
+            )
+        except Exception as exc:
+            logger.warning("Failed to save WebhookLog entry: %s", exc)
+
 
         if not subscription_id:
             return Response({"status": "ignored", "reason": "No subscription entity in payload"}, status=status.HTTP_200_OK)
