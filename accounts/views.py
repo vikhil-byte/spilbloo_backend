@@ -12,8 +12,9 @@ from .serializers import UserSerializer, RegisterSerializer, CustomTokenObtainPa
 from .models import HaLogins
 from core.models import (
     ContactForm, LoginHistory, Symptom, UserSymptom, AgeGroup, 
-    AssignedTherapist, Page, Faq, ApiAccessToken
+    AssignedTherapist, Page, Faq, ApiAccessToken, SubscribedVideo
 )
+
 from availability.models import Notification
 from core.serializers import SymptomSerializer, PageSerializer, FaqSerializer, TherapistEarningSerializer
 from django.db import transaction
@@ -237,11 +238,12 @@ def _legacy_user_detail(user):
         otp_verified = 1 if user.state_id == User.STATE_ACTIVE else 0
 
     active_paid_subscription = (
-        SubscribedPlan.objects.filter(created_by=user, state_id=1, plan_type=1)
+        SubscribedPlan.objects.filter(created_by=user, state_id=1, plan_type=SubscribedPlan.PLAN_TYPE_PAID)
         .select_related("plan")
         .order_by("-id")
         .first()
     )
+
     subscribed_plan = None
     if active_paid_subscription:
         plan_obj = active_paid_subscription.plan
@@ -324,11 +326,13 @@ def _legacy_user_detail(user):
         "otp_verified": otp_verified,
         #"otp": _safe_str(getattr(user, "otp", "") or "") if settings.DEBUG else "",
         "is_ios_app_update": False,
-        "is_subscribed_user": bool(active_paid_subscription),
-        "is_buy_subscripion": bool(active_paid_subscription),
-        "is_buy_video_credits": False,
-        "video_credits": 0,
+        "is_subscribed_user": SubscribedPlan.objects.filter(created_by=user).exclude(state_id=SubscribedPlan.STATE_CREATED).exists(),
+        "is_buy_subscripion": SubscribedPlan.objects.filter(created_by=user, state_id=SubscribedPlan.STATE_ACTIVE).exists(),
+        "is_buy_video_credits": SubscribedVideo.objects.filter(created_by=user, state_id=1).exists(),
+        "video_credits": getattr(user, "video_credit", 0) or 0,
         "subscribed_plan": subscribed_plan or {},
+
+
         "language": getattr(user, "language", "") or "",
         "affirmation_for_the_day": user.get_affirmation_for_the_day(),
         # Added legacy fields for PHP compatibility
