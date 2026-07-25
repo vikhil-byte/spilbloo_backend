@@ -40,7 +40,7 @@ class CreateSubscriptionViewTests(APITestCase):
             final_price=Decimal("1178.82"),
             doctor_price=Decimal("700.00"),
             duration=30,
-            plan_type=1,
+            plan_type=0,
             type_id=1,
             state_id=1,
             is_recommended=1,
@@ -86,7 +86,7 @@ class CreateSubscriptionViewTests(APITestCase):
         SubscribedPlan.objects.create(
             plan=plan,
             created_by=self.user,
-            plan_type=1,
+            plan_type=0,
             state_id=1,
             subscription_id="sub_existing_001",
             start_date=timezone.now(),
@@ -118,7 +118,7 @@ class AuthenticateSubscriptionSecurityTests(APITestCase):
             tax_price=Decimal("179.00"),
             final_price=Decimal("1178.00"),
             duration=30,
-            plan_type=1,
+            plan_type=0,
             type_id=1,
             state_id=1,
         )
@@ -130,7 +130,7 @@ class AuthenticateSubscriptionSecurityTests(APITestCase):
         SubscribedPlan.objects.create(
             plan=self.plan,
             created_by=self.user,
-            plan_type=1,
+            plan_type=0,
             state_id=0,
             subscription_id="sub_live_001",
             start_date=timezone.now(),
@@ -156,7 +156,7 @@ class AuthenticateSubscriptionSecurityTests(APITestCase):
         sub = SubscribedPlan.objects.create(
             plan=self.plan,
             created_by=self.user,
-            plan_type=1,
+            plan_type=0,
             state_id=0,
             subscription_id="sub_live_002",
             start_date=timezone.now(),
@@ -258,7 +258,7 @@ class RazorpayWebhookViewTests(APITestCase):
             plan_id="plan_wh_123",
             no_of_video_session=4,
             duration=30,
-            plan_type=1,
+            plan_type=0,
             state_id=1,
         )
         self.subscribed_plan = SubscribedPlan.objects.create(

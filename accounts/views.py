@@ -1333,11 +1333,11 @@ class AssignVideoDoctorView(APIView):
                         patient.save(update_fields=updated_user_fields)
 
                     # Handle free subscription seed per PHP assign-video-doctor flow.
-                    free_plan = Plan.objects.filter(plan_type=0, state_id=1).order_by("id").first()
+                    free_plan = Plan.objects.filter(plan_type=Plan.PLAN_TYPE_FREE, state_id=1).order_by("id").first()
                     if free_plan and not SubscribedPlan.objects.filter(
                         created_by=patient,
                         plan=free_plan,
-                        plan_type=0,
+                        plan_type=SubscribedPlan.PLAN_TYPE_FREE,
                         state_id=1,
                     ).exists():
                         from datetime import timedelta
@@ -1346,13 +1346,14 @@ class AssignVideoDoctorView(APIView):
                         end_date = start_date + timedelta(days=int(free_plan.duration or 0))
                         SubscribedPlan.objects.create(
                             plan=free_plan,
-                            plan_type=0,
+                            plan_type=SubscribedPlan.PLAN_TYPE_FREE,
                             state_id=1,
                             start_date=start_date,
                             end_date=end_date,
                             renewal_date=end_date,
                             subscription_id=str(free_plan.id),
                             plan_price=free_plan.total_price,
+
                             gst_price=free_plan.tax_price,
                             final_price=free_plan.final_price,
                             coupon_free_trial_days=0,

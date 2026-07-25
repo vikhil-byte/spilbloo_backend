@@ -4,6 +4,18 @@ from django.conf import settings
 User = settings.AUTH_USER_MODEL
 
 class Plan(models.Model):
+    PLAN_TYPE_PAID = 0
+    PLAN_TYPE_FREE = 1
+    PLAN_TYPE_COMPANY = 2
+    PLAN_TYPE_ONE_TIME_PAYMENT = 3
+
+    PLAN_TYPE_CHOICES = (
+        (PLAN_TYPE_PAID, 'Paid Plan'),
+        (PLAN_TYPE_FREE, 'Free Plan'),
+        (PLAN_TYPE_COMPANY, 'Company Plan'),
+        (PLAN_TYPE_ONE_TIME_PAYMENT, 'One Time Payment Plan'),
+    )
+
     title = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     plan_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
@@ -15,7 +27,8 @@ class Plan(models.Model):
     final_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     doctor_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     duration = models.IntegerField(default=30) # in days
-    plan_type = models.IntegerField(default=1) # 1=Paid, 0=Free
+    plan_type = models.IntegerField(choices=PLAN_TYPE_CHOICES, default=PLAN_TYPE_PAID) # default = 0 (Paid)
+
     type_id = models.IntegerField(default=1) # Visibility
     state_id = models.IntegerField(default=1) # 1=Active
     is_recommended = models.IntegerField(default=0)
@@ -32,6 +45,18 @@ import logging
 logger = logging.getLogger(__name__)
 
 class SubscribedPlan(models.Model):
+    PLAN_TYPE_PAID = 0
+    PLAN_TYPE_FREE = 1
+    PLAN_TYPE_COMPANY = 2
+    PLAN_TYPE_ONE_TIME_PAYMENT = 3
+
+    PLAN_TYPE_CHOICES = (
+        (PLAN_TYPE_PAID, 'Razorpay Subscription'),
+        (PLAN_TYPE_FREE, 'Free Subscription'),
+        (PLAN_TYPE_COMPANY, 'Company Subscription'),
+        (PLAN_TYPE_ONE_TIME_PAYMENT, 'One Time Payment Subscription'),
+    )
+
     STATE_CREATED = 0
     STATE_ACTIVE = 1
     STATE_CANCELED = 2
@@ -43,8 +68,9 @@ class SubscribedPlan(models.Model):
     UPCOMING_STATE_IMMEDIATE_CANCELED = 5
 
     plan = models.ForeignKey(Plan, on_delete=models.CASCADE, null=True, blank=True)
-    plan_type = models.IntegerField(default=1)
+    plan_type = models.IntegerField(choices=PLAN_TYPE_CHOICES, default=PLAN_TYPE_PAID) # 0=Paid, 1=Free, 2=Company, 3=One-time
     state_id = models.IntegerField(default=1) # 1=Active, 2=Canceled, 3=Pending
+
     
     start_date = models.DateTimeField(null=True, blank=True)
     end_date = models.DateTimeField(null=True, blank=True)

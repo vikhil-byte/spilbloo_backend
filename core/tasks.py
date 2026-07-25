@@ -356,7 +356,7 @@ def cancel_free_plans():
     logger.info("Running: cancel_free_plans")
     plans = SubscribedPlan.objects.filter(
         state_id=1,
-        plan_type=0,
+        plan_type=SubscribedPlan.PLAN_TYPE_FREE,
         end_date__lte=now()
     )
     
@@ -376,7 +376,7 @@ def expire_one_time_plans():
     logger.info("Running: expire_one_time_plans")
     plans = SubscribedPlan.objects.filter(
         state_id=1,
-        plan_type=1,
+        plan_type=SubscribedPlan.PLAN_TYPE_ONE_TIME_PAYMENT,
         end_date__lte=now() + timedelta(minutes=5)
     )
     
@@ -385,6 +385,7 @@ def expire_one_time_plans():
         plan.cancel_reason = "User one time payment subscription period is over"
         plan.save(update_fields=['state_id', 'cancel_reason'])
         logger.info(f"One-Time Plan {plan.id} expired.")
+
 
 
 @shared_task

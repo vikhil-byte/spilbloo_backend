@@ -280,7 +280,8 @@ class CreateSubscriptionView(APIView):
                 plan_obj = Plan.objects.get(plan_id=plan_id)
                 
                 # Check if already on a paid plan (actionCreateSubscription 427-432)
-                if SubscribedPlan.objects.filter(created_by=user, state_id=1, plan_type=1).exists():
+                if SubscribedPlan.objects.filter(created_by=user, state_id=1, plan_type=SubscribedPlan.PLAN_TYPE_PAID).exists():
+
                      logger.warning("create-subscription blocked: active paid plan exists user_id=%s", getattr(user, "id", None))
                      return Response(
                          {
@@ -350,13 +351,14 @@ class CreateSubscriptionView(APIView):
                     subscription_id=subscription_id,
                     created_by=user,
                     state_id=0, # STATE_CREATED
-                    plan_type=1, # PLAN_TYPE_PAID
+                    plan_type=SubscribedPlan.PLAN_TYPE_PAID,
                     start_date=timezone.now(),
                     renewal_date=rezorpay_start_at,
                     plan_price=plan_obj.total_price,
                     gst_price=plan_obj.tax_price,
                     final_price=plan_obj.final_price,
                 )
+
                 logger.info("create-subscription saved: user_id=%s plan_id=%s sub_id=%s", getattr(user, "id", None), plan_id, subscription_id)
                 
                 return Response({
@@ -968,20 +970,12 @@ class FreeSubscriptionView(APIView):
             return Response({"error": "Plan not found."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Mirror PHP guard: block if user already has non-free active plan.
-        has_paid = SubscribedPlan.objects.filter(created_by=user, state_id=1).exclude(plan_type=0).exists()
+        has_paid = SubscribedPlan.objects.filter(created_by=user, state_id=1).exclude(plan_type=SubscribedPlan.PLAN_TYPE_FREE).exists()
         if has_paid:
-            return Response({"error": "You are already on a plan."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "You already have a paid plan."}, status=status.HTTP_400_BAD_REQUEST)
 
         coupon = Coupon.objects.filter(code=coupon_code, state_id=1).first()
         if not coupon:
-            return Response({"error": "coupon not found"}, status=status.HTTP_400_BAD_REQUEST)
-
-        address = request.data.get("address") or getattr(user, "address", None)
-        city = request.data.get("city") or getattr(user, "city", None)
-        country = request.data.get("country") or getattr(user, "country", None)
-        contact = request.data.get("contact") or getattr(user, "contact_no", None)
-
-        with transaction.atomic():
             free_plan = SubscribedPlan.objects.filter(created_by=user, plan_type=0, state_id=1).order_by("-id").first()
             start_date = free_plan.end_date if free_plan and free_plan.end_date else timezone.now()
             end_date = start_date + timedelta(days=int(plan.duration or 0))
@@ -1059,7 +1053,7 @@ class OneTimeSubscriptionView(APIView):
 
                 now = timezone.now()
                 latest_paid = (
-                    SubscribedPlan.objects.filter(created_by=user, plan_type=1, state_id__in=[1, 2])
+                    SubscribedPlan.objects.filter(created_by=user, plan_type=SubscribedPlan.PLAN_TYPE_ONE_TIME_PAYMENT, state_id__in=[1, 2])
                     .order_by("-end_date")
                     .first()
                 )
@@ -1069,7 +1063,7 @@ class OneTimeSubscriptionView(APIView):
 
                 subscribed = SubscribedPlan.objects.create(
                     plan=plan,
-                    plan_type=1,
+                    plan_type=SubscribedPlan.PLAN_TYPE_ONE_TIME_PAYMENT,
                     state_id=0,  # created; gets activated in authenticate-one-time-sub
                     start_date=start_date,
                     end_date=end_date,
@@ -1096,6 +1090,7 @@ class OneTimeSubscriptionView(APIView):
                     },
                     status=status.HTTP_200_OK,
                 )
+
         except Exception:
             logger.exception("one-time-subscription failed user_id=%s plan_id=%s", getattr(user, "id", None), plan_id)
             return Response({"error": "Unable to create one-time subscription right now."}, status=status.HTTP_400_BAD_REQUEST)
