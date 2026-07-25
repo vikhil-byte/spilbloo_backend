@@ -8,7 +8,7 @@ from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from plans.models import Plan, SubscribedPlan
+from plans.models import Plan, SubscribedPlan, WebhookLog
 from core.models import VideoPlan, SubscribedVideo, VideoCoupon, CouponUser
 
 
@@ -40,7 +40,7 @@ class CreateSubscriptionViewTests(APITestCase):
             final_price=Decimal("1178.82"),
             doctor_price=Decimal("700.00"),
             duration=30,
-            plan_type=1,
+            plan_type=0,
             type_id=1,
             state_id=1,
             is_recommended=1,
@@ -86,7 +86,7 @@ class CreateSubscriptionViewTests(APITestCase):
         SubscribedPlan.objects.create(
             plan=plan,
             created_by=self.user,
-            plan_type=1,
+            plan_type=0,
             state_id=1,
             subscription_id="sub_existing_001",
             start_date=timezone.now(),
@@ -118,7 +118,7 @@ class AuthenticateSubscriptionSecurityTests(APITestCase):
             tax_price=Decimal("179.00"),
             final_price=Decimal("1178.00"),
             duration=30,
-            plan_type=1,
+            plan_type=0,
             type_id=1,
             state_id=1,
         )
@@ -130,7 +130,7 @@ class AuthenticateSubscriptionSecurityTests(APITestCase):
         SubscribedPlan.objects.create(
             plan=self.plan,
             created_by=self.user,
-            plan_type=1,
+            plan_type=0,
             state_id=0,
             subscription_id="sub_live_001",
             start_date=timezone.now(),
@@ -156,7 +156,7 @@ class AuthenticateSubscriptionSecurityTests(APITestCase):
         sub = SubscribedPlan.objects.create(
             plan=self.plan,
             created_by=self.user,
-            plan_type=1,
+            plan_type=0,
             state_id=0,
             subscription_id="sub_live_002",
             start_date=timezone.now(),
@@ -241,3 +241,158 @@ class VideoPlanPurchaseFlowTests(APITestCase):
         self.assertTrue(
             CouponUser.objects.filter(coupon=coupon, created_by=self.user).exists()
         )
+
+
+class RazorpayWebhookViewTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="webhook_user@spilbloo.local",
+            password="Test@1234",
+            full_name="Webhook User",
+            role_id=User.ROLE_PATIENT,
+            state_id=User.STATE_ACTIVE,
+        )
+        self.plan = Plan.objects.create(
+            title="Webhook Test Plan",
+            description="Test plan for webhooks",
+            plan_id="plan_wh_123",
+            no_of_video_session=4,
+            duration=30,
+            plan_type=0,
+            state_id=1,
+        )
+        self.subscribed_plan = SubscribedPlan.objects.create(
+            plan=self.plan,
+            created_by=self.user,
+            subscription_id="sub_webhook_test_123",
+            state_id=1,
+        )
+        self.url = reverse("razorpay_webhook")
+
+    def test_webhook_subscription_charged_updates_subscription_and_sends_email(self):
+        payload = {
+            "event": "subscription.charged",
+            "payload": {
+                "subscription": {
+                    "entity": {
+                        "id": "sub_webhook_test_123",
+                        "plan_id": "plan_wh_123",
+                        "current_start": 1700000000,
+                        "current_end": 1702592000,
+                        "charge_at": 1702592000,
+                    }
+                },
+                "payment": {
+                    "entity": {
+                        "invoice_id": "inv_wh_123"
+                    }
+                }
+            }
+        }
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "success")
+
+        self.assertTrue(
+            WebhookLog.objects.filter(
+                event="subscription.charged",
+                subscription_id="sub_webhook_test_123",
+            ).exists()
+        )
+
+        self.subscribed_plan.refresh_from_db()
+        self.assertEqual(self.subscribed_plan.state_id, 1)
+        self.assertIsNotNone(self.subscribed_plan.start_date)
+        self.assertIsNotNone(self.subscribed_plan.end_date)
+
+    def test_webhook_subscription_cancelled_updates_upcoming_state(self):
+        payload = {
+            "event": "subscription.cancelled",
+            "payload": {
+                "subscription": {
+                    "entity": {
+                        "id": "sub_webhook_test_123"
+                    }
+                }
+            }
+        }
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.subscribed_plan.refresh_from_db()
+        self.assertEqual(self.subscribed_plan.upcoming_state, 4)
+
+    def test_webhook_subscription_cancelled_immediate_updates_state_id(self):
+        payload = {
+            "event": "subscription.cancelled",
+            "payload": {
+                "subscription": {
+                    "entity": {
+                        "id": "sub_webhook_test_123",
+                        "status": "cancelled",
+                        "ended_at": 1784918626,
+                    }
+                }
+            }
+        }
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.subscribed_plan.refresh_from_db()
+        self.assertEqual(self.subscribed_plan.state_id, SubscribedPlan.STATE_CANCELED)
+        self.assertEqual(self.subscribed_plan.upcoming_state, 4)
+
+
+    def test_webhook_subscription_pending_updates_state(self):
+        payload = {
+            "event": "subscription.pending",
+            "payload": {
+                "subscription": {
+                    "entity": {
+                        "id": "sub_webhook_test_123"
+                    }
+                }
+            }
+        }
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.subscribed_plan.refresh_from_db()
+        self.assertEqual(self.subscribed_plan.state_id, SubscribedPlan.STATE_PAYMENT_PENDING)
+
+    def test_webhook_subscription_halted_updates_state(self):
+        payload = {
+            "event": "subscription.halted",
+            "payload": {
+                "subscription": {
+                    "entity": {
+                        "id": "sub_webhook_test_123"
+                    }
+                }
+            }
+        }
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.subscribed_plan.refresh_from_db()
+        self.assertEqual(self.subscribed_plan.state_id, SubscribedPlan.STATE_CANCELED)
+
+
+    def test_webhook_ignored_when_subscription_id_unknown(self):
+        payload = {
+            "event": "subscription.charged",
+            "payload": {
+                "subscription": {
+                    "entity": {
+                        "id": "sub_nonexistent_999"
+                    }
+                }
+            }
+        }
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "ignored")
+
+    @override_settings(RAZORPAY_WEBHOOK_SECRET="test_secret")
+    def test_webhook_rejects_missing_signature_header_when_secret_set(self):
+        payload = {"event": "subscription.charged"}
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["error"], "Signature header missing.")
+

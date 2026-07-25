@@ -63,6 +63,7 @@ urlpatterns = [
     path("api/user/", include("accounts.urls")),
     path("api/slot/", include("availability.urls")),
     path("api/plan/", include("plans.urls")),
+    path("api/plans/", include("plans.urls")),
     path("api/doctor-request/", include("doctor_requests.urls")),
     path("api/call/", include("calls.urls")),
     path("api/notification/", include("accounts.urls_notification")),

@@ -1,7 +1,6 @@
 from django.urls import path
-from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
-    RegisterView, CustomTokenObtainPairView, UserProfileView,
+    RegisterView, CustomTokenObtainPairView, CustomTokenRefreshView, UserProfileView,
     VerifyOtpView, ResendOtpView, DoctorContactView,
     CheckView, LogoutView, ChangePasswordView, DetailView, GetPageView,
     ForgotPasswordView, SymptomListView, MatchesListView, FaqView, AssignDoctorView,
@@ -42,6 +41,6 @@ urlpatterns = [
     path('accept-consent/', AcceptConsentView.as_view(), name='accept_consent'),
     path('send-message/', SendMessageView.as_view(), name='send_message'),
     path('login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('login/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('login/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),
     path('update-profile/', UserProfileView.as_view(), name='user_profile'),
 ]

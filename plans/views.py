@@ -5,8 +5,8 @@ from rest_framework.views import APIView
 from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated
 from django.db import transaction
 from django.utils import timezone
-from datetime import timedelta
-from .models import Plan, SubscribedPlan, Coupon
+from datetime import datetime, timedelta, timezone as dt_timezone
+from .models import Plan, SubscribedPlan, Coupon, WebhookLog
 from core.models import VideoPlan, SubscribedVideo, VideoCoupon, CouponUser, Currency
 from .serializers import (
     PlanSerializer, SubscribedPlanSerializer, VideoPlanSerializer, 
@@ -84,7 +84,14 @@ def _is_free_trial_subscription(subscription) -> bool:
 
 
 def _cancel_razorpay_subscription(subscription_id: str, cancel_at_cycle_end: int):
-    razorpay_client.subscription.cancel(subscription_id, {"cancel_at_cycle_end": int(cancel_at_cycle_end)})
+    logger.info("[Razorpay API Cancel] Initiating subscription cancellation: sub_id=%s cancel_at_cycle_end=%d", subscription_id, cancel_at_cycle_end)
+    try:
+        res = razorpay_client.subscription.cancel(subscription_id, {"cancel_at_cycle_end": int(cancel_at_cycle_end)})
+        logger.info("[Razorpay API Cancel Success] sub_id=%s response=%s", subscription_id, json.dumps(res) if isinstance(res, dict) else str(res))
+    except Exception as exc:
+        logger.error("[Razorpay API Cancel Error] sub_id=%s cancel_at_cycle_end=%d error=%s", subscription_id, cancel_at_cycle_end, str(exc))
+        raise
+
 
 
 def _patch_razorpay_subscription_plan(subscription_id: str, plan_id: str, schedule_change_at: str):
@@ -273,7 +280,8 @@ class CreateSubscriptionView(APIView):
                 plan_obj = Plan.objects.get(plan_id=plan_id)
                 
                 # Check if already on a paid plan (actionCreateSubscription 427-432)
-                if SubscribedPlan.objects.filter(created_by=user, state_id=1, plan_type=1).exists():
+                if SubscribedPlan.objects.filter(created_by=user, state_id=1, plan_type=SubscribedPlan.PLAN_TYPE_PAID).exists():
+
                      logger.warning("create-subscription blocked: active paid plan exists user_id=%s", getattr(user, "id", None))
                      return Response(
                          {
@@ -342,14 +350,18 @@ class CreateSubscriptionView(APIView):
                     plan=plan_obj,
                     subscription_id=subscription_id,
                     created_by=user,
-                    state_id=0, # STATE_CREATED
-                    plan_type=1, # PLAN_TYPE_PAID
+                    state_id=SubscribedPlan.STATE_CREATED,
+                    upcoming_state=SubscribedPlan.STATE_ACTIVE,
+                    plan_type=SubscribedPlan.PLAN_TYPE_PAID,
                     start_date=timezone.now(),
                     renewal_date=rezorpay_start_at,
                     plan_price=plan_obj.total_price,
                     gst_price=plan_obj.tax_price,
                     final_price=plan_obj.final_price,
                 )
+
+
+
                 logger.info("create-subscription saved: user_id=%s plan_id=%s sub_id=%s", getattr(user, "id", None), plan_id, subscription_id)
                 
                 return Response({
@@ -448,10 +460,10 @@ class AuthenticateSubscriptionView(APIView):
                     )
                     return Response({"error": "Subscription is already authenticated."}, status=status.HTTP_400_BAD_REQUEST)
 
-                subscribed_plan.state_id = 1  # STATE_ACTIVE
-                if transaction_id:
-                    subscribed_plan.transaction_id = transaction_id
-                subscribed_plan.save(update_fields=["state_id", "transaction_id"])
+                # Activate subscription through domain model method (safely protects terminal CANCELED states)
+                subscribed_plan.activate(transaction_id=transaction_id)
+
+
             logger.info(
                 "authenticate-subscription success: user_id=%s plan_id=%s sub_id=%s",
                 getattr(user, "id", None),
@@ -579,9 +591,10 @@ class CancelCompanyView(APIView):
             return Response({"error": "Subscription not found."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Keep cancellation state mapping consistent with existing code paths.
-        subscription.state_id = 3
+        subscription.state_id = SubscribedPlan.STATE_CANCELED
         subscription.cancel_reason = cancel_reason
         subscription.save(update_fields=["state_id", "cancel_reason"])
+
         return Response({"message": "Subscription cancelled successfully."}, status=status.HTTP_200_OK)
 
 class CancelView(APIView):
@@ -589,11 +602,17 @@ class CancelView(APIView):
 
     def post(self, request, plan_id=None):
         plan_id = plan_id or request.data.get("plan_id") or request.query_params.get("plan_id")
-        if not plan_id:
-            return Response({"error": "plan_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         cancel_reason = request.data.get("cancel_reason") or "Cancelled by user"
+        user_id = getattr(request.user, "id", None)
+        logger.info("[CancelView Start] Request received: user_id=%s plan_id=%s cancel_reason=%r", user_id, plan_id, cancel_reason)
+
+        if not plan_id:
+            logger.warning("[CancelView Abort] Missing plan_id: user_id=%s", user_id)
+            return Response({"error": "plan_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
         plan = Plan.objects.filter(plan_id=plan_id).first()
         if not plan:
+            logger.warning("[CancelView Abort] Plan not found for plan_id=%s user_id=%s", plan_id, user_id)
             return Response({"error": "Plan not found."}, status=status.HTTP_400_BAD_REQUEST)
 
         subscription = (
@@ -606,39 +625,51 @@ class CancelView(APIView):
             .first()
         )
         if not subscription:
+            logger.warning("[CancelView Abort] No active or matching subscription found for user_id=%s plan_id=%s", user_id, plan_id)
             return Response({"error": "Subscription not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        logger.info("[CancelView Subscription Found] sub_db_id=%s subscription_id=%s current_state_id=%s current_upcoming_state=%s",
+                    subscription.id, subscription.subscription_id, subscription.state_id, subscription.upcoming_state)
 
         try:
             with transaction.atomic():
                 subscription = SubscribedPlan.objects.select_for_update().get(id=subscription.id)
 
-                # Mirror legacy behavior:
-                # - free-trial -> immediate cancel
-                # - otherwise cancel at cycle end
                 immediate_cancel = _is_free_trial_subscription(subscription)
                 next_upcoming_state = (
                     UPCOMING_STATE_IMMEDIATE_CANCELED if immediate_cancel else UPCOMING_STATE_CANCELED
                 )
+                cancel_cycle_flag = 0 if immediate_cancel else 1
+
+                logger.info("[CancelView Processing] sub_id=%s immediate_cancel=%s next_upcoming_state=%s cancel_cycle_flag=%s",
+                            subscription.subscription_id, immediate_cancel, next_upcoming_state, cancel_cycle_flag)
 
                 if _is_live_razorpay_subscription(subscription.subscription_id):
                     _cancel_razorpay_subscription(
                         subscription.subscription_id,
-                        cancel_at_cycle_end=0 if immediate_cancel else 1,
+                        cancel_at_cycle_end=cancel_cycle_flag,
                     )
+                else:
+                    logger.info("[CancelView Non-Live/Mock] Skipping Razorpay API call for sub_id=%s", subscription.subscription_id)
 
                 SubscribedPlan.objects.filter(created_by=request.user).update(upcoming_state=next_upcoming_state)
-                subscription.cancel_reason = cancel_reason
-                subscription.save(update_fields=["cancel_reason"])
+                subscription.mark_cancelled(immediate=immediate_cancel, reason=cancel_reason)
+
+                logger.info("[CancelView Success] user_id=%s sub_id=%s upcoming_state_updated_to=%s",
+                            user_id, subscription.subscription_id, next_upcoming_state)
+
 
             return Response({"message": "Subscription cancelled successfully."}, status=status.HTTP_200_OK)
-        except Exception:
+        except Exception as exc:
             logger.exception(
-                "cancel-subscription failed user_id=%s plan_id=%s sub_id=%s",
-                getattr(request.user, "id", None),
+                "[CancelView Error] cancel-subscription failed user_id=%s plan_id=%s sub_id=%s error=%s",
+                user_id,
                 plan_id,
                 getattr(subscription, "subscription_id", None),
+                str(exc),
             )
             return Response({"error": "Unable to cancel subscription right now."}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class BuyVideoPlanView(APIView):
     permission_classes = (IsAuthenticated,)
@@ -943,20 +974,12 @@ class FreeSubscriptionView(APIView):
             return Response({"error": "Plan not found."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Mirror PHP guard: block if user already has non-free active plan.
-        has_paid = SubscribedPlan.objects.filter(created_by=user, state_id=1).exclude(plan_type=0).exists()
+        has_paid = SubscribedPlan.objects.filter(created_by=user, state_id=1).exclude(plan_type=SubscribedPlan.PLAN_TYPE_FREE).exists()
         if has_paid:
-            return Response({"error": "You are already on a plan."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "You already have a paid plan."}, status=status.HTTP_400_BAD_REQUEST)
 
         coupon = Coupon.objects.filter(code=coupon_code, state_id=1).first()
         if not coupon:
-            return Response({"error": "coupon not found"}, status=status.HTTP_400_BAD_REQUEST)
-
-        address = request.data.get("address") or getattr(user, "address", None)
-        city = request.data.get("city") or getattr(user, "city", None)
-        country = request.data.get("country") or getattr(user, "country", None)
-        contact = request.data.get("contact") or getattr(user, "contact_no", None)
-
-        with transaction.atomic():
             free_plan = SubscribedPlan.objects.filter(created_by=user, plan_type=0, state_id=1).order_by("-id").first()
             start_date = free_plan.end_date if free_plan and free_plan.end_date else timezone.now()
             end_date = start_date + timedelta(days=int(plan.duration or 0))
@@ -1034,7 +1057,7 @@ class OneTimeSubscriptionView(APIView):
 
                 now = timezone.now()
                 latest_paid = (
-                    SubscribedPlan.objects.filter(created_by=user, plan_type=1, state_id__in=[1, 2])
+                    SubscribedPlan.objects.filter(created_by=user, plan_type=SubscribedPlan.PLAN_TYPE_ONE_TIME_PAYMENT, state_id__in=[1, 2])
                     .order_by("-end_date")
                     .first()
                 )
@@ -1044,7 +1067,7 @@ class OneTimeSubscriptionView(APIView):
 
                 subscribed = SubscribedPlan.objects.create(
                     plan=plan,
-                    plan_type=1,
+                    plan_type=SubscribedPlan.PLAN_TYPE_ONE_TIME_PAYMENT,
                     state_id=0,  # created; gets activated in authenticate-one-time-sub
                     start_date=start_date,
                     end_date=end_date,
@@ -1071,6 +1094,7 @@ class OneTimeSubscriptionView(APIView):
                     },
                     status=status.HTTP_200_OK,
                 )
+
         except Exception:
             logger.exception("one-time-subscription failed user_id=%s plan_id=%s", getattr(user, "id", None), plan_id)
             return Response({"error": "Unable to create one-time subscription right now."}, status=status.HTTP_400_BAD_REQUEST)
@@ -1084,3 +1108,143 @@ class CurrencyListView(APIView):
             "country", "code", "symbol", "conversion_rate"
         )
         return Response({"list": list(currencies)}, status=status.HTTP_200_OK)
+
+
+class RazorpayWebhookView(APIView):
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        payload_bytes = request.body
+        sig_header = request.META.get("HTTP_X_RAZORPAY_SIGNATURE", "")
+        secret = getattr(settings, "RAZORPAY_WEBHOOK_SECRET", "")
+
+        if secret:
+            if not sig_header:
+                logger.warning("Razorpay webhook received without X-Razorpay-Signature header")
+                return Response({"error": "Signature header missing."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                razorpay_client.utility.verify_webhook_signature(
+                    payload_bytes.decode("utf-8"), sig_header, secret
+                )
+            except Exception as exc:
+                logger.warning("Razorpay webhook signature verification failed: %s", exc)
+                return Response({"error": "Invalid webhook signature."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            event_json = json.loads(payload_bytes.decode("utf-8"))
+        except Exception:
+            logger.error("Razorpay webhook payload is not valid JSON")
+            return Response({"error": "Invalid JSON payload."}, status=status.HTTP_400_BAD_REQUEST)
+
+        event_name = event_json.get("event")
+        payload = event_json.get("payload", {})
+        sub_entity = payload.get("subscription", {}).get("entity", {})
+        subscription_id = sub_entity.get("id")
+
+        logger.info("Razorpay webhook received event=%s subscription_id=%s", event_name, subscription_id)
+
+        try:
+            WebhookLog.objects.create(
+                event=event_name or "unknown",
+                subscription_id=subscription_id or "",
+                data=payload_bytes.decode("utf-8", errors="ignore"),
+            )
+        except Exception as exc:
+            logger.warning("Failed to save WebhookLog entry: %s", exc)
+
+
+        if not subscription_id:
+            return Response({"status": "ignored", "reason": "No subscription entity in payload"}, status=status.HTTP_200_OK)
+
+        subscribed_plan = SubscribedPlan.objects.filter(subscription_id=subscription_id).first()
+        if not subscribed_plan:
+            logger.warning("Razorpay webhook subscription_id=%s not found in database", subscription_id)
+            return Response({"status": "ignored", "reason": "Subscription not found"}, status=status.HTTP_200_OK)
+
+        if event_name == "subscription.charged":
+            self._handle_subscription_charged(subscribed_plan, sub_entity, payload)
+        elif event_name == "subscription.activated":
+            self._handle_subscription_activated(subscribed_plan, sub_entity)
+        elif event_name == "subscription.cancelled":
+            self._handle_subscription_cancelled(subscribed_plan, sub_entity)
+        elif event_name == "subscription.pending":
+            self._handle_subscription_pending(subscribed_plan)
+        elif event_name == "subscription.halted":
+            self._handle_subscription_halted(subscribed_plan, sub_entity)
+
+        return Response({"status": "success"}, status=status.HTTP_200_OK)
+
+    def _handle_subscription_charged(self, subscribed_plan, sub_entity, payload):
+        plan_id_str = sub_entity.get("plan_id")
+        plan = Plan.objects.filter(plan_id=plan_id_str).first() or subscribed_plan.plan
+
+        current_start = sub_entity.get("current_start")
+        current_end = sub_entity.get("current_end")
+        charge_at = sub_entity.get("charge_at")
+
+        start_dt = datetime.fromtimestamp(current_start, tz=dt_timezone.utc) if current_start else None
+        end_dt = datetime.fromtimestamp(current_end, tz=dt_timezone.utc) if current_end else None
+        renewal_dt = datetime.fromtimestamp(charge_at, tz=dt_timezone.utc) if charge_at else None
+
+        subscribed_plan.activate(start_date=start_dt, end_date=end_dt, renewal_date=renewal_dt, plan=plan)
+
+        # Send invoice email if user email exists
+        user = subscribed_plan.created_by
+        if user and getattr(user, "email", ""):
+            payment_entity = payload.get("payment", {}).get("entity", {})
+            invoice_id = payment_entity.get("invoice_id", "N/A")
+            self._send_invoice_email(user.email, plan.title if plan else "Subscription", invoice_id)
+
+    def _handle_subscription_activated(self, subscribed_plan, sub_entity):
+        plan_id_str = sub_entity.get("plan_id")
+        plan = Plan.objects.filter(plan_id=plan_id_str).first() or subscribed_plan.plan
+
+        current_start = sub_entity.get("current_start")
+        current_end = sub_entity.get("current_end")
+        charge_at = sub_entity.get("charge_at")
+
+        start_dt = datetime.fromtimestamp(current_start, tz=dt_timezone.utc) if current_start else None
+        end_dt = datetime.fromtimestamp(current_end, tz=dt_timezone.utc) if current_end else None
+        renewal_dt = datetime.fromtimestamp(charge_at, tz=dt_timezone.utc) if charge_at else None
+
+        subscribed_plan.activate(start_date=start_dt, end_date=end_dt, renewal_date=renewal_dt, plan=plan)
+
+    def _handle_subscription_cancelled(self, subscribed_plan, sub_entity):
+        is_immediate = (sub_entity.get("status") == "cancelled")
+        subscribed_plan.mark_cancelled(immediate=is_immediate)
+
+    def _handle_subscription_pending(self, subscribed_plan):
+        subscribed_plan.mark_pending()
+
+    def _handle_subscription_halted(self, subscribed_plan, sub_entity):
+        subscribed_plan.mark_cancelled(immediate=True, reason="Subscription payment halted")
+
+        if _is_live_razorpay_subscription(subscribed_plan.subscription_id):
+            try:
+                _cancel_razorpay_subscription(subscribed_plan.subscription_id, cancel_at_cycle_end=1)
+            except Exception as exc:
+                logger.warning("Failed to cancel halted subscription %s on Razorpay: %s", subscribed_plan.subscription_id, exc)
+
+
+    def _send_invoice_email(self, to_email, plan_title, invoice_id):
+        try:
+            from django.template.loader import render_to_string
+            from django.core.mail import EmailMultiAlternatives
+            context = {
+                "plan_title": plan_title,
+                "invoice_id": invoice_id,
+                "purchase_date": timezone.now().strftime("%Y-%m-%d"),
+            }
+            html_content = render_to_string("emails/subInvoice.html", context)
+            from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
+            msg = EmailMultiAlternatives(
+                subject="Your Subscription Invoice",
+                body=f"Thank you for your purchase. Invoice ID: {invoice_id}",
+                from_email=from_email,
+                to=[to_email],
+            )
+            msg.attach_alternative(html_content, "text/html")
+            msg.send(fail_silently=True)
+        except Exception as exc:
+            logger.error("Failed to send invoice email to %s: %s", to_email, exc)
+

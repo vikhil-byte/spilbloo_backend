@@ -447,28 +447,38 @@ class SendPushNotificationView(NodeBaseAPIView):
                 logger.warning("SendPushNotification: missing to_id")
                 return Response(node_error("Missing to_id", 400), status=400)
 
-            tokens = ApiAccessToken.objects.filter(created_by_id=to_id)
-            token_count = tokens.count()
-            logger.info("SendPushNotification: found %d ApiAccessToken records for user_id=%s", token_count, to_id)
+            try:
+                user = User.objects.get(id=to_id)
+            except User.DoesNotExist:
+                logger.warning("SendPushNotification: User not found for id=%s", to_id)
+                return Response(node_error("User not found", 404), status=404)
 
-            if not tokens.exists():
-                logger.warning("SendPushNotification: no ApiAccessToken records for user_id=%s", to_id)
-                return Response(node_error("Error sending push notification", 400), status=400)
+            # Discover tokens from both direct user.token and ApiAccessToken records
+            unique_tokens = set()
+            if getattr(user, "token", None) and str(user.token).strip():
+                unique_tokens.add(str(user.token).strip())
+
+            db_tokens = ApiAccessToken.objects.filter(created_by=user).exclude(device_token="").exclude(device_token__isnull=True).values_list("device_token", flat=True)
+            for t in db_tokens:
+                if str(t).strip():
+                    unique_tokens.add(str(t).strip())
+
+            logger.info("SendPushNotification: found %d total tokens for user_id=%s", len(unique_tokens), to_id)
+
+            if not unique_tokens:
+                logger.warning("SendPushNotification: no tokens found for user_id=%s", to_id)
+                return Response(
+                    node_success("No registered device tokens found for user", 0, 200),
+                    status=200,
+                )
 
             data = {"chat_id": str(chat_id), "type_id": str(type_id)}
             sent_count = 0
-            for t in tokens:
-                logger.info("SendPushNotification: token_record id=%s device_token=%s... platform=%s",
-                    t.id, (t.device_token or "")[:30], getattr(t, 'platform', 'N/A'))
-                if t.device_token:
-                    if _send_fcm(t.device_token, title, title, data=data):
-                        sent_count += 1
-                    else:
-                        logger.warning("SendPushNotification: _send_fcm returned False for token %s...", (t.device_token or "")[:20])
-                else:
-                    logger.warning("SendPushNotification: device_token is empty for token_record id=%s", t.id)
+            for device_token in unique_tokens:
+                if _send_fcm(device_token, title, title, data=data):
+                    sent_count += 1
 
-            logger.info("SendPushNotification: sent %d/%d notifications", sent_count, token_count)
+            logger.info("SendPushNotification: sent %d/%d notifications", sent_count, len(unique_tokens))
             return Response(
                 node_success("Push notification sent successfully", sent_count, 200),
                 status=200,

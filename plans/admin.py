@@ -1,5 +1,6 @@
 from django.contrib import admin
-from .models import Plan, SubscribedPlan, Coupon
+from .models import Plan, SubscribedPlan, Coupon, WebhookLog
+
 
 
 @admin.register(Plan)
@@ -10,7 +11,8 @@ class PlanAdmin(admin.ModelAdmin):
         "plan_id",
         "currency_code",
         "final_price",
-        "plan_type",
+        "discounted_price",
+        "get_plan_type_display",
         "type_id",
         "state_id",
         "is_recommended",
@@ -26,12 +28,20 @@ class SubscribedPlanAdmin(admin.ModelAdmin):
         "created_by",
         "plan",
         "subscription_id",
-        "state_id",
-        "plan_type",
+        "get_plan_type_display",
+        "get_state_id_display",
+        "get_upcoming_state_display",
+        "coupon",
+        "coupon_discount",
         "final_price",
+        "created_on",
     )
-    search_fields = ("subscription_id", "transaction_id", "created_by__email", "plan__plan_id")
-    list_filter = ("state_id", "plan_type")
+    search_fields = ("subscription_id", "transaction_id", "created_by__email", "plan__plan_id", "coupon")
+    list_filter = ("state_id", "upcoming_state", "plan_type", "created_on")
+    readonly_fields = ("created_on",)
+
+
+
 
 
 @admin.register(Coupon)
@@ -39,3 +49,12 @@ class CouponAdmin(admin.ModelAdmin):
     list_display = ("id", "code", "type_id", "discount", "no_of_free_trial_days", "state_id", "valid_till")
     search_fields = ("code", "plan_id")
     list_filter = ("state_id", "type_id")
+
+
+@admin.register(WebhookLog)
+class WebhookLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "event", "subscription_id", "created_on")
+    search_fields = ("event", "subscription_id", "data")
+    list_filter = ("event", "created_on")
+    readonly_fields = ("created_on",)
+

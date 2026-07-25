@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 def _load_firebase_credentials(credentials_cls):
-    """Load and sanitize Firebase credentials dict from base64 env, file path, or raw JSON env."""
+    """Load Firebase credentials dict from base64 env, file path, or raw JSON env."""
     b64_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_BASE64", "").strip("'\" \t\r\n")
     cred_path = os.environ.get("FIREBASE_CREDENTIALS_PATH", "").strip("'\" \t\r\n")
     raw_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip("'\" \t\r\n")
@@ -28,20 +28,14 @@ def _load_firebase_credentials(credentials_cls):
 
     if not cert_dict and raw_json:
         logger.info("[FCM Config] Loading Firebase credentials from FIREBASE_SERVICE_ACCOUNT_JSON env var (len=%d)", len(raw_json))
-        cert_dict = json.loads(raw_json)
+        try:
+            cert_dict = json.loads(raw_json)
+        except Exception as exc:
+            logger.error("[FCM Config Error] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON: %s", exc)
 
     if not cert_dict:
         logger.error("[FCM Config Error] No valid credentials configured. Check FIREBASE_SERVICE_ACCOUNT_BASE64, FIREBASE_CREDENTIALS_PATH, or FIREBASE_SERVICE_ACCOUNT_JSON.")
         return None
-
-    # Sanitize private key PEM formatting issues automatically
-    if "private_key" in cert_dict and isinstance(cert_dict["private_key"], str):
-        pk = cert_dict["private_key"]
-        pk = pk.replace("\\n", "\n")
-        pk = pk.replace("-----BEGIN PRIVATE KEY-----n", "-----BEGIN PRIVATE KEY-----\n")
-        pk = pk.replace("=n-----END PRIVATE KEY-----", "=\n-----END PRIVATE KEY-----")
-        pk = pk.replace("KEY-----n", "KEY-----\n")
-        cert_dict["private_key"] = pk
 
     return credentials_cls.Certificate(cert_dict)
 
@@ -71,7 +65,6 @@ def _send_fcm(token, title, body, data=None):
 
     try:
         app = firebase_admin.get_app()
-        logger.debug("[FCM] Reusing existing firebase App instance.")
     except Exception:
         app = None
 
@@ -80,8 +73,12 @@ def _send_fcm(token, title, body, data=None):
             cred = _load_firebase_credentials(credentials)
             if not cred:
                 return False
-            app = firebase_admin.initialize_app(cred)
-            logger.info("[FCM Config Success] Firebase App initialized. Project ID: %s", getattr(cred, 'project_id', 'unknown'))
+            try:
+                options = {"projectId": getattr(cred, "project_id", "spilbloo-dev")}
+                app = firebase_admin.initialize_app(cred, options=options)
+                logger.info("[FCM Config Success] Firebase App initialized with Project ID: %s", options["projectId"])
+            except ValueError:
+                app = firebase_admin.get_app()
 
         msg = messaging.Message(
             token=token,
@@ -92,5 +89,39 @@ def _send_fcm(token, title, body, data=None):
         logger.info("[FCM Send SUCCESS] Message ID: %s | Token Prefix: %s...", response, token[:20])
         return True
     except Exception as exc:
+        exc_str = str(exc)
+        exc_type = type(exc).__name__
         logger.exception("[FCM Send FAILED] Target Token: %s... | Error: %s", token[:20] if token else "None", exc)
+
+        # If OAuth authentication fails (401 / ThirdPartyAuthError), re-authenticate and retry
+        if "ThirdPartyAuthError" in exc_type or "Unauthorized" in exc_str or "401" in exc_str:
+            logger.warning("[FCM Auth Retry] Re-authenticating credentials due to 401 error...")
+            try:
+                if app:
+                    firebase_admin.delete_app(app)
+            except Exception:
+                pass
+
+            try:
+                cred = _load_firebase_credentials(credentials)
+                if cred:
+                    options = {"projectId": getattr(cred, "project_id", "spilbloo-dev")}
+                    app = firebase_admin.initialize_app(cred, options=options)
+                    response = messaging.send(msg, app=app)
+                    logger.info("[FCM Send SUCCESS Retry] Message ID: %s | Token Prefix: %s...", response, token[:20])
+                    return True
+            except Exception as retry_exc:
+                logger.exception("[FCM Send Retry Failed] Error: %s", retry_exc)
+                exc_str = str(retry_exc)
+                exc_type = type(retry_exc).__name__
+
+        # Auto-cleanup expired/unregistered token from database
+        if "Unregistered" in exc_type or "NotRegistered" in exc_str:
+            try:
+                from core.models import ApiAccessToken
+                deleted_count, _ = ApiAccessToken.objects.filter(device_token=token).delete()
+                if deleted_count:
+                    logger.info("[FCM Token Cleanup] Removed %d expired ApiAccessToken record(s) for token: %s...", deleted_count, token[:20])
+            except Exception as cleanup_err:
+                logger.warning("[FCM Token Cleanup Error] Failed to remove expired token: %s", cleanup_err)
         return False

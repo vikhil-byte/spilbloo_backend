@@ -37,16 +37,17 @@ class UserAdmin(BaseUserAdmin):
     form = CustomUserChangeForm
     add_form = CustomUserCreationForm
     
-    list_display = ('id', 'email', 'full_name', 'role_id', 'is_active', 'is_staff', 'date_joined')
+    list_display = ('id', 'email', 'full_name', 'role_id', 'current_subscription', 'is_active', 'is_staff', 'date_joined')
     list_filter = ('is_active', 'is_staff', 'is_superuser', 'role_id', 'state_id')
     search_fields = ('email', 'full_name', 'contact_no')
     ordering = ('-date_joined',)
-    readonly_fields = ('date_joined', 'last_login')
+    readonly_fields = ('date_joined', 'last_login', 'current_subscription')
 
     # Exposes fields in clean sections, including groups/permissions and superuser checkbox
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
         ('Personal Info', {'fields': ('full_name', 'date_of_birth', 'gender', 'contact_no', 'address', 'city', 'country', 'zipcode')}),
+        ('Subscription Info', {'fields': ('current_subscription',)}),
         ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions', 'role_id', 'state_id')}),
         ('Important dates', {'fields': ('last_login', 'date_joined')}),
     )
@@ -57,6 +58,18 @@ class UserAdmin(BaseUserAdmin):
             'fields': ('email', 'password', 'password_2'),
         }),
     )
+
+    @admin.display(description="Subscription Plan")
+    def current_subscription(self, obj):
+        from plans.models import SubscribedPlan
+        sub = SubscribedPlan.objects.filter(created_by=obj).order_by("-id").first()
+        if not sub:
+            return "No Subscription"
+        state_map = {0: "Created", 1: "Active", 2: "Canceled", 3: "Payment Pending"}
+        state_str = state_map.get(sub.state_id, f"State {sub.state_id}")
+        upcoming_str = " (Auto-Renewal Stopped)" if sub.upcoming_state in [4, 5] else ""
+        return f"{sub.plan.title if sub.plan else 'Plan'} - {state_str}{upcoming_str}"
+
 
 @admin.register(HaLogins)
 class HaLoginsAdmin(admin.ModelAdmin):

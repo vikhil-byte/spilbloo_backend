@@ -228,13 +228,13 @@ def cancel_plans():
     cutoff_time = now() + timedelta(minutes=5)
     
     plans = SubscribedPlan.objects.filter(
-        state_id=1,
+        state_id=SubscribedPlan.STATE_ACTIVE,
         end_date__lte=cutoff_time,
-        upcoming_state__in=[4, 5]
+        upcoming_state__in=[SubscribedPlan.UPCOMING_STATE_CANCELED, SubscribedPlan.UPCOMING_STATE_IMMEDIATE_CANCELED]
     )
     
     for plan in plans:
-        plan.state_id = 4
+        plan.state_id = SubscribedPlan.STATE_CANCELED
         plan.save(update_fields=['state_id'])
         logger.info(f"Plan {plan.id} cancelled as scheduled.")
 
@@ -249,13 +249,13 @@ def cancel_trial_plans():
     cutoff_time = now() + timedelta(minutes=5)
     
     plans = SubscribedPlan.objects.filter(
-        state_id=1,
-        upcoming_state=5,
+        state_id=SubscribedPlan.STATE_ACTIVE,
+        upcoming_state=SubscribedPlan.UPCOMING_STATE_IMMEDIATE_CANCELED,
         end_date__lte=cutoff_time
     )
     
     for plan in plans:
-        plan.state_id = 4
+        plan.state_id = SubscribedPlan.STATE_CANCELED
         plan.cancel_reason = "User free plan period is over"
         plan.save(update_fields=['state_id', 'cancel_reason'])
         logger.info(f"Trial Plan {plan.id} expired and cancelled.")
@@ -268,8 +268,12 @@ def cancel_halted_plans():
     Communicates with Razorpay to cancel subscriptions where payment is halted.
     """
     logger.info("Running: cancel_halted_plans")
+    cutoff_time = now() + timedelta(minutes=5)
     
-    plans = SubscribedPlan.objects.filter(upcoming_state=6)
+    plans = SubscribedPlan.objects.filter(
+        state_id=SubscribedPlan.STATE_PAYMENT_HALT,
+        end_date__lte=cutoff_time
+    )
     
     for plan in plans:
         if razorpay_client and plan.subscription_id:
@@ -356,7 +360,7 @@ def cancel_free_plans():
     logger.info("Running: cancel_free_plans")
     plans = SubscribedPlan.objects.filter(
         state_id=1,
-        plan_type=0,
+        plan_type=SubscribedPlan.PLAN_TYPE_FREE,
         end_date__lte=now()
     )
     
@@ -376,7 +380,7 @@ def expire_one_time_plans():
     logger.info("Running: expire_one_time_plans")
     plans = SubscribedPlan.objects.filter(
         state_id=1,
-        plan_type=1,
+        plan_type=SubscribedPlan.PLAN_TYPE_ONE_TIME_PAYMENT,
         end_date__lte=now() + timedelta(minutes=5)
     )
     
@@ -385,6 +389,7 @@ def expire_one_time_plans():
         plan.cancel_reason = "User one time payment subscription period is over"
         plan.save(update_fields=['state_id', 'cancel_reason'])
         logger.info(f"One-Time Plan {plan.id} expired.")
+
 
 
 @shared_task

@@ -1,3 +1,4 @@
+from unittest.mock import patch, MagicMock
 from django.test import TestCase, override_settings
 from django.core import mail
 from core.email_service.factory import get_email_client
@@ -243,6 +244,28 @@ class PushNotificationTokenResolutionTests(TestCase):
             self.assertEqual(mock_send_fcm.call_count, 2)
             called_tokens = {call.args[0] for call in mock_send_fcm.call_args_list}
             self.assertEqual(called_tokens, {"user_direct_token_123", "db_device_token_456"})
+
+    def test_expired_fcm_token_auto_cleaned_from_db(self):
+        User = get_user_model()
+        user = User.objects.create_user(
+            email="expired_token_user@spilbloo.com",
+            password="Password@123",
+            full_name="Expired Token User"
+        )
+        from core.models import ApiAccessToken
+        expired_token = ApiAccessToken.objects.create(
+            created_by=user,
+            device_token="expired_mock_token_789",
+            device_type="1"
+        )
+        
+        from firebase_admin._messaging_utils import UnregisteredError
+        with patch("firebase_admin.messaging.send", side_effect=UnregisteredError("NotRegistered")):
+            with patch("core.firebase._load_firebase_credentials", return_value=MagicMock()):
+                from core.firebase import _send_fcm
+                result = _send_fcm("expired_mock_token_789", "Title", "Body")
+                self.assertFalse(result)
+                self.assertFalse(ApiAccessToken.objects.filter(device_token="expired_mock_token_789").exists())
 
 
 
