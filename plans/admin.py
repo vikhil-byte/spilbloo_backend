@@ -12,7 +12,7 @@ class PlanAdmin(admin.ModelAdmin):
         "currency_code",
         "final_price",
         "discounted_price",
-        "plan_type",
+        "get_plan_type_display",
         "type_id",
         "state_id",
         "is_recommended",
@@ -28,8 +28,9 @@ class SubscribedPlanAdmin(admin.ModelAdmin):
         "created_by",
         "plan",
         "subscription_id",
-        "state_id",
-        "upcoming_state",
+        "get_plan_type_display",
+        "get_state_id_display",
+        "get_upcoming_state_display",
         "coupon",
         "coupon_discount",
         "final_price",
@@ -38,6 +39,7 @@ class SubscribedPlanAdmin(admin.ModelAdmin):
     search_fields = ("subscription_id", "transaction_id", "created_by__email", "plan__plan_id", "coupon")
     list_filter = ("state_id", "upcoming_state", "plan_type", "created_on")
     readonly_fields = ("created_on",)
+
 
 
 

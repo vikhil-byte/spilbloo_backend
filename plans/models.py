@@ -73,6 +73,13 @@ class SubscribedPlan(models.Model):
     UPCOMING_STATE_CANCELED = 4
     UPCOMING_STATE_IMMEDIATE_CANCELED = 5
 
+    UPCOMING_STATE_CHOICES = (
+        (UPCOMING_STATE_NONE, "None"),
+        (UPCOMING_STATE_UPCOMING, "Upcoming"),
+        (UPCOMING_STATE_CANCELED, "Canceled at Cycle End"),
+        (UPCOMING_STATE_IMMEDIATE_CANCELED, "Immediate Canceled"),
+    )
+
     STATE_CHOICES = (
 
         (STATE_INACTIVE, "New"),
@@ -90,7 +97,7 @@ class SubscribedPlan(models.Model):
 
     plan = models.ForeignKey(Plan, on_delete=models.CASCADE, null=True, blank=True)
     plan_type = models.IntegerField(choices=PLAN_TYPE_CHOICES, default=PLAN_TYPE_PAID) # 0=Paid, 1=Free, 2=Company, 3=One-time
-    state_id = models.IntegerField(default=1) # 1=Active, 2=Canceled, 3=Pending
+    state_id = models.IntegerField(choices=STATE_CHOICES, default=STATE_ACTIVE)
 
     
     start_date = models.DateTimeField(null=True, blank=True)
@@ -121,7 +128,8 @@ class SubscribedPlan(models.Model):
     cancel_reason = models.CharField(max_length=255, null=True, blank=True)
     
     upcoming_plan_id = models.IntegerField(null=True, blank=True)
-    upcoming_state = models.IntegerField(default=0)
+    upcoming_state = models.IntegerField(choices=UPCOMING_STATE_CHOICES, default=UPCOMING_STATE_NONE)
+
 
     created_on = models.DateTimeField(auto_now_add=True, null=True, blank=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='subscribed_plans')
