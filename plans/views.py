@@ -351,6 +351,7 @@ class CreateSubscriptionView(APIView):
                     subscription_id=subscription_id,
                     created_by=user,
                     state_id=SubscribedPlan.STATE_CREATED,
+                    upcoming_state=SubscribedPlan.STATE_ACTIVE,
                     plan_type=SubscribedPlan.PLAN_TYPE_PAID,
                     start_date=timezone.now(),
                     renewal_date=rezorpay_start_at,
@@ -358,6 +359,7 @@ class CreateSubscriptionView(APIView):
                     gst_price=plan_obj.tax_price,
                     final_price=plan_obj.final_price,
                 )
+
 
 
                 logger.info("create-subscription saved: user_id=%s plan_id=%s sub_id=%s", getattr(user, "id", None), plan_id, subscription_id)
