@@ -238,11 +238,15 @@ def _legacy_user_detail(user):
         otp_verified = 1 if user.state_id == User.STATE_ACTIVE else 0
 
     active_paid_subscription = (
-        SubscribedPlan.objects.filter(created_by=user, state_id=1, plan_type=SubscribedPlan.PLAN_TYPE_PAID)
+        SubscribedPlan.objects.filter(
+            created_by=user,
+            state_id__in=[SubscribedPlan.STATE_ACTIVE, SubscribedPlan.STATE_PAYMENT_PENDING]
+        )
         .select_related("plan")
         .order_by("-id")
         .first()
     )
+
 
     subscribed_plan = None
     if active_paid_subscription:
@@ -267,7 +271,8 @@ def _legacy_user_detail(user):
                 "final_price": str(plan_obj.final_price or "0"),
                 "weekly_price": "{:.2f}".format(weekly_price) if weekly_price else "0",
                 "is_recommended": plan_obj.is_recommended or 0,
-                "plan_type": plan_obj.plan_type or 1,
+                "plan_type": plan_obj.plan_type if plan_obj.plan_type is not None else 0,
+
                 "duration": plan_obj.duration or 30,
                 "currency_code": plan_obj.currency_code or "INR",
                 "company_name": "",
