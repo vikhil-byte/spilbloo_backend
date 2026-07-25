@@ -128,7 +128,8 @@ class SubscribedPlan(models.Model):
     cancel_reason = models.CharField(max_length=255, null=True, blank=True)
     
     upcoming_plan_id = models.IntegerField(null=True, blank=True)
-    upcoming_state = models.IntegerField(choices=UPCOMING_STATE_CHOICES, default=UPCOMING_STATE_NONE)
+    upcoming_state = models.IntegerField(choices=STATE_CHOICES, default=STATE_ACTIVE)
+
 
 
     created_on = models.DateTimeField(auto_now_add=True, null=True, blank=True)
