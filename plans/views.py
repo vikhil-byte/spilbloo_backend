@@ -350,7 +350,7 @@ class CreateSubscriptionView(APIView):
                     plan=plan_obj,
                     subscription_id=subscription_id,
                     created_by=user,
-                    state_id=0, # STATE_CREATED
+                    state_id=SubscribedPlan.STATE_CREATED,
                     plan_type=SubscribedPlan.PLAN_TYPE_PAID,
                     start_date=timezone.now(),
                     renewal_date=rezorpay_start_at,
@@ -358,6 +358,7 @@ class CreateSubscriptionView(APIView):
                     gst_price=plan_obj.tax_price,
                     final_price=plan_obj.final_price,
                 )
+
 
                 logger.info("create-subscription saved: user_id=%s plan_id=%s sub_id=%s", getattr(user, "id", None), plan_id, subscription_id)
                 
@@ -588,9 +589,10 @@ class CancelCompanyView(APIView):
             return Response({"error": "Subscription not found."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Keep cancellation state mapping consistent with existing code paths.
-        subscription.state_id = 3
+        subscription.state_id = SubscribedPlan.STATE_CANCELED
         subscription.cancel_reason = cancel_reason
         subscription.save(update_fields=["state_id", "cancel_reason"])
+
         return Response({"message": "Subscription cancelled successfully."}, status=status.HTTP_200_OK)
 
 class CancelView(APIView):

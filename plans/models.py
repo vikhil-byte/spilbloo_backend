@@ -57,15 +57,36 @@ class SubscribedPlan(models.Model):
         (PLAN_TYPE_ONE_TIME_PAYMENT, 'One Time Payment Subscription'),
     )
 
-    STATE_CREATED = 0
+    STATE_INACTIVE = 0
     STATE_ACTIVE = 1
-    STATE_CANCELED = 2
-    STATE_PAYMENT_PENDING = 3
+    STATE_DELETED = 2
+    STATE_UPCOMING = 3
+    STATE_EXPIRED = 4
+    STATE_CANCELED = 5
+    STATE_CREATED = 6
+    STATE_IMMEDIATE_CANCELED = 7
+    STATE_PAYMENT_PENDING = 8
+    STATE_PAYMENT_HALT = 9
 
     UPCOMING_STATE_NONE = 0
-    UPCOMING_STATE_UPCOMING = 2
+    UPCOMING_STATE_UPCOMING = 3
     UPCOMING_STATE_CANCELED = 4
     UPCOMING_STATE_IMMEDIATE_CANCELED = 5
+
+    STATE_CHOICES = (
+
+        (STATE_INACTIVE, "New"),
+        (STATE_ACTIVE, "Active"),
+        (STATE_DELETED, "Deleted"),
+        (STATE_UPCOMING, "Upcoming"),
+        (STATE_EXPIRED, "Expired"),
+        (STATE_CANCELED, "Canceled"),
+        (STATE_CREATED, "Incomplete"),
+        (STATE_IMMEDIATE_CANCELED, "Immediate Cancel"),
+        (STATE_PAYMENT_PENDING, "Payment Pending"),
+        (STATE_PAYMENT_HALT, "Payment Halt"),
+    )
+
 
     plan = models.ForeignKey(Plan, on_delete=models.CASCADE, null=True, blank=True)
     plan_type = models.IntegerField(choices=PLAN_TYPE_CHOICES, default=PLAN_TYPE_PAID) # 0=Paid, 1=Free, 2=Company, 3=One-time

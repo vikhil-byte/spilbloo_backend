@@ -337,7 +337,7 @@ class RazorpayWebhookViewTests(APITestCase):
         response = self.client.post(self.url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.subscribed_plan.refresh_from_db()
-        self.assertEqual(self.subscribed_plan.state_id, 2)
+        self.assertEqual(self.subscribed_plan.state_id, SubscribedPlan.STATE_CANCELED)
         self.assertEqual(self.subscribed_plan.upcoming_state, 4)
 
 
@@ -355,7 +355,7 @@ class RazorpayWebhookViewTests(APITestCase):
         response = self.client.post(self.url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.subscribed_plan.refresh_from_db()
-        self.assertEqual(self.subscribed_plan.state_id, 3)
+        self.assertEqual(self.subscribed_plan.state_id, SubscribedPlan.STATE_PAYMENT_PENDING)
 
     def test_webhook_subscription_halted_updates_state(self):
         payload = {
@@ -371,7 +371,8 @@ class RazorpayWebhookViewTests(APITestCase):
         response = self.client.post(self.url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.subscribed_plan.refresh_from_db()
-        self.assertEqual(self.subscribed_plan.state_id, 2)
+        self.assertEqual(self.subscribed_plan.state_id, SubscribedPlan.STATE_CANCELED)
+
 
     def test_webhook_ignored_when_subscription_id_unknown(self):
         payload = {
