@@ -356,8 +356,11 @@ def _legacy_user_detail(user):
         #"otp": _safe_str(getattr(user, "otp", "") or "") if settings.DEBUG else "",
         "is_ios_app_update": False,
         "is_subscribed_user": SubscribedPlan.objects.filter(created_by=user).exclude(state_id=SubscribedPlan.STATE_CREATED).exists(),
+        "is_buy_subscripion": SubscribedPlan.objects.filter(created_by=user, state_id=SubscribedPlan.STATE_ACTIVE).exists(),
+        "is_buy_subscription": SubscribedPlan.objects.filter(created_by=user, state_id=SubscribedPlan.STATE_ACTIVE).exists(),
         "is_buy_video_credits": SubscribedVideo.objects.filter(created_by=user, state_id=1).exists(),
         "video_credits": _safe_str(getattr(user, "video_credit", "0") or "0"),
+
         "subscribed_plan": subscribed_plan or {},
 
         "upcoming_plan": {},
