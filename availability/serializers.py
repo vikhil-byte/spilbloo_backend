@@ -116,7 +116,7 @@ class SlotBookingSerializer(serializers.ModelSerializer):
         return getattr(obj, "description", "") or ""
 
     def get_room_id(self, obj):
-        return getattr(obj, "room_id", "") or ""
+        return obj.room_id or ""
 
     def get_call_duration(self, obj):
         return getattr(obj, "call_duration", "00:00:00") or "00:00:00"

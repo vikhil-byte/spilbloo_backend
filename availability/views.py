@@ -306,7 +306,8 @@ class BookingView(APIView):
                     created_by=patient,
                     state_id=SlotBooking.STATE_REQUEST,
                     type_id=type_id,
-                    is_active=0 # IS_ROOM_ACTIVE_NO
+                    is_active=0, # IS_ROOM_ACTIVE_NO
+                    room_id=room_id or "",
                 )
 
                 # Notifications...

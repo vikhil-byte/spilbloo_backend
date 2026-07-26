@@ -39,6 +39,7 @@ class SlotBooking(models.Model):
     state_id = models.IntegerField(choices=STATE_CHOICES, default=STATE_REQUEST)
     type_id = models.IntegerField(default=0)
     is_active = models.IntegerField(default=0)
+    room_id = models.CharField(max_length=255, blank=True, default="")
     
     cancel_reason = models.CharField(max_length=255, null=True, blank=True)
     is_refunded = models.IntegerField(default=0)
