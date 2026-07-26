@@ -342,11 +342,39 @@ class DoctorBookingListView(generics.ListAPIView):
         start_time = self.request.query_params.get('start_time')
         end_time = self.request.query_params.get('end_time')
         # STATE_REQUEST = usually 2, we filter out requests
-        return SlotBooking.objects.filter(
-            doctor_id=self.request.user.id,
-            start_time__gte=start_time,
-            start_time__lte=end_time
-        ).exclude(state_id=2).order_by('-id')
+        qs = SlotBooking.objects.filter(doctor_id=self.request.user.id)
+        if start_time and end_time:
+            qs = qs.filter(start_time__gte=start_time, start_time__lte=end_time)
+        return qs.exclude(state_id=2).order_by('-id')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        try:
+            page_num = int(request.query_params.get('page') or 1)
+        except (ValueError, TypeError):
+            page_num = 1
+        per_page = 20
+        total_count = queryset.count()
+        page_count = (total_count + per_page - 1) // per_page if total_count > 0 else 0
+
+        page = self.paginate_queryset(queryset)
+        data = self.get_serializer(page if page is not None else queryset, many=True).data
+
+        return Response({
+            "list": data,
+            "_meta": {
+                "totalCount": total_count,
+                "pageCount": page_count,
+                "currentPage": page_num,
+                "perPage": per_page,
+            },
+            "_links": {
+                "self": {
+                    "href": request.build_absolute_uri()
+                }
+            }
+        }, status=status.HTTP_200_OK)
+
 
 class PatientBookingListView(generics.ListAPIView):
     permission_classes = (IsAuthenticated,)
@@ -419,6 +447,35 @@ class DoctorBookingReqView(generics.ListAPIView):
         Notification.objects.filter(to_user_id=self.request.user.id).update(is_read=1)
         
         return SlotBooking.objects.filter(doctor_id=self.request.user.id, state_id__in=[2]).order_by('id')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        try:
+            page_num = int(request.query_params.get('page') or 1)
+        except (ValueError, TypeError):
+            page_num = 1
+        per_page = 20
+        total_count = queryset.count()
+        page_count = (total_count + per_page - 1) // per_page if total_count > 0 else 0
+
+        page = self.paginate_queryset(queryset)
+        data = self.get_serializer(page if page is not None else queryset, many=True).data
+
+        return Response({
+            "list": data,
+            "_meta": {
+                "totalCount": total_count,
+                "pageCount": page_count,
+                "currentPage": page_num,
+                "perPage": per_page,
+            },
+            "_links": {
+                "self": {
+                    "href": request.build_absolute_uri()
+                }
+            }
+        }, status=status.HTTP_200_OK)
+
 
 class NotificationCountView(APIView):
     permission_classes = (IsAuthenticated,)
