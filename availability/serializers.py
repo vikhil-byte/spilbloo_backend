@@ -23,10 +23,26 @@ class SlotSerializer(serializers.ModelSerializer):
         return False
 
 class DoctorSlotSerializer(serializers.ModelSerializer):
+    """Legacy iOS expects `yyyy-MM-dd HH:mm:ss`, not DRF's default ISO8601."""
+
+    start_time = serializers.SerializerMethodField()
+    end_time = serializers.SerializerMethodField()
+    created_on = serializers.SerializerMethodField()
+
     class Meta:
         model = DoctorSlot
         fields = '__all__'
         read_only_fields = ('created_by', 'created_on')
+
+    def get_start_time(self, obj):
+        return _fmt_val_dt(obj.start_time)
+
+    def get_end_time(self, obj):
+        return _fmt_val_dt(obj.end_time)
+
+    def get_created_on(self, obj):
+        return _fmt_val_dt(obj.created_on)
+
 
 def _fmt_val_dt(dt_val, fmt="%Y-%m-%d %H:%M:%S"):
     if not dt_val:
