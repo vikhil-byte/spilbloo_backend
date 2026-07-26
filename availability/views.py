@@ -252,7 +252,10 @@ class BookingView(APIView):
             end_date__gte=timezone.now()
         ).exists()
 
-        video_credits = getattr(patient, 'video_credit', 0)
+        try:
+            video_credits = int(getattr(patient, 'video_credit', 0) or 0)
+        except (ValueError, TypeError):
+            video_credits = 0
         
         # Logic mapped from PHP: If not subscribed and no credits, block.
         if not has_active_subscription and video_credits <= 0:
@@ -267,11 +270,12 @@ class BookingView(APIView):
                 type_id = 0
                 
                 # Priority 1: User's video_credit
-                if patient.video_credit > 0:
-                     patient.video_credit -= 1 # User::ONE_VIDEO_CREDIT
+                if video_credits > 0:
+                     patient.video_credit = video_credits - 1
                      patient.save(update_fields=['video_credit'])
-                     type_id = 1 # SlotBooking::TYPE_BY_VIDEO_PLAN (assumed mapping)
+                     type_id = 1 # SlotBooking::TYPE_BY_VIDEO_PLAN
                      deducted = True
+
                 
                 # Priority 2: SubscribedPlan's video session
                 if not deducted:
