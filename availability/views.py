@@ -663,9 +663,10 @@ class PatientRescheduleView(APIView):
         booking.end_time = end_time
         if slot_id:
             booking.slot_id = slot_id
-        booking.state_id = 3  # STATE_ACCEPT
+        booking.state_id = SlotBooking.STATE_ACCEPT
         booking.patient_reschedule = 1  # YES
         booking.save()
+
 
         patient_name = getattr(user, "full_name", "") or getattr(user, "first_name", "") or "Patient"
         message = f"{patient_name} has rescheduled your video session to"
