@@ -28,6 +28,21 @@ class DoctorSlotSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ('created_by', 'created_on')
 
+def _fmt_val_dt(dt_val, fmt="%Y-%m-%d %H:%M:%S"):
+    if not dt_val:
+        return ""
+    if isinstance(dt_val, str):
+        try:
+            from dateutil.parser import parse
+            dt_val = parse(dt_val)
+        except Exception:
+            return dt_val
+    try:
+        return dt_val.strftime(fmt)
+    except Exception:
+        return str(dt_val)
+
+
 class SlotBookingSerializer(serializers.ModelSerializer):
     doctor_name = serializers.SerializerMethodField()
     patient_name = serializers.SerializerMethodField()
@@ -55,16 +70,17 @@ class SlotBookingSerializer(serializers.ModelSerializer):
         )
 
     def get_date(self, obj):
-        return obj.start_time.strftime("%Y-%m-%d") if obj.start_time else ""
+        return _fmt_val_dt(obj.start_time, "%Y-%m-%d")
 
     def get_start_time(self, obj):
-        return obj.start_time.strftime("%Y-%m-%d %H:%M:%S") if obj.start_time else ""
+        return _fmt_val_dt(obj.start_time, "%Y-%m-%d %H:%M:%S")
 
     def get_end_time(self, obj):
-        return obj.end_time.strftime("%Y-%m-%d %H:%M:%S") if obj.end_time else ""
+        return _fmt_val_dt(obj.end_time, "%Y-%m-%d %H:%M:%S")
 
     def get_created_on(self, obj):
-        return obj.created_on.strftime("%Y-%m-%d %H:%M:%S") if obj.created_on else ""
+        return _fmt_val_dt(obj.created_on, "%Y-%m-%d %H:%M:%S")
+
 
     def get_doctor_name(self, obj):
         from accounts.models import User
