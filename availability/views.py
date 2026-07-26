@@ -491,17 +491,37 @@ class NotificationCountView(APIView):
 class AcceptBookingView(APIView):
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request, booking_id=None):
-        booking_id = booking_id or request.data.get("booking_id") or request.query_params.get("booking_id")
+    def _handle_accept(self, request, booking_id=None):
+        booking_id = booking_id or request.query_params.get("booking_id") or request.data.get("booking_id")
         if not booking_id:
             return Response({"error": "booking_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             booking = SlotBooking.objects.get(id=booking_id)
-            booking.state_id = 3 # ACCEPT
-            booking.save()
+            booking.state_id = 3 # STATE_ACCEPT
+            booking.save(update_fields=['state_id'])
+
+            # Send Notification & Push (matching PHP SlotController 608-615)
+            user = request.user
+            doc_name = getattr(user, "first_name", "") or getattr(user, "full_name", "") or "Doctor"
+            msg = f"{doc_name} confirmed your request for"
+            
+            Notification.objects.create(
+                html=msg,
+                title=msg,
+                to_user_id=booking.created_by_id,
+                created_by=user,
+                model_type='SlotBooking'
+            )
             return Response({"message": "Booking accepted successfully"}, status=status.HTTP_200_OK)
         except SlotBooking.DoesNotExist:
             return Response({"error": "No Booking found"}, status=status.HTTP_400_BAD_REQUEST)
+
+    def get(self, request, booking_id=None):
+        return self._handle_accept(request, booking_id)
+
+    def post(self, request, booking_id=None):
+        return self._handle_accept(request, booking_id)
+
 
 class DoctorRescheduleView(APIView):
     permission_classes = (IsAuthenticated,)
