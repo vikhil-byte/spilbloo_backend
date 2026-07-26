@@ -228,10 +228,16 @@ class BookingView(APIView):
 
     def post(self, request):
         patient = request.user
-        slot_id = request.data.get('slot_id')
-        start_time = request.data.get('start_time')
-        end_time = request.data.get('end_time')
-        doctor_id = request.data.get('doctor_id')
+        slot_id = request.data.get('slot_id') or request.data.get('SlotBooking[slot_id]')
+        start_time = request.data.get('start_time') or request.data.get('SlotBooking[start_time]')
+        end_time = request.data.get('end_time') or request.data.get('SlotBooking[end_time]')
+        doctor_id = request.data.get('doctor_id') or request.data.get('SlotBooking[doctor_id]')
+        room_id = request.data.get('room_id') or request.data.get('SlotBooking[room_id]') or ""
+
+        if not slot_id or not start_time or not end_time or not doctor_id:
+            logger.warning("[BookingView Abort] Missing parameters: slot_id=%s doctor_id=%s start_time=%s end_time=%s", slot_id, doctor_id, start_time, end_time)
+            return Response({"error": "Missing slot booking parameters."}, status=status.HTTP_400_BAD_REQUEST)
+
 
         # Check if already booked
         exists = SlotBooking.objects.filter(
