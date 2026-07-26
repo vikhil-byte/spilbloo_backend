@@ -625,6 +625,13 @@ class DoctorCancelView(APIView):
                     "Session cancelled by therapist",
                     msg,
                 )
+                return Response({
+                    "message": "Booking canceled successfully.",
+                    "details": SlotBookingSerializer(booking).data
+                }, status=status.HTTP_200_OK)
+        except SlotBooking.DoesNotExist:
+            return Response({"error": "No booking found."}, status=status.HTTP_400_BAD_REQUEST)
+
 
 
 class PatientRescheduleView(APIView):
