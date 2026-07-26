@@ -132,7 +132,7 @@ class CompleteBookingView(APIView):
                 created_by=user
             )
 
-            booking.state_id = 5 # COMPLETED (Assuming 5 is completed based on previous logic)
+            booking.state_id = SlotBooking.STATE_COMPLETED
             booking.is_active = 0 # NO
             booking.complete_reason = "Therapist change the state to completed"
             booking.save()

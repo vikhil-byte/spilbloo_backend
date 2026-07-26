@@ -38,9 +38,9 @@ def send_booking_notification():
     logger.info("Running: send_booking_notification")
     cutoff_time = now() + timedelta(minutes=5)
     
-    # STATE_ACCEPT = 3
+    # STATE_ACCEPT — legacy PHP/iOS value
     bookings = SlotBooking.objects.filter(
-        state_id=3, 
+        state_id=SlotBooking.STATE_ACCEPT, 
         is_active=0, 
         start_time__lte=cutoff_time
     )
@@ -97,7 +97,7 @@ def auto_cancel_booking():
     cutoff_time = now() - timedelta(minutes=5)
     
     bookings = SlotBooking.objects.filter(
-        state_id=3, # STATE_ACCEPT
+        state_id=SlotBooking.STATE_ACCEPT,
         end_time__lte=cutoff_time
     )
 
@@ -105,13 +105,13 @@ def auto_cancel_booking():
         patient_call = Call.objects.filter(booking_id=booking.id, created_by_id=booking.created_by_id).first()
         
         if not patient_call:
-            booking.state_id = 5 # STATE_COMPLETED
+            booking.state_id = SlotBooking.STATE_COMPLETED
             booking.complete_reason = "User did not attend the video call"
             booking.save(update_fields=['state_id', 'complete_reason'])
         else:
             doctor_call = Call.objects.filter(booking_id=booking.id, created_by_id=booking.doctor_id).first()
             if not doctor_call:
-                booking.state_id = 4 # CANCELED
+                booking.state_id = SlotBooking.STATE_CANCELED
                 booking.cancel_reason = "Therapist did not attend the video call"
                 booking.is_refunded = 1
                 booking.save(update_fields=['state_id', 'cancel_reason', 'is_refunded'])
@@ -141,12 +141,12 @@ def cancel_pending_booking():
     cutoff_time = now() - timedelta(minutes=5)
     
     bookings = SlotBooking.objects.filter(
-        state_id=2, # STATE_REQUEST
+        state_id=SlotBooking.STATE_REQUEST,
         start_time__lte=cutoff_time
     )
 
     for booking in bookings:
-        booking.state_id = 4 # CANCELED
+        booking.state_id = SlotBooking.STATE_CANCELED
         booking.cancel_reason = "Therapist did not respond to the booking request"
         booking.is_refunded = 1
         booking.save(update_fields=['state_id', 'cancel_reason', 'is_refunded'])
@@ -176,12 +176,12 @@ def auto_complete_booking():
     cutoff_time = now() - timedelta(minutes=45)
     
     bookings = SlotBooking.objects.filter(
-        state_id=3, # ACCEPTED
+        state_id=SlotBooking.STATE_ACCEPT,
         end_time__lte=cutoff_time
     )
 
     for booking in bookings:
-        booking.state_id = 5 # STATE_COMPLETED
+        booking.state_id = SlotBooking.STATE_COMPLETED
         booking.complete_reason = "Auto completed after 45 minutes of booking end time."
         booking.save(update_fields=['state_id', 'complete_reason'])
         
@@ -205,7 +205,7 @@ def booking_reminder():
     target_end = now() + timedelta(hours=24, minutes=15)
     
     bookings = SlotBooking.objects.filter(
-        state_id__in=[2, 3], # REQUEST, ACCEPTED
+        state_id__in=[SlotBooking.STATE_REQUEST, SlotBooking.STATE_ACCEPT],
         start_time__gte=target_start,
         start_time__lte=target_end
     )

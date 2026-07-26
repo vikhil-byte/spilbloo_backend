@@ -208,7 +208,7 @@ class GetDoctorSlotView(APIView):
             doctor_id=doctor_id,
             start_time__gte=start_time,
             start_time__lte=end_time
-        ).exclude(state_id=4).values_list('slot_id', flat=True) # STATE_CANCELED = 4 (or similar in mapping)
+        ).exclude(state_id=SlotBooking.STATE_CANCELED).values_list('slot_id', flat=True)
 
         available_slots = set(doctor_slots) - set(booked_slots)
 
@@ -245,7 +245,7 @@ class BookingView(APIView):
             start_time=start_time,
             end_time=end_time,
             doctor_id=doctor_id,
-            state_id__in=[1, 2] # STATE_REQUEST, STATE_ACCEPT
+            state_id__in=[SlotBooking.STATE_REQUEST, SlotBooking.STATE_ACCEPT]
         ).exists()
 
         if exists:
@@ -304,7 +304,7 @@ class BookingView(APIView):
                     end_time=end_time,
                     doctor_id=doctor_id,
                     created_by=patient,
-                    state_id=2, # STATE_REQUEST
+                    state_id=SlotBooking.STATE_REQUEST,
                     type_id=type_id,
                     is_active=0 # IS_ROOM_ACTIVE_NO
                 )
@@ -341,11 +341,11 @@ class DoctorBookingListView(generics.ListAPIView):
     def get_queryset(self):
         start_time = self.request.query_params.get('start_time')
         end_time = self.request.query_params.get('end_time')
-        # STATE_REQUEST = usually 2, we filter out requests
+        # Exclude pending requests from the doctor's schedule list (legacy PHP).
         qs = SlotBooking.objects.filter(doctor_id=self.request.user.id)
         if start_time and end_time:
             qs = qs.filter(start_time__gte=start_time, start_time__lte=end_time)
-        return qs.exclude(state_id=2).order_by('-id')
+        return qs.exclude(state_id=SlotBooking.STATE_REQUEST).order_by('-id')
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -394,10 +394,10 @@ class PatientBookingListView(generics.ListAPIView):
         )
 
         qs = SlotBooking.objects.filter(created_by_id=patient_id, doctor_id=doctor_id)
-        if str(b_type) == '1': # UPCOMING
-            qs = qs.filter(state_id__in=[2, 3]) # REQUEST, ACCEPT
-        elif str(b_type) == '2': # COMPLETED
-            qs = qs.filter(state_id__in=[4, 5]) # CANCELLED, COMPLETED
+        if str(b_type) == str(SlotBooking.UPCOMING_BOOKING):
+            qs = qs.filter(state_id__in=[SlotBooking.STATE_REQUEST, SlotBooking.STATE_ACCEPT])
+        elif str(b_type) == str(SlotBooking.COMPLETED_BOOKING):
+            qs = qs.filter(state_id__in=[SlotBooking.STATE_COMPLETED, SlotBooking.STATE_CANCELED])
         return qs.order_by('-id')
 
     def list(self, request, *args, **kwargs):
@@ -446,7 +446,10 @@ class DoctorBookingReqView(generics.ListAPIView):
         # Mark notifications read
         Notification.objects.filter(to_user_id=self.request.user.id).update(is_read=1)
         
-        return SlotBooking.objects.filter(doctor_id=self.request.user.id, state_id__in=[2]).order_by('id')
+        return SlotBooking.objects.filter(
+            doctor_id=self.request.user.id,
+            state_id=SlotBooking.STATE_REQUEST,
+        ).order_by('id')
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -497,7 +500,7 @@ class AcceptBookingView(APIView):
             return Response({"error": "booking_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             booking = SlotBooking.objects.get(id=booking_id)
-            booking.state_id = 3 # STATE_ACCEPT
+            booking.state_id = SlotBooking.STATE_ACCEPT
             booking.save(update_fields=['state_id'])
 
             # Send Notification & Push (matching PHP SlotController 608-615)
@@ -543,7 +546,7 @@ class DoctorRescheduleView(APIView):
             # Load new times from post
             booking.start_time = request.data.get('start_time', booking.start_time)
             booking.end_time = request.data.get('end_time', booking.end_time)
-            booking.state_id = 3 # STATE_ACCEPT
+            booking.state_id = SlotBooking.STATE_ACCEPT
             booking.doctor_reschedule = 1 # YES
             
             booking.save()
@@ -578,10 +581,10 @@ class DoctorCancelView(APIView):
         try:
             with transaction.atomic():
                 booking = SlotBooking.objects.select_for_update().get(id=booking_id, doctor_id=doctor.id)
-                if booking.state_id == 4: # STATE_CANCELED
+                if booking.state_id == SlotBooking.STATE_CANCELED:
                      return Response({"error": "Booking is already canceled."}, status=status.HTTP_400_BAD_REQUEST)
                 
-                booking.state_id = 4 # CANCELED
+                booking.state_id = SlotBooking.STATE_CANCELED
                 booking.is_refunded = 1 # YES
                 booking.cancel_reason = "Therapist canceled the video session"
                 booking.save()
@@ -655,7 +658,7 @@ class PatientRescheduleView(APIView):
         booking.old_end_time = booking.end_time
         booking.start_time = start_time
         booking.end_time = end_time
-        booking.state_id = 3  # STATE_ACCEPT
+        booking.state_id = SlotBooking.STATE_ACCEPT
         booking.patient_reschedule = 1  # YES
         booking.save()
 
