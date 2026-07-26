@@ -363,13 +363,42 @@ class PatientBookingListView(generics.ListAPIView):
         return qs.order_by('-id')
 
     def list(self, request, *args, **kwargs):
-        response = super().list(request, *args, **kwargs)
-        logger.info(
-            "PatientBookingListView response: status_code=%s, data=%s",
-            response.status_code,
-            response.data
-        )
-        return response
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        try:
+            page_num = int(request.query_params.get('page') or 1)
+        except (ValueError, TypeError):
+            page_num = 1
+            
+        per_page = 20
+        total_count = queryset.count()
+        page_count = (total_count + per_page - 1) // per_page if total_count > 0 else 0
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            data = serializer.data
+        else:
+            serializer = self.get_serializer(queryset, many=True)
+            data = serializer.data
+
+        logger.info("PatientBookingListView response: status_code=200, count=%d", total_count)
+
+        return Response({
+            "list": data,
+            "_meta": {
+                "totalCount": total_count,
+                "pageCount": page_count,
+                "currentPage": page_num,
+                "perPage": per_page,
+            },
+            "_links": {
+                "self": {
+                    "href": request.build_absolute_uri()
+                }
+            }
+        }, status=status.HTTP_200_OK)
+
 
 class DoctorBookingReqView(generics.ListAPIView):
     permission_classes = (IsAuthenticated,)
