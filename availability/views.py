@@ -626,19 +626,13 @@ class DoctorCancelView(APIView):
                     msg,
                 )
 
-                return Response({
-                    "message": "Booking canceled successfully.",
-                    "details": SlotBookingSerializer(booking).data
-                }, status=status.HTTP_200_OK)
-        except SlotBooking.DoesNotExist:
-            return Response({"error": "No booking found."}, status=status.HTTP_400_BAD_REQUEST)
 
 class PatientRescheduleView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, booking_id=None):
         user = request.user
-        booking_id = booking_id or request.data.get("booking_id") or request.query_params.get("booking_id")
+        booking_id = booking_id or request.query_params.get("booking_id") or request.data.get("booking_id")
         if not booking_id:
             return Response({"error": "booking_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         try:
@@ -649,8 +643,10 @@ class PatientRescheduleView(APIView):
         if booking.patient_reschedule == 1:
             return Response({"error": "You have already rescheduled the booking once."}, status=status.HTTP_400_BAD_REQUEST)
 
-        start_time = request.data.get("start_time")
-        end_time = request.data.get("end_time")
+        start_time = request.data.get("start_time") or request.data.get("SlotBooking[start_time]")
+        end_time = request.data.get("end_time") or request.data.get("SlotBooking[end_time]")
+        slot_id = request.data.get("slot_id") or request.data.get("SlotBooking[slot_id]")
+
         if not start_time or not end_time:
             return Response({"error": "Data not posted."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -658,11 +654,14 @@ class PatientRescheduleView(APIView):
         booking.old_end_time = booking.end_time
         booking.start_time = start_time
         booking.end_time = end_time
-        booking.state_id = SlotBooking.STATE_ACCEPT
+        if slot_id:
+            booking.slot_id = slot_id
+        booking.state_id = 3  # STATE_ACCEPT
         booking.patient_reschedule = 1  # YES
         booking.save()
 
-        message = f"{user.full_name} has rescheduled your video session to"
+        patient_name = getattr(user, "full_name", "") or getattr(user, "first_name", "") or "Patient"
+        message = f"{patient_name} has rescheduled your video session to"
         Notification.objects.create(
             to_user_id=booking.doctor_id,
             created_by=user,
@@ -670,19 +669,14 @@ class PatientRescheduleView(APIView):
             html=message,
             model_type="SlotBooking",
         )
-        doctor_user = User.objects.filter(id=booking.doctor_id).first()
-        send_event_email(
-            getattr(doctor_user, "email", ""),
-            "Session rescheduled by patient",
-            message,
-        )
         return Response(
             {
-                "details": SlotBookingSerializer(booking).data,
-                "message": "Booking reschedule successfully.",
+                "message": "Booking rescheduled successfully.",
+                "details": SlotBookingSerializer(booking).data
             },
             status=status.HTTP_200_OK,
         )
+
 
 class ConfirmRescheduleView(APIView):
     permission_classes = (IsAuthenticated,)
