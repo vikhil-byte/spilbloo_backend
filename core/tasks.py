@@ -198,12 +198,13 @@ def auto_complete_booking():
 def booking_reminder():
     """
     Legacy: SlotBooking::bookingReminder()
-    Finds bookings exactly 24 hours away and prints console logs instead of email queue.
+    Finds bookings 23h45m–24h15m away and sends 24-hour reminder emails
+    to both patient and therapist.
     """
     logger.info("Running: booking_reminder")
     target_start = now() + timedelta(hours=23, minutes=45)
     target_end = now() + timedelta(hours=24, minutes=15)
-    
+
     bookings = SlotBooking.objects.filter(
         state_id__in=[SlotBooking.STATE_REQUEST, SlotBooking.STATE_ACCEPT],
         start_time__gte=target_start,
@@ -211,7 +212,71 @@ def booking_reminder():
     )
 
     for booking in bookings:
-        logger.info(f"[EMAIL QUEUE MOCK] Reminder sent to Patient ID {booking.created_by_id} and Doctor ID {booking.doctor_id} for Booking {booking.id}")
+        patient = None
+        doctor = None
+        try:
+            patient = User.objects.get(id=booking.created_by_id)
+        except User.DoesNotExist:
+            pass
+        try:
+            doctor = User.objects.get(id=booking.doctor_id)
+        except User.DoesNotExist:
+            pass
+
+        if not patient or not doctor:
+            logger.warning(f"booking_reminder: missing user for booking {booking.id}")
+            continue
+
+        session_date = booking.start_time.strftime('%B %d, %Y')
+        session_day = booking.start_time.strftime('%A')
+        start_str = booking.start_time.strftime('%I:%M %p')
+        end_str = booking.end_time.strftime('%I:%M %p')
+
+        from django.template.loader import render_to_string
+        from django.conf import settings
+        from core.email_service import get_email_client
+
+        # Patient reminder email
+        try:
+            html_body = render_to_string('emails/reminderPatient.html', {
+                'patient_name': getattr(patient, 'full_name', ''),
+                'therapist_name': getattr(doctor, 'full_name', ''),
+                'session_date': session_date,
+                'session_day': session_day,
+                'session_start_time': start_str,
+                'session_end_time': end_str,
+            })
+            subject = 'Reminder: Your video session is tomorrow!'
+            get_email_client().send_email(
+                subject=subject,
+                body=html_body,
+                to_email=patient.email,
+                html_body=html_body,
+            )
+            logger.info(f"booking_reminder: sent patient reminder for booking {booking.id}")
+        except Exception:
+            logger.exception(f"booking_reminder: failed to send patient email for booking {booking.id}")
+
+        # Therapist reminder email
+        try:
+            html_body = render_to_string('emails/reminderDoctor.html', {
+                'therapist_name': getattr(doctor, 'full_name', ''),
+                'patient_name': getattr(patient, 'full_name', ''),
+                'session_date': session_date,
+                'session_day': session_day,
+                'session_start_time': start_str,
+                'session_end_time': end_str,
+            })
+            subject = 'Reminder: You have a video session tomorrow!'
+            get_email_client().send_email(
+                subject=subject,
+                body=html_body,
+                to_email=doctor.email,
+                html_body=html_body,
+            )
+            logger.info(f"booking_reminder: sent doctor reminder for booking {booking.id}")
+        except Exception:
+            logger.exception(f"booking_reminder: failed to send doctor email for booking {booking.id}")
 
 
 # ==========================================
