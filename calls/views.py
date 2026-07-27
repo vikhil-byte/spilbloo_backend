@@ -15,30 +15,53 @@ logger = logging.getLogger(__name__)
 def _extract_param(data, query_params, *keys):
     """
     Helper to extract parameter values from request data or query params.
-    Handles standard keys (e.g. 'booking_id'), nested array keys (e.g. 'Call[booking_id]'),
-    and dict wrappers.
+    Handles standard keys ('booking_id'), nested dicts, PHP form keys ('Call[booking_id]'),
+    malformed bracket keys ('Call[booking_id]]'), and Django QueryDicts/MultiValueDicts.
     """
+    def _unwrap(v):
+        if isinstance(v, (list, tuple)) and len(v) > 0:
+            return v[0]
+        return v
+
     for key in keys:
-        val = data.get(key) if isinstance(data, dict) else None
-        if val is not None and val != "":
-            return val
+        target_sub = f"[{key}]"
         
-        # Check nested Call dict if request parsed it as a dictionary
-        if isinstance(data, dict) and "Call" in data and isinstance(data["Call"], dict):
-            val = data["Call"].get(key)
-            if val is not None and val != "":
-                return val
+        # 1. Search request.data / body
+        if data:
+            # Direct key lookup
+            val = data.get(key)
+            if val is not None and val != "" and val != []:
+                return _unwrap(val)
+
+            # Nested Call dict
+            if isinstance(data, dict) and "Call" in data and isinstance(data["Call"], dict):
+                val = data["Call"].get(key)
+                if val is not None and val != "" and val != []:
+                    return _unwrap(val)
+
+            # Iterate all keys in data (handles QueryDict & dict)
+            items = data.items() if hasattr(data, "items") else []
+            for d_key, d_val in items:
+                d_val = _unwrap(d_val)
+                if d_val is not None and d_val != "":
+                    cleaned_key = d_key.replace("]", "").replace("[", "")
+                    if target_sub in d_key or cleaned_key.endswith(key):
+                        return d_val
+
+        # 2. Search request.query_params
+        if query_params:
+            val = query_params.get(key)
+            if val is not None and val != "" and val != []:
+                return _unwrap(val)
                 
-        # Check legacy PHP form array keys like Call[booking_id]
-        php_key = f"Call[{key}]"
-        val = data.get(php_key) if isinstance(data, dict) else None
-        if val is not None and val != "":
-            return val
-            
-        val = query_params.get(key) or query_params.get(php_key)
-        if val is not None and val != "":
-            return val
-            
+            items = query_params.items() if hasattr(query_params, "items") else []
+            for q_key, q_val in items:
+                q_val = _unwrap(q_val)
+                if q_val is not None and q_val != "":
+                    cleaned_key = q_key.replace("]", "").replace("[", "")
+                    if target_sub in q_key or cleaned_key.endswith(key):
+                        return q_val
+
     return None
 
 
@@ -58,22 +81,36 @@ class JoinView(APIView):
             getattr(user, "id", None), data, dict(query_params), booking_id, session_id
         )
 
-        if not booking_id or not session_id:
-            logger.warning("JoinView Bad Request: Missing booking_id or session_id (booking_id=%s, session_id=%s)", booking_id, session_id)
+        if not session_id and not booking_id:
+            logger.warning("JoinView Bad Request: Missing both booking_id and session_id (booking_id=%s, session_id=%s)", booking_id, session_id)
             return Response({"error": "Data not posted."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            booking = SlotBooking.objects.filter(id=booking_id).first()
+            booking = None
+            if booking_id:
+                booking = SlotBooking.objects.filter(id=booking_id).first()
+
+            # Fallback: if booking_id was missing or not found, try lookup via session_id (room_id)
+            if not booking and session_id:
+                booking = SlotBooking.objects.filter(room_id=session_id).order_by('-id').first()
+                if booking:
+                    booking_id = booking.id
+                    logger.info("JoinView resolved booking_id=%s via session_id=%s", booking_id, session_id)
+
             if not booking:
-                logger.warning("JoinView Bad Request: Booking id=%s does not exist", booking_id)
+                logger.warning("JoinView Bad Request: Booking id=%s session_id=%s does not exist", booking_id, session_id)
                 return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
 
-            if str(booking.room_id) != str(session_id):
+            if session_id and str(booking.room_id) != str(session_id):
                 logger.warning(
                     "JoinView Bad Request: Room/Session mismatch for booking_id=%s (DB room_id=%s vs received session_id=%s)",
                     booking_id, booking.room_id, session_id
                 )
                 return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Ensure session_id is populated from booking if missing
+            if not session_id:
+                session_id = booking.room_id
             
             # Identify receiver
             if user.role_id == User.ROLE_DOCTER:
