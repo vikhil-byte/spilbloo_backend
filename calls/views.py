@@ -212,6 +212,11 @@ class LeaveView(APIView):
         if duration_millisec == 0 and duration > 0:
             duration_millisec = duration * 1000
 
+        logger.info(
+            "LeaveView request received: user_id=%s data=%s query_params=%s parsed_booking_id=%s parsed_session_id=%s raw_duration=%s -> parsed_duration=%s raw_dur_ms=%s -> parsed_dur_ms=%s",
+            getattr(user, "id", None), data, dict(query_params), booking_id, session_id, raw_duration, duration, raw_duration_millisec, duration_millisec
+        )
+
         try:
             booking = None
             if booking_id:
@@ -240,38 +245,69 @@ class LeaveView(APIView):
             booking.is_call_end = 1 # YES
             booking.save()
 
+            logger.info("LeaveView success: user_id=%s booking_id=%s call_id=%s duration=%s", user.id, booking.id, call.id, duration)
             return Response({
                 "message": "Room leave Successfully.",
                 "detail": CallSerializer(call).data
             }, status=status.HTTP_200_OK)
 
         except SlotBooking.DoesNotExist:
+            logger.warning("LeaveView Bad Request: SlotBooking DoesNotExist for booking_id=%s", booking_id)
             return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
         except Exception:
-            logger.exception("leave-call failed user_id=%s booking_id=%s", getattr(user, "id", None), booking_id)
+            logger.exception("leave-call failed user_id=%s booking_id=%s raw_duration=%s", getattr(user, "id", None), booking_id, raw_duration)
             return Response({"error": "Unable to leave call right now."}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class CompleteBookingView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, booking_id=None):
         user = request.user
-        booking_id = booking_id or request.data.get("booking_id") or request.query_params.get("booking_id")
-        if not booking_id:
-            return Response({"error": "booking_id is required."}, status=status.HTTP_400_BAD_REQUEST)
-        
+        data = request.data or {}
+        query_params = request.query_params or {}
+
+        booking_id = booking_id or _extract_param(data, query_params, 'booking_id')
+        session_id = _extract_param(data, query_params, 'session_id', 'room_id')
+        raw_duration = _extract_param(data, query_params, 'duration') or 0
+        raw_duration_millisec = _extract_param(data, query_params, 'duration_millisec') or 0
+
+        duration = _parse_duration_to_seconds(raw_duration)
+        duration_millisec = _parse_duration_to_seconds(raw_duration_millisec)
+        if duration_millisec == 0 and duration > 0:
+            duration_millisec = duration * 1000
+
+        logger.info(
+            "CompleteBookingView request received: user_id=%s data=%s query_params=%s parsed_booking_id=%s parsed_session_id=%s parsed_duration=%s",
+            getattr(user, "id", None), data, dict(query_params), booking_id, session_id, duration
+        )
+
         try:
-            booking = SlotBooking.objects.get(id=booking_id)
-            
+            booking = None
+            if booking_id:
+                booking = SlotBooking.objects.filter(id=booking_id).first()
+            if not booking and session_id:
+                booking = SlotBooking.objects.filter(room_id=session_id).order_by('-id').first()
+
+            if not booking:
+                logger.warning("CompleteBookingView Bad Request: Booking id=%s session_id=%s does not exist", booking_id, session_id)
+                return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
+
             call = Call.objects.create(
                 state_id=3, # COMPLETED
                 booking_id=booking.id,
-                session_id=booking.room_id,
+                session_id=session_id or booking.room_id,
+                end_time=timezone.now(),
+                duration=duration,
+                duration_millisec=duration_millisec,
                 created_by=user
             )
 
+            booking.call_duration = duration
+            booking.duration_millisec = duration_millisec
             booking.state_id = SlotBooking.STATE_COMPLETED
             booking.is_active = 0 # NO
+            booking.is_call_end = 1 # YES
             booking.complete_reason = "Therapist change the state to completed"
             booking.save()
 
@@ -283,13 +319,15 @@ class CompleteBookingView(APIView):
                 model_type='SlotBooking'
             )
 
+            logger.info("CompleteBookingView success: user_id=%s booking_id=%s call_id=%s duration=%s", user.id, booking.id, call.id, duration)
             return Response({
-                "message": "Booking completed successfully",
-                # "detail": SlotBookingSerializer(booking).data # Omitted to save imports, or add if needed
+                "message": "Booking completed successfully.",
+                "detail": CallSerializer(call).data
             }, status=status.HTTP_200_OK)
 
         except SlotBooking.DoesNotExist:
-            return Response({"error": "Booking not found"}, status=status.HTTP_400_BAD_REQUEST)
+            logger.warning("CompleteBookingView Bad Request: SlotBooking DoesNotExist for booking_id=%s", booking_id)
+            return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
         except Exception:
-            logger.exception("complete-booking failed user_id=%s booking_id=%s", getattr(user, "id", None), booking_id)
-            return Response({"error": "Unable to complete booking right now."}, status=status.HTTP_400_BAD_REQUEST)
+            logger.exception("complete-call failed user_id=%s booking_id=%s raw_duration=%s", getattr(user, "id", None), booking_id, raw_duration)
+            return Response({"error": "Unable to complete call right now."}, status=status.HTTP_400_BAD_REQUEST)
