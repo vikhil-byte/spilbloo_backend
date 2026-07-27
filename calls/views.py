@@ -164,6 +164,36 @@ class JoinView(APIView):
             logger.exception("join-call failed user_id=%s booking_id=%s", getattr(user, "id", None), booking_id)
             return Response({"error": "Unable to join call right now."}, status=status.HTTP_400_BAD_REQUEST)
 
+def _parse_duration_to_seconds(val):
+    """
+    Safely parses duration input into integer seconds.
+    Handles int/float numbers, numeric strings ('45'), and time strings ('00:45', '01:15:30').
+    """
+    if val is None or val == "":
+        return 0
+    if isinstance(val, (int, float)):
+        return int(val)
+    
+    val_str = str(val).strip()
+    if val_str.isdigit():
+        return int(val_str)
+        
+    if ":" in val_str:
+        try:
+            parts = [int(p) for p in val_str.split(":")]
+            if len(parts) == 2:  # MM:SS
+                return parts[0] * 60 + parts[1]
+            elif len(parts) == 3:  # HH:MM:SS
+                return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        except ValueError:
+            pass
+            
+    try:
+        return int(float(val_str))
+    except (ValueError, TypeError):
+        return 0
+
+
 class LeaveView(APIView):
     permission_classes = (IsAuthenticated,)
 
@@ -174,16 +204,31 @@ class LeaveView(APIView):
 
         booking_id = _extract_param(data, query_params, 'booking_id')
         session_id = _extract_param(data, query_params, 'session_id', 'room_id')
-        duration = _extract_param(data, query_params, 'duration') or 0
-        duration_millisec = _extract_param(data, query_params, 'duration_millisec') or 0
+        raw_duration = _extract_param(data, query_params, 'duration') or 0
+        raw_duration_millisec = _extract_param(data, query_params, 'duration_millisec') or 0
+
+        duration = _parse_duration_to_seconds(raw_duration)
+        duration_millisec = _parse_duration_to_seconds(raw_duration_millisec)
+        if duration_millisec == 0 and duration > 0:
+            duration_millisec = duration * 1000
 
         try:
-            booking = SlotBooking.objects.get(id=booking_id, room_id=session_id)
+            booking = None
+            if booking_id:
+                booking = SlotBooking.objects.filter(id=booking_id).first()
+            if not booking and session_id:
+                booking = SlotBooking.objects.filter(room_id=session_id).order_by('-id').first()
+                if booking:
+                    booking_id = booking.id
+
+            if not booking:
+                logger.warning("LeaveView Bad Request: Booking id=%s session_id=%s does not exist", booking_id, session_id)
+                return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
             
             call = Call.objects.create(
                 state_id=2, # LEFT
                 booking_id=booking.id,
-                session_id=session_id,
+                session_id=session_id or booking.room_id,
                 end_time=timezone.now(),
                 duration=duration,
                 duration_millisec=duration_millisec,
