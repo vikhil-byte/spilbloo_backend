@@ -12,18 +12,68 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def _extract_param(data, query_params, *keys):
+    """
+    Helper to extract parameter values from request data or query params.
+    Handles standard keys (e.g. 'booking_id'), nested array keys (e.g. 'Call[booking_id]'),
+    and dict wrappers.
+    """
+    for key in keys:
+        val = data.get(key) if isinstance(data, dict) else None
+        if val is not None and val != "":
+            return val
+        
+        # Check nested Call dict if request parsed it as a dictionary
+        if isinstance(data, dict) and "Call" in data and isinstance(data["Call"], dict):
+            val = data["Call"].get(key)
+            if val is not None and val != "":
+                return val
+                
+        # Check legacy PHP form array keys like Call[booking_id]
+        php_key = f"Call[{key}]"
+        val = data.get(php_key) if isinstance(data, dict) else None
+        if val is not None and val != "":
+            return val
+            
+        val = query_params.get(key) or query_params.get(php_key)
+        if val is not None and val != "":
+            return val
+            
+    return None
+
+
 class JoinView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
         user = request.user
-        booking_id = request.data.get('booking_id')
-        session_id = request.data.get('session_id')
+        data = request.data or {}
+        query_params = request.query_params or {}
+        
+        booking_id = _extract_param(data, query_params, 'booking_id')
+        session_id = _extract_param(data, query_params, 'session_id', 'room_id')
+
+        logger.info(
+            "JoinView request received: user_id=%s data=%s query_params=%s parsed_booking_id=%s parsed_session_id=%s",
+            getattr(user, "id", None), data, dict(query_params), booking_id, session_id
+        )
+
         if not booking_id or not session_id:
+            logger.warning("JoinView Bad Request: Missing booking_id or session_id (booking_id=%s, session_id=%s)", booking_id, session_id)
             return Response({"error": "Data not posted."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            booking = SlotBooking.objects.get(id=booking_id, room_id=session_id)
+            booking = SlotBooking.objects.filter(id=booking_id).first()
+            if not booking:
+                logger.warning("JoinView Bad Request: Booking id=%s does not exist", booking_id)
+                return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if str(booking.room_id) != str(session_id):
+                logger.warning(
+                    "JoinView Bad Request: Room/Session mismatch for booking_id=%s (DB room_id=%s vs received session_id=%s)",
+                    booking_id, booking.room_id, session_id
+                )
+                return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
             
             # Identify receiver
             if user.role_id == User.ROLE_DOCTER:
@@ -61,14 +111,17 @@ class JoinView(APIView):
                 )
                 send_push_notification(receiver_user, "Incoming Call", message)
 
+            logger.info("JoinView success: user_id=%s booking_id=%s call_id=%s", user.id, booking.id, call.id)
             return Response({
                 "message": "Joined Successfully.",
                 "detail": CallSerializer(call).data
             }, status=status.HTTP_200_OK)
 
         except SlotBooking.DoesNotExist:
+            logger.warning("JoinView Bad Request: SlotBooking DoesNotExist for booking_id=%s", booking_id)
             return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
         except User.DoesNotExist:
+            logger.warning("JoinView Bad Request: Receiver User DoesNotExist")
             return Response({"error": "Receiver user not found."}, status=status.HTTP_400_BAD_REQUEST)
         except Exception:
             logger.exception("join-call failed user_id=%s booking_id=%s", getattr(user, "id", None), booking_id)
@@ -79,10 +132,13 @@ class LeaveView(APIView):
 
     def post(self, request):
         user = request.user
-        booking_id = request.data.get('booking_id')
-        session_id = request.data.get('session_id')
-        duration = request.data.get('duration', 0)
-        duration_millisec = request.data.get('duration_millisec', 0)
+        data = request.data or {}
+        query_params = request.query_params or {}
+
+        booking_id = _extract_param(data, query_params, 'booking_id')
+        session_id = _extract_param(data, query_params, 'session_id', 'room_id')
+        duration = _extract_param(data, query_params, 'duration') or 0
+        duration_millisec = _extract_param(data, query_params, 'duration_millisec') or 0
 
         try:
             booking = SlotBooking.objects.get(id=booking_id, room_id=session_id)
