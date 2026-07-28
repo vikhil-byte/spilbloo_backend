@@ -298,6 +298,12 @@ class BookingView(APIView):
                 if not deducted:
                      return Response({"error": "Not enough video credits for booking."}, status=status.HTTP_400_BAD_REQUEST)
 
+                # Clients send room_id; fall back to the same scheme they use
+                # ({patient}_{doctor}_{slot}) so the Agora channel is never empty.
+                final_room_id = (room_id or "").strip()
+                if not final_room_id:
+                    final_room_id = f"{patient.id}_{doctor_id}_{slot_id}"
+
                 booking = SlotBooking.objects.create(
                     slot_id=slot_id,
                     start_time=start_time,
@@ -307,7 +313,7 @@ class BookingView(APIView):
                     state_id=SlotBooking.STATE_REQUEST,
                     type_id=type_id,
                     is_active=0, # IS_ROOM_ACTIVE_NO
-                    room_id=room_id or "",
+                    room_id=final_room_id,
                 )
 
                 # Notifications...

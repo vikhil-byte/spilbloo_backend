@@ -36,14 +36,16 @@ class SlotBooking(models.Model):
     start_time = models.DateTimeField()
     end_time = models.DateTimeField()
     doctor_id = models.IntegerField()
+    room_id = models.CharField(max_length=255, blank=True, default="")
     state_id = models.IntegerField(choices=STATE_CHOICES, default=STATE_REQUEST)
     type_id = models.IntegerField(default=0)
     is_active = models.IntegerField(default=0)
-    room_id = models.CharField(max_length=255, blank=True, default="")
-    
+    is_call_end = models.IntegerField(default=0)
+
     cancel_reason = models.CharField(max_length=255, null=True, blank=True)
+    complete_reason = models.CharField(max_length=255, null=True, blank=True)
     is_refunded = models.IntegerField(default=0)
-    
+
     doctor_reschedule = models.IntegerField(default=0)
     patient_reschedule = models.IntegerField(default=0)
     old_start_time = models.DateTimeField(null=True, blank=True)
