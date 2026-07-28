@@ -1,6 +1,6 @@
 from rest_framework import status
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, BasePermission
 from rest_framework.views import APIView
 from django.conf import settings
 from django.utils import timezone
@@ -8,6 +8,7 @@ from .models import Call
 from .serializers import CallSerializer
 from availability.views import send_push_notification
 from availability.models import SlotBooking, Notification
+from availability.serializers import SlotBookingSerializer
 from accounts.models import User
 import logging
 import time
@@ -15,6 +16,17 @@ import time
 logger = logging.getLogger(__name__)
 
 ROLE_PUBLISHER = 1
+
+
+class IsDoctor(BasePermission):
+    message = "Only therapists can perform this action."
+
+    def has_permission(self, request, view):
+        return (
+            request.user
+            and request.user.is_authenticated
+            and int(getattr(request.user, "role_id", 0)) == User.ROLE_DOCTER
+        )
 
 
 def _extract_param(data, query_params, *keys):
@@ -289,7 +301,7 @@ class LeaveView(APIView):
 
 
 class CompleteBookingView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, IsDoctor)
 
     def post(self, request, booking_id=None):
         user = request.user
@@ -336,21 +348,26 @@ class CompleteBookingView(APIView):
                 created_by=user
             )
 
-            booking.call_duration = duration
-            booking.duration_millisec = duration_millisec
             booking.state_id = SlotBooking.STATE_COMPLETED
             booking.is_active = 0  # NO
-            booking.is_call_end = 1  # YES
             booking.complete_reason = "Therapist change the state to completed"
             booking.save()
 
-            message = "Your booking completed successfully"
+            # Notification with doctor name (matches PHP behavior)
+            doctor_name = ""
+            if booking.doctor_id:
+                doctor_user = User.objects.filter(id=booking.doctor_id).first()
+                if doctor_user:
+                    doctor_name = getattr(doctor_user, 'first_name', '') or ''
+            message = f"Your booking with {doctor_name} completed successfully"
+
             Notification.objects.create(
                 to_user_id=booking.created_by_id,
                 created_by=user,
                 title=message,
                 model_type='SlotBooking'
             )
+            send_push_notification(booking.created_by, message, "")
 
             logger.info(
                 "CompleteBookingView success: user_id=%s booking_id=%s call_id=%s duration=%s",
@@ -360,8 +377,8 @@ class CompleteBookingView(APIView):
                 duration,
             )
             return Response({
-                "message": "Booking completed successfully.",
-                "detail": CallSerializer(call).data
+                "message": "Booking completed successfully",
+                "detail": SlotBookingSerializer(booking).data
             }, status=status.HTTP_200_OK)
 
         except SlotBooking.DoesNotExist:

@@ -1001,7 +1001,7 @@ class NodeSubscriptionPlan(models.Model):
     plan_type = models.TextField(blank=True, null=True)
 
     class Meta:
-        managed = True
+        managed = False
         db_table = "tbl_subscription_plan"
 
 
