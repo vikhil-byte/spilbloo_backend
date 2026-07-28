@@ -12,13 +12,15 @@ from .serializers import UserSerializer, RegisterSerializer, CustomTokenObtainPa
 from .models import HaLogins
 from core.models import (
     ContactForm, LoginHistory, Symptom, UserSymptom, AgeGroup, 
-    AssignedTherapist, Page, Faq, ApiAccessToken, SubscribedVideo, Setting
+    AssignedTherapist, Page, Faq, Category, ApiAccessToken, SubscribedVideo, Setting
 )
 
 from availability.models import Notification
-from core.serializers import SymptomSerializer, PageSerializer, FaqSerializer, TherapistEarningSerializer
+from core.serializers import (
+    SymptomSerializer, PageSerializer, FaqSerializer, FaqCategorySerializer, TherapistEarningSerializer
+)
 from django.db import transaction
-from django.db.models import Case, When, F, Q
+from django.db.models import Case, When, F, Q, Prefetch
 import random
 import logging
 from django.utils import timezone
@@ -1284,15 +1286,37 @@ class MatchesListView(APIView):
         }, status=status.HTTP_200_OK)
 
 class FaqView(APIView):
-    permission_classes = (AllowAny,)
-    
+    """
+    PHP parity for `user/faq`: return active FAQ *categories* with nested `faqs`.
+    iOS FAQsTypeModel expects `{list: [{title, faqs: [{id, question, answer}, ...]}, ...]}`.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    # Match PHP Category::TYPE_PATIENT / TYPE_DOCTOR
+    TYPE_PATIENT = 1
+    TYPE_DOCTOR = 2
+
     def get(self, request):
-        type_id = request.query_params.get('type_id') # e.g. User Role
-        faqs = Faq.objects.filter(state_id=1)
-        if type_id:
-            faqs = faqs.filter(type_id=type_id)
-            
-        return Response({"list": FaqSerializer(faqs, many=True).data}, status=status.HTTP_200_OK)
+        # PHP ignores query type_id and picks from logged-in role.
+        if getattr(request.user, "role_id", None) == User.ROLE_DOCTER:
+            type_id = self.TYPE_DOCTOR
+        else:
+            type_id = self.TYPE_PATIENT
+
+        categories = (
+            Category.objects.filter(state_id=Category.STATE_ACTIVE, type_id=type_id)
+            .prefetch_related(
+                Prefetch(
+                    "faqs",
+                    queryset=Faq.objects.filter(state_id=Faq.STATE_ACTIVE).order_by("id"),
+                )
+            )
+            .order_by("-id")
+        )
+        return Response(
+            {"list": FaqCategorySerializer(categories, many=True).data},
+            status=status.HTTP_200_OK,
+        )
 
 class AssignDoctorView(APIView):
     permission_classes = (IsAuthenticated,)
