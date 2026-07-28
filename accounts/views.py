@@ -244,8 +244,8 @@ def _force_update_flags(request):
     """
     client_version = _client_app_version(request)
     config = Setting.get_version_config()
-    android_required = _safe_float(config.get("android_version"), getattr(settings, "ANDROID_APP_VERSION", 1.0.0))
-    ios_required = _safe_float(config.get("ios_version"), getattr(settings, "IOS_APP_VERSION", 1.0.0))
+    android_required = _safe_float(config.get("android_version"), getattr(settings, "ANDROID_APP_VERSION", 1.0))
+    ios_required = _safe_float(config.get("ios_version"), getattr(settings, "IOS_APP_VERSION", 1.0))
     return {
         "is_app_update": not (client_version >= android_required),
         "is_ios_app_update": not (client_version >= ios_required),
