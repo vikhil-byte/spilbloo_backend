@@ -3,8 +3,9 @@ from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
 from core.models import (
     Symptom, NodeSubscriptionPlan, HomeCard, DailyCheckinQuestion, DailyCheckinAnswer,
-    TherapistApplication, Language
+    DailyJournal, TherapistApplication, Language
 )
+from availability.models import Slot
 
 User = get_user_model()
 
@@ -99,21 +100,132 @@ class Command(BaseCommand):
 
         # Seed Daily Check-in Q&A
         self.stdout.write("Seeding daily check-in questions & answers...")
-        if not DailyCheckinQuestion.objects.exists():
-            DailyCheckinQuestion.objects.create(id=1, question='How are you feeling today?', is_active=1)
-            DailyCheckinQuestion.objects.create(id=2, question='Did you sleep well last night?', is_active=1)
+        questions_data = [
+            (1, "How was your relationship with your family?", "Relationship", 1),
+            (2, "How often did you feel nervous, anxious, or on edge?", "Anxiety", 1),
+            (3, "How would you rate your sleep quality last night?", "Sleep", 1),
+            (4, "How would you describe your energy levels and motivation?", "Energy", 1),
+            (5, "How would you rate your mood?", "Mood", 1),
+            (8, "how are you?", None, 0),
+        ]
+        for q_id, q_text, q_title, q_active in questions_data:
+            DailyCheckinQuestion.objects.update_or_create(
+                id=q_id,
+                defaults={
+                    "question": q_text,
+                    "title": q_title,
+                    "is_active": q_active,
+                }
+            )
 
-            DailyCheckinAnswer.objects.create(question_id=1, answer='Excellent')
-            DailyCheckinAnswer.objects.create(question_id=1, answer='Good')
-            DailyCheckinAnswer.objects.create(question_id=1, answer='Neutral')
-            DailyCheckinAnswer.objects.create(question_id=1, answer='Bad')
+        answers_data = [
+            (1, 1, "Energized", 5, 1),
+            (2, 1, "Calm and steady", 4, 1),
+            (3, 1, "Just getting", 3, 1),
+            (4, 1, "Mentally drained", 2, 1),
+            (5, 1, "Overwhelmed", 1, 1),
+            (6, 2, "Fully refreshed", 5, 1),
+            (7, 2, "Mostly fine, slight tiredness", 4, 1),
+            (8, 2, "effort to function", 3, 1),
+            (9, 2, "Felt sluggish most of the day", 2, 1),
+            (10, 2, "Exhausted, could not focus properly", 1, 1),
+            (11, 3, "Fully aligned, made strong progress", 5, 1),
+            (12, 3, "Did a few meaningful things", 4, 1),
+            (13, 3, "Stayed busy but not impactful", 3, 1),
+            (14, 3, "Procrastinated more than I like", 2, 1),
+            (15, 3, "Completely off-track today", 1, 1),
+            (16, 4, "Present, engaged, and supportive", 5, 1),
+            (17, 4, "Had some positive interactions", 4, 1),
+            (18, 4, "neutral", 3, 1),
+            (19, 4, "Distant or slightly irritable", 2, 1),
+            (20, 4, "Conflict, regret, or disconnection", 1, 1),
+            (21, 5, "Very intentional & nourishing", 5, 1),
+            (22, 5, "Mostly mindful with a few slips", 4, 1),
+            (23, 5, "Ate whatever was convenient", 3, 1),
+            (24, 5, "emotional eating", 2, 1),
+            (25, 5, "No control, unhealthy all day", 1, 1),
+        ]
+        for a_id, q_id, ans, score, jq_id in answers_data:
+            DailyCheckinAnswer.objects.update_or_create(
+                id=a_id,
+                defaults={
+                    "question_id": q_id,
+                    "answer": ans,
+                    "score": score,
+                    "journal_question_id": jq_id,
+                }
+            )
+        self.stdout.write(self.style.SUCCESS("  + Seeded daily check-in questions and answers."))
 
-            DailyCheckinAnswer.objects.create(question_id=2, answer='Yes')
-            DailyCheckinAnswer.objects.create(question_id=2, answer='No')
-            DailyCheckinAnswer.objects.create(question_id=2, answer='Somewhat')
-            self.stdout.write(self.style.SUCCESS("  + Seeded daily check-in Q&A questions."))
-        else:
-            self.stdout.write("  Daily check-in questions already seeded.")
+        # Seed 32 Time Slots
+        self.stdout.write("Seeding time slots...")
+        slots_data = [
+            (1, "00:00:00", "00:45:00"), (2, "00:45:00", "01:30:00"), (3, "01:30:00", "02:15:00"), (4, "02:15:00", "03:00:00"),
+            (5, "03:00:00", "03:45:00"), (6, "03:45:00", "04:30:00"), (7, "04:30:00", "05:15:00"), (8, "05:15:00", "06:00:00"),
+            (9, "06:00:00", "06:45:00"), (10, "06:45:00", "07:30:00"), (11, "07:30:00", "08:15:00"), (12, "08:15:00", "09:00:00"),
+            (13, "09:00:00", "09:45:00"), (14, "09:45:00", "10:30:00"), (15, "10:30:00", "11:15:00"), (16, "11:15:00", "12:00:00"),
+            (17, "12:00:00", "12:45:00"), (18, "12:45:00", "13:30:00"), (19, "13:30:00", "14:15:00"), (20, "14:15:00", "15:00:00"),
+            (21, "15:00:00", "15:45:00"), (22, "15:45:00", "16:30:00"), (23, "16:30:00", "17:15:00"), (24, "17:15:00", "18:00:00"),
+            (25, "18:00:00", "18:45:00"), (26, "18:45:00", "19:30:00"), (27, "19:30:00", "20:15:00"), (28, "20:15:00", "21:00:00"),
+            (29, "21:00:00", "21:45:00"), (30, "21:45:00", "22:30:00"), (31, "22:30:00", "23:15:00"), (32, "23:15:00", "23:59:59")
+        ]
+        for slot_id, s_time, e_time in slots_data:
+            Slot.objects.update_or_create(
+                id=slot_id,
+                defaults={
+                    "title": "Slot",
+                    "start_time": s_time,
+                    "end_time": e_time,
+                    "state_id": 1,
+                }
+            )
+        self.stdout.write(self.style.SUCCESS("  + Seeded 32 time slots."))
+
+        # Seed Daily Journals (mapped to admin user)
+        admin_user = User.objects.filter(is_superuser=True).first() or User.objects.first()
+        if admin_user:
+            self.stdout.write(f"Seeding daily journals (assigned to admin user {admin_user.email})...")
+            journals_data = [
+                (1, "2023-09-13", "this is for testing edit API.", 1),
+                (2, "2026-06-22", "Hello i ma good today", 1),
+                (3, "2023-09-21", "this is for testing timezone.", 1),
+                (4, "2026-06-22", "Okay okay", 1),
+                (5, "2026-06-22", "Hello", 1),
+                (6, "2023-09-15", "Testing entry date edit API .", 1),
+                (7, "2026-04-23", "Hello i am good.", 1),
+                (8, "2026-04-24", "I am doing well today. Wow", 1),
+                (9, "2026-04-26", "I am doing good. Nice day.", 1),
+                (10, "2026-05-12", "Test ", 1),
+                (11, "2026-06-28", "Hello chinmay", 1),
+                (12, "2026-06-28", "Okay okay", 1),
+                (13, "2026-06-26", "I am okay okay okay", 1),
+                (14, "2026-06-29", "Hello I am good", 1),
+                (15, "2026-06-23", "Okay okay", 1),
+                (16, "2026-07-06", "Test note.", 1),
+                (17, "2026-07-07", "Test journey.", 1),
+                (18, "2026-07-17", "Test note", 1),
+                (19, "2026-07-19", "Doing good today", 1),
+                (20, "2025-07-22", "hiiiii", 1),
+                (21, "2025-10-23", "Test journal.", 1),
+                (22, "2026-07-23", "Test note. Test note 2.", 1),
+                (23, "2026-07-23", "Note 1", 1),
+                (24, "2026-07-24", "thgffgvg", 1),
+                (25, "2026-07-26", "Fgvjhkj cjjk Bhuj I", 1),
+                (26, "2026-07-27", "Hdjsj", 1),
+                (27, "2026-07-27", "Hchcjc", 1),
+                (28, "2026-07-28", "Today felt lighter than yesterday.\nI still caught myself overthinking\na few conversations, but instead of\nspiralling, I took a walk and let\nmyself breathe.\n\nI'm learning that healing isn't\nabout having perfect days—it's\nabout showing up for myself,\none small step at a time.\n\nTonight, I'm choosing progress\nover perfection.\n\n😊 Calm", 1),
+            ]
+            for j_id, e_date, j_text, q_id in journals_data:
+                DailyJournal.objects.update_or_create(
+                    id=j_id,
+                    defaults={
+                        "entry_date": e_date,
+                        "journal": j_text,
+                        "question_id": q_id,
+                        "created_by": admin_user,
+                    }
+                )
+            self.stdout.write(self.style.SUCCESS("  + Seeded daily journals."))
 
         # Seed Therapist Applications
         self.stdout.write("Seeding therapist applications...")
