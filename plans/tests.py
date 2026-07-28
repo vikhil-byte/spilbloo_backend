@@ -396,3 +396,83 @@ class RazorpayWebhookViewTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"], "Signature header missing.")
 
+
+class PlanListParityTests(APITestCase):
+    def setUp(self):
+        self.url = reverse("plan_list")
+        self.lite_14 = Plan.objects.create(
+            title="Spilbloo Lite - 14 days",
+            description="<p>Unlimited texting and voice notes</p>",
+            video_description="<b>Text and audio messaging</b>",
+            weekly_price="0",
+            plan_id="plan_parity_lite_14",
+            no_of_video_session=0,
+            currency_code="INR",
+            total_price=Decimal("1016.00"),
+            tax_price=Decimal("183.00"),
+            final_price=Decimal("1199.00"),
+            doctor_price=Decimal("508.00"),
+            duration=14,
+            plan_type=0,
+            type_id=0,
+            state_id=1,
+            is_recommended=0,
+            discounted_price=Decimal("0.00"),
+            tax_percentage=None,
+        )
+        self.lite_30 = Plan.objects.create(
+            title="Spilbloo Lite - 30 days",
+            description="Unlimited texting and voice notes",
+            video_description="Text and audio messaging with guaranteed responses.",
+            weekly_price="435",
+            plan_id="plan_parity_lite_30",
+            no_of_video_session=0,
+            currency_code="INR",
+            total_price=Decimal("1864.00"),
+            tax_price=Decimal("335.00"),
+            final_price=Decimal("2199.00"),
+            doctor_price=Decimal("932.00"),
+            duration=30,
+            plan_type=0,
+            type_id=0,
+            state_id=1,
+            is_recommended=0,
+            discounted_price=Decimal("500.00"),
+            tax_percentage="18",
+        )
+        # Plus plan should be excluded when type_id=1 (Lite / text-only).
+        Plan.objects.create(
+            title="Spilbloo Plus - 30 days",
+            plan_id="plan_parity_plus_30",
+            no_of_video_session=4,
+            currency_code="INR",
+            duration=30,
+            plan_type=0,
+            type_id=0,
+            state_id=1,
+            discounted_price=Decimal("0.00"),
+        )
+
+    def test_plan_list_matches_php_asjson_shape(self):
+        response = self.client.get(self.url, {"type_id": 1, "page": 0, "currency": "INR"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("list", response.data)
+        plans = response.data["list"]
+        self.assertEqual(len(plans), 2)
+
+        by_id = {p["id"]: p for p in plans}
+        p14 = by_id[self.lite_14.id]
+        p30 = by_id[self.lite_30.id]
+
+        self.assertEqual(p14["company_name"], "")
+        self.assertEqual(p14["discounted_price_calculated"], 0)
+        self.assertEqual(p14["description"], "Unlimited texting and voice notes")
+        self.assertEqual(p14["video_description"], "Text and audio messaging")
+        self.assertNotIn("<", p14["description"])
+
+        # PHP: ceil(((int)500 / 7) * 30) == 2143
+        self.assertEqual(p30["discounted_price_calculated"], 2143)
+        self.assertEqual(p30["weekly_price"], "435")
+        self.assertEqual(p30["tax_percentage"], "18")
+        self.assertEqual(p30["company_name"], "")
+

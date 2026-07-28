@@ -205,14 +205,22 @@ class CompanyUserPlanListView(generics.ListAPIView):
     permission_classes = (IsAuthenticated,)
     serializer_class = PlanSerializer
 
-    def get_queryset(self):
+    def _resolve_company(self):
+        if hasattr(self, "_company"):
+            return self._company
         user = self.request.user
         email = getattr(user, "email", "") or ""
         domain = email.split("@")[-1].lower() if "@" in email else ""
-        if not domain:
-            return Plan.objects.filter(state_id=1, plan_type=0, type_id=0).order_by("-is_recommended")
+        company = None
+        if domain:
+            company = Company.objects.filter(
+                state_id=Company.STATE_ACTIVE, email_domain__iexact=domain
+            ).first()
+        self._company = company
+        return company
 
-        company = Company.objects.filter(state_id=Company.STATE_ACTIVE, email_domain__iexact=domain).first()
+    def get_queryset(self):
+        company = self._resolve_company()
         if not company:
             return Plan.objects.filter(state_id=1, plan_type=0, type_id=0).order_by("-is_recommended")
 
@@ -221,6 +229,17 @@ class CompanyUserPlanListView(generics.ListAPIView):
             state_id=CompanyCoupon.STATE_ACTIVE,
         ).values_list("plan_id", flat=True)
         return Plan.objects.filter(state_id=1, id__in=coupon_plan_ids).order_by("-is_recommended")
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx["company"] = self._resolve_company()
+        return ctx
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        # Legacy clients expect `{list: [...]}` (same envelope as plan/list).
+        return Response({"list": serializer.data}, status=status.HTTP_200_OK)
 
 class MyPlansView(generics.ListAPIView):
     permission_classes = (IsAuthenticated,)
