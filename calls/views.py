@@ -1,7 +1,8 @@
-from rest_framework import generics, status
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
+from django.conf import settings
 from django.utils import timezone
 from .models import Call
 from .serializers import CallSerializer
@@ -9,8 +10,12 @@ from availability.views import send_push_notification
 from availability.models import SlotBooking, Notification
 from accounts.models import User
 import logging
+import time
 
 logger = logging.getLogger(__name__)
+
+ROLE_PUBLISHER = 1
+
 
 def _extract_param(data, query_params, *keys):
     """
@@ -25,7 +30,7 @@ def _extract_param(data, query_params, *keys):
 
     for key in keys:
         target_sub = f"[{key}]"
-        
+
         # 1. Search request.data / body
         if data:
             # Direct key lookup
@@ -53,7 +58,7 @@ def _extract_param(data, query_params, *keys):
             val = query_params.get(key)
             if val is not None and val != "" and val != []:
                 return _unwrap(val)
-                
+
             items = query_params.items() if hasattr(query_params, "items") else []
             for q_key, q_val in items:
                 q_val = _unwrap(q_val)
@@ -65,6 +70,36 @@ def _extract_param(data, query_params, *keys):
     return None
 
 
+def _parse_duration_to_seconds(val):
+    """
+    Safely parses duration input into integer seconds.
+    Handles int/float numbers, numeric strings ('45'), and time strings ('00:45', '01:15:30').
+    """
+    if val is None or val == "":
+        return 0
+    if isinstance(val, (int, float)):
+        return int(val)
+
+    val_str = str(val).strip()
+    if val_str.isdigit():
+        return int(val_str)
+
+    if ":" in val_str:
+        try:
+            parts = [int(p) for p in val_str.split(":")]
+            if len(parts) == 2:  # MM:SS
+                return parts[0] * 60 + parts[1]
+            elif len(parts) == 3:  # HH:MM:SS
+                return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        except ValueError:
+            pass
+
+    try:
+        return int(float(val_str))
+    except (ValueError, TypeError):
+        return 0
+
+
 class JoinView(APIView):
     permission_classes = (IsAuthenticated,)
 
@@ -72,7 +107,7 @@ class JoinView(APIView):
         user = request.user
         data = request.data or {}
         query_params = request.query_params or {}
-        
+
         booking_id = _extract_param(data, query_params, 'booking_id')
         session_id = _extract_param(data, query_params, 'session_id', 'room_id')
 
@@ -82,7 +117,11 @@ class JoinView(APIView):
         )
 
         if not session_id and not booking_id:
-            logger.warning("JoinView Bad Request: Missing both booking_id and session_id (booking_id=%s, session_id=%s)", booking_id, session_id)
+            logger.warning(
+                "JoinView Bad Request: Missing both booking_id and session_id (booking_id=%s, session_id=%s)",
+                booking_id,
+                session_id,
+            )
             return Response({"error": "Data not posted."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
@@ -98,7 +137,11 @@ class JoinView(APIView):
                     logger.info("JoinView resolved booking_id=%s via session_id=%s", booking_id, session_id)
 
             if not booking:
-                logger.warning("JoinView Bad Request: Booking id=%s session_id=%s does not exist", booking_id, session_id)
+                logger.warning(
+                    "JoinView Bad Request: Booking id=%s session_id=%s does not exist",
+                    booking_id,
+                    session_id,
+                )
                 return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
 
             if session_id and str(booking.room_id) != str(session_id):
@@ -111,11 +154,11 @@ class JoinView(APIView):
             # Ensure session_id is populated from booking if missing
             if not session_id:
                 session_id = booking.room_id
-            
+
             # Identify receiver
             if user.role_id == User.ROLE_DOCTER:
                 receiver_user_id = booking.created_by_id
-                name = getattr(user, 'first_name', user.full_name) # Fallback
+                name = getattr(user, 'first_name', user.full_name)  # Fallback
             else:
                 receiver_user_id = booking.doctor_id
                 name = user.full_name
@@ -123,7 +166,7 @@ class JoinView(APIView):
             receiver_user = User.objects.get(id=receiver_user_id)
 
             call = Call.objects.create(
-                state_id=1, # JOIN
+                state_id=1,  # JOIN
                 booking_id=booking.id,
                 session_id=session_id,
                 user=receiver_user,
@@ -164,35 +207,6 @@ class JoinView(APIView):
             logger.exception("join-call failed user_id=%s booking_id=%s", getattr(user, "id", None), booking_id)
             return Response({"error": "Unable to join call right now."}, status=status.HTTP_400_BAD_REQUEST)
 
-def _parse_duration_to_seconds(val):
-    """
-    Safely parses duration input into integer seconds.
-    Handles int/float numbers, numeric strings ('45'), and time strings ('00:45', '01:15:30').
-    """
-    if val is None or val == "":
-        return 0
-    if isinstance(val, (int, float)):
-        return int(val)
-    
-    val_str = str(val).strip()
-    if val_str.isdigit():
-        return int(val_str)
-        
-    if ":" in val_str:
-        try:
-            parts = [int(p) for p in val_str.split(":")]
-            if len(parts) == 2:  # MM:SS
-                return parts[0] * 60 + parts[1]
-            elif len(parts) == 3:  # HH:MM:SS
-                return parts[0] * 3600 + parts[1] * 60 + parts[2]
-        except ValueError:
-            pass
-            
-    try:
-        return int(float(val_str))
-    except (ValueError, TypeError):
-        return 0
-
 
 class LeaveView(APIView):
     permission_classes = (IsAuthenticated,)
@@ -227,11 +241,15 @@ class LeaveView(APIView):
                     booking_id = booking.id
 
             if not booking:
-                logger.warning("LeaveView Bad Request: Booking id=%s session_id=%s does not exist", booking_id, session_id)
+                logger.warning(
+                    "LeaveView Bad Request: Booking id=%s session_id=%s does not exist",
+                    booking_id,
+                    session_id,
+                )
                 return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
-            
+
             call = Call.objects.create(
-                state_id=2, # LEFT
+                state_id=2,  # LEFT
                 booking_id=booking.id,
                 session_id=session_id or booking.room_id,
                 end_time=timezone.now(),
@@ -242,10 +260,16 @@ class LeaveView(APIView):
 
             booking.call_duration = duration
             booking.duration_millisec = duration_millisec
-            booking.is_call_end = 1 # YES
+            booking.is_call_end = 1  # YES
             booking.save()
 
-            logger.info("LeaveView success: user_id=%s booking_id=%s call_id=%s duration=%s", user.id, booking.id, call.id, duration)
+            logger.info(
+                "LeaveView success: user_id=%s booking_id=%s call_id=%s duration=%s",
+                user.id,
+                booking.id,
+                call.id,
+                duration,
+            )
             return Response({
                 "message": "Room leave Successfully.",
                 "detail": CallSerializer(call).data
@@ -255,7 +279,12 @@ class LeaveView(APIView):
             logger.warning("LeaveView Bad Request: SlotBooking DoesNotExist for booking_id=%s", booking_id)
             return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
         except Exception:
-            logger.exception("leave-call failed user_id=%s booking_id=%s raw_duration=%s", getattr(user, "id", None), booking_id, raw_duration)
+            logger.exception(
+                "leave-call failed user_id=%s booking_id=%s raw_duration=%s",
+                getattr(user, "id", None),
+                booking_id,
+                raw_duration,
+            )
             return Response({"error": "Unable to leave call right now."}, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -290,11 +319,15 @@ class CompleteBookingView(APIView):
                 booking = SlotBooking.objects.filter(room_id=session_id).order_by('-id').first()
 
             if not booking:
-                logger.warning("CompleteBookingView Bad Request: Booking id=%s session_id=%s does not exist", booking_id, session_id)
+                logger.warning(
+                    "CompleteBookingView Bad Request: Booking id=%s session_id=%s does not exist",
+                    booking_id,
+                    session_id,
+                )
                 return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
 
             call = Call.objects.create(
-                state_id=3, # COMPLETED
+                state_id=3,  # COMPLETED
                 booking_id=booking.id,
                 session_id=session_id or booking.room_id,
                 end_time=timezone.now(),
@@ -306,8 +339,8 @@ class CompleteBookingView(APIView):
             booking.call_duration = duration
             booking.duration_millisec = duration_millisec
             booking.state_id = SlotBooking.STATE_COMPLETED
-            booking.is_active = 0 # NO
-            booking.is_call_end = 1 # YES
+            booking.is_active = 0  # NO
+            booking.is_call_end = 1  # YES
             booking.complete_reason = "Therapist change the state to completed"
             booking.save()
 
@@ -319,15 +352,126 @@ class CompleteBookingView(APIView):
                 model_type='SlotBooking'
             )
 
-            logger.info("CompleteBookingView success: user_id=%s booking_id=%s call_id=%s duration=%s", user.id, booking.id, call.id, duration)
+            logger.info(
+                "CompleteBookingView success: user_id=%s booking_id=%s call_id=%s duration=%s",
+                user.id,
+                booking.id,
+                call.id,
+                duration,
+            )
             return Response({
                 "message": "Booking completed successfully.",
                 "detail": CallSerializer(call).data
             }, status=status.HTTP_200_OK)
 
         except SlotBooking.DoesNotExist:
-            logger.warning("CompleteBookingView Bad Request: SlotBooking DoesNotExist for booking_id=%s", booking_id)
+            logger.warning(
+                "CompleteBookingView Bad Request: SlotBooking DoesNotExist for booking_id=%s",
+                booking_id,
+            )
             return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
         except Exception:
-            logger.exception("complete-call failed user_id=%s booking_id=%s raw_duration=%s", getattr(user, "id", None), booking_id, raw_duration)
-            return Response({"error": "Unable to complete call right now."}, status=status.HTTP_400_BAD_REQUEST)
+            logger.exception(
+                "complete-booking failed user_id=%s booking_id=%s raw_duration=%s",
+                getattr(user, "id", None),
+                booking_id,
+                raw_duration,
+            )
+            return Response(
+                {"error": "Unable to complete booking right now."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+class AgoraTokenView(APIView):
+    """
+    Mint a short-lived Agora RTC token for a booking participant.
+
+    When AGORA_APP_CERTIFICATE is empty (App ID-only testing mode), returns an
+    empty token so existing clients can still join.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        return self._issue_token(request)
+
+    def post(self, request):
+        return self._issue_token(request)
+
+    def _issue_token(self, request):
+        user = request.user
+        data = request.data or {}
+        query_params = request.query_params or {}
+
+        booking_id = _extract_param(data, query_params, 'booking_id')
+        channel = _extract_param(data, query_params, 'channel', 'session_id', 'room_id')
+        if not booking_id or not channel:
+            return Response(
+                {"error": "booking_id and channel are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            booking = SlotBooking.objects.get(id=booking_id)
+        except SlotBooking.DoesNotExist:
+            return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        participant_ids = {booking.created_by_id, booking.doctor_id}
+        if user.id not in participant_ids:
+            return Response(
+                {"error": "Not a participant of this call."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Prefer the stored room when present; otherwise accept client channel
+        # (legacy bookings may have an empty room_id until recreated).
+        if booking.room_id and booking.room_id != channel:
+            return Response(
+                {"error": "Channel does not match this booking."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        app_id = getattr(settings, "AGORA_APP_ID", "") or ""
+        app_certificate = getattr(settings, "AGORA_APP_CERTIFICATE", "") or ""
+        expire_seconds = int(getattr(settings, "AGORA_TOKEN_EXPIRE_SECONDS", 3600) or 3600)
+        expire_at = int(time.time()) + expire_seconds
+        uid = int(user.id)
+
+        token = ""
+        if app_id and app_certificate:
+            try:
+                from agora_token_builder import RtcTokenBuilder
+
+                token = RtcTokenBuilder.buildTokenWithUid(
+                    app_id,
+                    app_certificate,
+                    channel,
+                    uid,
+                    ROLE_PUBLISHER,
+                    expire_at,
+                )
+            except Exception:
+                logger.exception(
+                    "agora token generation failed user_id=%s booking_id=%s",
+                    user.id,
+                    booking_id,
+                )
+                return Response(
+                    {"error": "Unable to generate Agora token right now."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+        else:
+            logger.warning(
+                "AGORA_APP_CERTIFICATE not set; returning empty token (App ID-only mode)"
+            )
+
+        return Response(
+            {
+                "token": token,
+                "uid": uid,
+                "channel": channel,
+                "app_id": app_id,
+                "expires_at": expire_at,
+            },
+            status=status.HTTP_200_OK,
+        )
