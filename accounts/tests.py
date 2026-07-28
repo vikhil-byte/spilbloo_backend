@@ -353,6 +353,7 @@ class VerifyOtpStagingTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("access-token", response.data)
+        self.assertIn("refresh-token", response.data)
         
         new_access_token = response.data["access-token"]
         self.user.refresh_from_db()

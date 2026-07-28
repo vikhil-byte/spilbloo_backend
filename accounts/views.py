@@ -654,19 +654,36 @@ class DoctorContactView(APIView):
 class CustomTokenRefreshView(TokenRefreshView):
     def post(self, request, *args, **kwargs):
         # Support legacy payload keys 'refresh-token' or 'refresh'
-        raw_refresh = request.data.get("refresh") or request.data.get("refresh-token") or request.data.get("refreshToken")
+        raw_refresh = (
+            request.data.get("refresh")
+            or request.data.get("refresh-token")
+            or request.data.get("refreshToken")
+        )
         if raw_refresh and "refresh" not in request.data:
-            request.data["refresh"] = raw_refresh
+            # QueryDict may be immutable depending on parser; copy when needed.
+            try:
+                request.data._mutable = True  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            try:
+                request.data["refresh"] = raw_refresh
+            except Exception:
+                # Fallback: rebuild via private attribute used by DRF Request
+                data = request.data.copy() if hasattr(request.data, "copy") else dict(request.data)
+                data["refresh"] = raw_refresh
+                request._full_data = data
 
         response = super().post(request, *args, **kwargs)
 
         if response.status_code == 200:
             access_token = response.data.get("access") or response.data.get("access-token")
-            refresh_token_str = response.data.get("refresh") or raw_refresh
+            # With ROTATE_REFRESH_TOKENS, SimpleJWT returns a new refresh under "refresh".
+            rotated_refresh = response.data.get("refresh")
+            refresh_token_str = rotated_refresh or raw_refresh
 
             if access_token:
                 response.data["access-token"] = access_token
-            if refresh_token_str and "refresh-token" not in response.data:
+            if refresh_token_str:
                 response.data["refresh-token"] = refresh_token_str
 
             try:
@@ -674,7 +691,7 @@ class CustomTokenRefreshView(TokenRefreshView):
                     from rest_framework_simplejwt.tokens import UntypedToken
                     token_obj = UntypedToken(raw_refresh)
                     user_id = token_obj.get("user_id")
-                    if user_id:
+                    if user_id and access_token:
                         user = User.objects.get(id=user_id)
                         user.activation_key = str(access_token)
                         user.save(update_fields=["activation_key"])
@@ -815,8 +832,17 @@ class CheckView(APIView):
                 self.request.headers.get("User-Agent", ""),
                 self.request.content_type,
             )
-            # Legacy PHP actionCheck returns guest payload instead of 401
-            # when user is unauthenticated/expired.
+            # If the client sent a Bearer token that failed (expired/invalid), return 401
+            # so mobile refresh interceptors can rotate access via /user/login/refresh/.
+            # Only return the legacy guest 200 payload when no credentials were provided.
+            if auth_header.strip():
+                return Response(
+                    {
+                        "detail": "Given token not valid for any token type",
+                        "code": "token_not_valid",
+                    },
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
             return Response(
                 {"message": "User not authenticated. No device token found"},
                 status=status.HTTP_200_OK,
