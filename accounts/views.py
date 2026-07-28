@@ -12,7 +12,7 @@ from .serializers import UserSerializer, RegisterSerializer, CustomTokenObtainPa
 from .models import HaLogins
 from core.models import (
     ContactForm, LoginHistory, Symptom, UserSymptom, AgeGroup, 
-    AssignedTherapist, Page, Faq, ApiAccessToken, SubscribedVideo
+    AssignedTherapist, Page, Faq, ApiAccessToken, SubscribedVideo, Setting
 )
 
 from availability.models import Notification
@@ -228,7 +228,31 @@ def _safe_str(value, default=""):
         return default
 
 
-def _legacy_user_detail(user):
+def _client_app_version(request):
+    """Read legacy `version` request header used by PHP force-update checks."""
+    if request is None:
+        return 0.0
+    return _safe_float(request.headers.get("version", 0), 0.0)
+
+
+def _force_update_flags(request):
+    """
+    Mirror PHP User::asJson force-update flags from tbl_setting.versionSettings.
+
+    is_app_update      -> Android needs update (client version < android_version)
+    is_ios_app_update  -> iOS needs update (client version < ios_version)
+    """
+    client_version = _client_app_version(request)
+    config = Setting.get_version_config()
+    android_required = _safe_float(config.get("android_version"), getattr(settings, "ANDROID_APP_VERSION", 1.0.0))
+    ios_required = _safe_float(config.get("ios_version"), getattr(settings, "IOS_APP_VERSION", 1.0.0))
+    return {
+        "is_app_update": not (client_version >= android_required),
+        "is_ios_app_update": not (client_version >= ios_required),
+    }
+
+
+def _legacy_user_detail(user, request=None):
     """
     Build compatibility payload expected by legacy iOS user model parsing.
     """
@@ -334,6 +358,8 @@ def _legacy_user_detail(user):
         except Exception:
             pass
 
+    force_update = _force_update_flags(request)
+
     return {
         "id": user.id,
         "email": user.email or "",
@@ -354,7 +380,7 @@ def _legacy_user_detail(user):
         "isOnline": _safe_str(getattr(user, "online", "") or ""),
         "otp_verified": otp_verified,
         #"otp": _safe_str(getattr(user, "otp", "") or "") if settings.DEBUG else "",
-        "is_ios_app_update": False,
+        "is_ios_app_update": force_update["is_ios_app_update"],
         "is_subscribed_user": SubscribedPlan.objects.filter(created_by=user).exclude(state_id=SubscribedPlan.STATE_CREATED).exists(),
         "is_buy_subscripion": SubscribedPlan.objects.filter(created_by=user, state_id=SubscribedPlan.STATE_ACTIVE).exists(),
         "is_buy_subscription": SubscribedPlan.objects.filter(created_by=user, state_id=SubscribedPlan.STATE_ACTIVE).exists(),
@@ -380,7 +406,7 @@ def _legacy_user_detail(user):
         "gender": getattr(user, "gender", 0) or 0,
         "inr_payment_bottom_sheet_url": "",
         "is_android_under_maintenance": 0,
-        "is_app_update": False,
+        "is_app_update": force_update["is_app_update"],
         "is_available": 1 if getattr(user, "is_available", True) else 0,
         "is_consent_accept": getattr(user, "is_consent_accept", 0) or 0,
         "is_ios_under_maintenance": 0,
@@ -526,7 +552,7 @@ class RegisterView(generics.CreateAPIView):
 
         return Response({
             "message": "Please verify your OTP.",
-            "detail": _legacy_user_detail(user)
+            "detail": _legacy_user_detail(user, request)
         }, status=status.HTTP_200_OK)
 
 class VerifyOtpView(APIView):
@@ -568,7 +594,7 @@ class VerifyOtpView(APIView):
                 "message": "Your account successfully verified!",
                 "access-token": str(refresh.access_token),
                 "refresh-token": str(refresh),
-                "detail": _legacy_user_detail(user)
+                "detail": _legacy_user_detail(user, request)
             }, status=status.HTTP_200_OK)
         else:
             return Response({"error": "Incorrect OTP"}, status=status.HTTP_400_BAD_REQUEST)
@@ -708,7 +734,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                     return Response(
                         {
                             "message": "Details already exist. You need to verify your otp first",
-                            "detail": _legacy_user_detail(user),
+                            "detail": _legacy_user_detail(user, request),
                         },
                         status=status.HTTP_200_OK,
                     )
@@ -721,7 +747,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 send_otp_via_email(user.email, otp)
                 return Response({
                     "message": "Please verify your OTP.",
-                    "detail": _legacy_user_detail(user)
+                    "detail": _legacy_user_detail(user, request)
                 }, status=status.HTTP_200_OK)
 
             auth_user = authenticate(request, username=email, password=password) or authenticate(request, email=email, password=password)
@@ -737,7 +763,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 "message": "Login Successfully",
                 "access-token": str(refresh.access_token),
                 "refresh-token": str(refresh),
-                "detail": _legacy_user_detail(auth_user)
+                "detail": _legacy_user_detail(auth_user, request)
             }
 
             # OTP challenge for newer versions (legacy behavior).
@@ -816,7 +842,7 @@ class CheckView(APIView):
         user.save(update_fields=["last_action_time"])
 
         return Response({
-            "detail": _legacy_user_detail(user)
+            "detail": _legacy_user_detail(user, request)
         }, status=status.HTTP_200_OK)
 
     def get(self, request):
@@ -892,7 +918,7 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         return Response({
-            "detail": _legacy_user_detail(instance)
+            "detail": _legacy_user_detail(instance, request)
         }, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):
@@ -1025,7 +1051,7 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
                 return Response({"error": e.messages}, status=status.HTTP_400_BAD_REQUEST)
 
             return Response({
-                "detail": _legacy_user_detail(instance)
+                "detail": _legacy_user_detail(instance, request)
             }, status=status.HTTP_200_OK)
         except Exception as exc:
             logger.exception("Error in UserProfileView.update")
@@ -1103,7 +1129,7 @@ class DetailView(generics.RetrieveAPIView):
     def retrieve(self, request, *args, **kwargs):
         try:
             instance = self.get_object()
-            return Response({"detail": _legacy_user_detail(instance)}, status=status.HTTP_200_OK)
+            return Response({"detail": _legacy_user_detail(instance, request)}, status=status.HTTP_200_OK)
         except Http404:
             return Response({"error": "Data Not Found"}, status=status.HTTP_400_BAD_REQUEST)
 
