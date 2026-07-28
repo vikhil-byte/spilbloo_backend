@@ -37,7 +37,7 @@ def send_event_email(to_email, subject, message):
 
 from core.models import RefundLog, ApiAccessToken
 
-def send_push_notification(user, title, description):
+def send_push_notification(user, title, description, data=None):
     if not user:
         logger.warning("[Push Notify Abort] No user object passed to send_push_notification.")
         return
@@ -72,7 +72,7 @@ def send_push_notification(user, title, description):
     sent_count = 0
     fail_count = 0
     for tok in target_tokens:
-        success = _send_fcm(tok, title, description)
+        success = _send_fcm(tok, title, description, data=data)
         if success:
             sent_count += 1
         else:
@@ -520,8 +520,10 @@ class AcceptBookingView(APIView):
                 title=msg,
                 to_user_id=booking.created_by_id,
                 created_by=user,
+                model_id=booking.id,
                 model_type='SlotBooking'
             )
+            send_push_notification(booking.created_by, msg, "")
             return Response({"message": "Booking accepted successfully"}, status=status.HTTP_200_OK)
         except SlotBooking.DoesNotExist:
             return Response({"error": "No Booking found"}, status=status.HTTP_400_BAD_REQUEST)
@@ -563,8 +565,10 @@ class DoctorRescheduleView(APIView):
                 to_user_id=booking.created_by_id,
                 created_by=doctor,
                 title=msg,
-                html=msg
+                html=msg,
+                model_id=booking.id,
             )
+            send_push_notification(booking.created_by, "Session rescheduled", msg)
             send_event_email(
                 getattr(booking.created_by, "email", ""),
                 "Session rescheduled by therapist",
@@ -625,8 +629,10 @@ class DoctorCancelView(APIView):
                     to_user_id=patient.id,
                     created_by=doctor,
                     title=msg,
-                    html=msg
+                    html=msg,
+                    model_id=booking.id,
                 )
+                send_push_notification(patient, "Session cancelled", msg)
                 send_event_email(
                     getattr(patient, "email", ""),
                     "Session cancelled by therapist",
@@ -682,7 +688,12 @@ class PatientRescheduleView(APIView):
             created_by=user,
             title=message,
             html=message,
+            model_id=booking.id,
             model_type="SlotBooking",
+        )
+        send_push_notification(
+            User.objects.filter(id=booking.doctor_id).first(),
+            "Session rescheduled", message,
         )
         return Response(
             {

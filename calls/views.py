@@ -170,7 +170,7 @@ class JoinView(APIView):
             # Identify receiver
             if user.role_id == User.ROLE_DOCTER:
                 receiver_user_id = booking.created_by_id
-                name = getattr(user, 'first_name', user.full_name)  # Fallback
+                name = user.full_name
             else:
                 receiver_user_id = booking.doctor_id
                 name = user.full_name
@@ -199,9 +199,14 @@ class JoinView(APIView):
                     to_user_id=receiver_user.id,
                     created_by=user,
                     title=message,
+                    model_id=call.id,
                     model_type='Call'
                 )
-                send_push_notification(receiver_user, "Incoming Call", message)
+                send_push_notification(
+                    receiver_user, "Incoming Call", message,
+                    data={"controller": "call", "action": "join", "message": message,
+                          "user_id": str(user.id), "detail": CallSerializer(call).data},
+                )
 
             logger.info("JoinView success: user_id=%s booking_id=%s call_id=%s", user.id, booking.id, call.id)
             return Response({
@@ -214,7 +219,7 @@ class JoinView(APIView):
             return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
         except User.DoesNotExist:
             logger.warning("JoinView Bad Request: Receiver User DoesNotExist")
-            return Response({"error": "Receiver user not found."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Reciever user not found."}, status=status.HTTP_400_BAD_REQUEST)
         except Exception:
             logger.exception("join-call failed user_id=%s booking_id=%s", getattr(user, "id", None), booking_id)
             return Response({"error": "Unable to join call right now."}, status=status.HTTP_400_BAD_REQUEST)
@@ -260,10 +265,19 @@ class LeaveView(APIView):
                 )
                 return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
 
+            # PHP compound check: booking_id AND room_id must match
+            if session_id and booking.room_id and str(booking.room_id) != str(session_id):
+                logger.warning(
+                    "LeaveView Bad Request: Room/Session mismatch for booking_id=%s (DB room_id=%s vs received session_id=%s)",
+                    booking_id, booking.room_id, session_id
+                )
+                return Response({"error": "Booking not found."}, status=status.HTTP_400_BAD_REQUEST)
+
             call = Call.objects.create(
                 state_id=2,  # LEFT
                 booking_id=booking.id,
                 session_id=session_id or booking.room_id,
+                user=user,  # PHP sets user_id to current user via beforeValidate
                 end_time=timezone.now(),
                 duration=duration,
                 duration_millisec=duration_millisec,
@@ -273,7 +287,7 @@ class LeaveView(APIView):
             booking.call_duration = duration
             booking.duration_millisec = duration_millisec
             booking.is_call_end = 1  # YES
-            booking.save()
+            booking.save(update_fields=['call_duration', 'duration_millisec', 'is_call_end'])
 
             logger.info(
                 "LeaveView success: user_id=%s booking_id=%s call_id=%s duration=%s",
@@ -351,23 +365,29 @@ class CompleteBookingView(APIView):
             booking.state_id = SlotBooking.STATE_COMPLETED
             booking.is_active = 0  # NO
             booking.complete_reason = "Therapist change the state to completed"
-            booking.save()
+            booking.save(update_fields=['state_id', 'is_active', 'complete_reason'])
 
             # Notification with doctor name (matches PHP behavior)
             doctor_name = ""
             if booking.doctor_id:
                 doctor_user = User.objects.filter(id=booking.doctor_id).first()
                 if doctor_user:
-                    doctor_name = getattr(doctor_user, 'first_name', '') or ''
+                    doctor_name = getattr(doctor_user, 'full_name', '') or ''
             message = f"Your booking with {doctor_name} completed successfully"
 
             Notification.objects.create(
                 to_user_id=booking.created_by_id,
                 created_by=user,
                 title=message,
+                model_id=booking.id,
                 model_type='SlotBooking'
             )
-            send_push_notification(booking.created_by, message, "")
+            send_push_notification(
+                booking.created_by, message, "",
+                data={"controller": "call", "action": "complete-booking",
+                      "message": message, "user_id": str(user.id),
+                      "detail": SlotBookingSerializer(booking).data},
+            )
 
             logger.info(
                 "CompleteBookingView success: user_id=%s booking_id=%s call_id=%s duration=%s",

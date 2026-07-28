@@ -964,6 +964,10 @@ class FreeSubscriptionView(APIView):
         user = request.user
         plan_id = request.data.get("plan_id") or request.query_params.get("plan_id")
         coupon_code = request.data.get("coupon") or request.data.get("code")
+        address = request.data.get("address") or getattr(user, "address", None)
+        city = request.data.get("city") or getattr(user, "city", None)
+        country = request.data.get("country") or getattr(user, "country", None)
+        contact = request.data.get("contact") or getattr(user, "contact_no", None)
         if not plan_id:
             return Response({"error": "plan_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         if not coupon_code:
@@ -1011,14 +1015,16 @@ class FreeSubscriptionView(APIView):
                 free_plan.state_id = 3
                 free_plan.save(update_fields=["state_id"])
 
-        return Response(
-            {
-                "message": "Subscription created successfully.",
-                "detail": _legacy_user_detail(user),
-                "subscription_id": subscribed.id,
-            },
-            status=status.HTTP_200_OK,
-        )
+            return Response(
+                {
+                    "message": "Subscription created successfully.",
+                    "detail": _legacy_user_detail(user),
+                    "subscription_id": subscribed.id,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response({"error": "Invalid or expired coupon code."}, status=status.HTTP_400_BAD_REQUEST)
 
 class OneTimeSubscriptionView(APIView):
     permission_classes = (IsAuthenticated,)
