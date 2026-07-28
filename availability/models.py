@@ -16,17 +16,36 @@ class DoctorSlot(models.Model):
         db_table = 'tbl_doctor_slot'
 
 class SlotBooking(models.Model):
+    # Align with legacy PHP SlotBooking + iOS BookingState (0..3).
+    STATE_REQUEST = 0
+    STATE_ACCEPT = 1
+    STATE_CANCELED = 2
+    STATE_COMPLETED = 3
+
+    STATE_CHOICES = (
+        (STATE_REQUEST, "Request"),
+        (STATE_ACCEPT, "Accept"),
+        (STATE_CANCELED, "Canceled"),
+        (STATE_COMPLETED, "Completed"),
+    )
+
+    UPCOMING_BOOKING = 1
+    COMPLETED_BOOKING = 2
+
     slot_id = models.IntegerField()
     start_time = models.DateTimeField()
     end_time = models.DateTimeField()
     doctor_id = models.IntegerField()
-    state_id = models.IntegerField(default=2) # 2 = REQUEST, 3 = ACCEPT, 4 = CANCELLED, etc.
+    room_id = models.CharField(max_length=255, blank=True, default="")
+    state_id = models.IntegerField(choices=STATE_CHOICES, default=STATE_REQUEST)
     type_id = models.IntegerField(default=0)
     is_active = models.IntegerField(default=0)
-    
+    is_call_end = models.IntegerField(default=0)
+
     cancel_reason = models.CharField(max_length=255, null=True, blank=True)
+    complete_reason = models.CharField(max_length=255, null=True, blank=True)
     is_refunded = models.IntegerField(default=0)
-    
+
     doctor_reschedule = models.IntegerField(default=0)
     patient_reschedule = models.IntegerField(default=0)
     old_start_time = models.DateTimeField(null=True, blank=True)

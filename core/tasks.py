@@ -38,9 +38,9 @@ def send_booking_notification():
     logger.info("Running: send_booking_notification")
     cutoff_time = now() + timedelta(minutes=5)
     
-    # STATE_ACCEPT = 3
+    # STATE_ACCEPT — legacy PHP/iOS value
     bookings = SlotBooking.objects.filter(
-        state_id=3, 
+        state_id=SlotBooking.STATE_ACCEPT, 
         is_active=0, 
         start_time__lte=cutoff_time
     )
@@ -97,7 +97,7 @@ def auto_cancel_booking():
     cutoff_time = now() - timedelta(minutes=5)
     
     bookings = SlotBooking.objects.filter(
-        state_id=3, # STATE_ACCEPT
+        state_id=SlotBooking.STATE_ACCEPT,
         end_time__lte=cutoff_time
     )
 
@@ -105,13 +105,13 @@ def auto_cancel_booking():
         patient_call = Call.objects.filter(booking_id=booking.id, created_by_id=booking.created_by_id).first()
         
         if not patient_call:
-            booking.state_id = 5 # STATE_COMPLETED
+            booking.state_id = SlotBooking.STATE_COMPLETED
             booking.complete_reason = "User did not attend the video call"
             booking.save(update_fields=['state_id', 'complete_reason'])
         else:
             doctor_call = Call.objects.filter(booking_id=booking.id, created_by_id=booking.doctor_id).first()
             if not doctor_call:
-                booking.state_id = 4 # CANCELED
+                booking.state_id = SlotBooking.STATE_CANCELED
                 booking.cancel_reason = "Therapist did not attend the video call"
                 booking.is_refunded = 1
                 booking.save(update_fields=['state_id', 'cancel_reason', 'is_refunded'])
@@ -141,12 +141,12 @@ def cancel_pending_booking():
     cutoff_time = now() - timedelta(minutes=5)
     
     bookings = SlotBooking.objects.filter(
-        state_id=2, # STATE_REQUEST
+        state_id=SlotBooking.STATE_REQUEST,
         start_time__lte=cutoff_time
     )
 
     for booking in bookings:
-        booking.state_id = 4 # CANCELED
+        booking.state_id = SlotBooking.STATE_CANCELED
         booking.cancel_reason = "Therapist did not respond to the booking request"
         booking.is_refunded = 1
         booking.save(update_fields=['state_id', 'cancel_reason', 'is_refunded'])
@@ -176,12 +176,12 @@ def auto_complete_booking():
     cutoff_time = now() - timedelta(minutes=45)
     
     bookings = SlotBooking.objects.filter(
-        state_id=3, # ACCEPTED
+        state_id=SlotBooking.STATE_ACCEPT,
         end_time__lte=cutoff_time
     )
 
     for booking in bookings:
-        booking.state_id = 5 # STATE_COMPLETED
+        booking.state_id = SlotBooking.STATE_COMPLETED
         booking.complete_reason = "Auto completed after 45 minutes of booking end time."
         booking.save(update_fields=['state_id', 'complete_reason'])
         
@@ -198,20 +198,85 @@ def auto_complete_booking():
 def booking_reminder():
     """
     Legacy: SlotBooking::bookingReminder()
-    Finds bookings exactly 24 hours away and prints console logs instead of email queue.
+    Finds bookings 23h45m–24h15m away and sends 24-hour reminder emails
+    to both patient and therapist.
     """
     logger.info("Running: booking_reminder")
     target_start = now() + timedelta(hours=23, minutes=45)
     target_end = now() + timedelta(hours=24, minutes=15)
-    
+
     bookings = SlotBooking.objects.filter(
-        state_id__in=[2, 3], # REQUEST, ACCEPTED
+        state_id__in=[SlotBooking.STATE_REQUEST, SlotBooking.STATE_ACCEPT],
         start_time__gte=target_start,
         start_time__lte=target_end
     )
 
     for booking in bookings:
-        logger.info(f"[EMAIL QUEUE MOCK] Reminder sent to Patient ID {booking.created_by_id} and Doctor ID {booking.doctor_id} for Booking {booking.id}")
+        patient = None
+        doctor = None
+        try:
+            patient = User.objects.get(id=booking.created_by_id)
+        except User.DoesNotExist:
+            pass
+        try:
+            doctor = User.objects.get(id=booking.doctor_id)
+        except User.DoesNotExist:
+            pass
+
+        if not patient or not doctor:
+            logger.warning(f"booking_reminder: missing user for booking {booking.id}")
+            continue
+
+        session_date = booking.start_time.strftime('%B %d, %Y')
+        session_day = booking.start_time.strftime('%A')
+        start_str = booking.start_time.strftime('%I:%M %p')
+        end_str = booking.end_time.strftime('%I:%M %p')
+
+        from django.template.loader import render_to_string
+        from django.conf import settings
+        from core.email_service import get_email_client
+
+        # Patient reminder email
+        try:
+            html_body = render_to_string('emails/reminderPatient.html', {
+                'patient_name': getattr(patient, 'full_name', ''),
+                'therapist_name': getattr(doctor, 'full_name', ''),
+                'session_date': session_date,
+                'session_day': session_day,
+                'session_start_time': start_str,
+                'session_end_time': end_str,
+            })
+            subject = 'Reminder: Your video session is tomorrow!'
+            get_email_client().send_email(
+                subject=subject,
+                body=html_body,
+                to_email=patient.email,
+                html_body=html_body,
+            )
+            logger.info(f"booking_reminder: sent patient reminder for booking {booking.id}")
+        except Exception:
+            logger.exception(f"booking_reminder: failed to send patient email for booking {booking.id}")
+
+        # Therapist reminder email
+        try:
+            html_body = render_to_string('emails/reminderDoctor.html', {
+                'therapist_name': getattr(doctor, 'full_name', ''),
+                'patient_name': getattr(patient, 'full_name', ''),
+                'session_date': session_date,
+                'session_day': session_day,
+                'session_start_time': start_str,
+                'session_end_time': end_str,
+            })
+            subject = 'Reminder: You have a video session tomorrow!'
+            get_email_client().send_email(
+                subject=subject,
+                body=html_body,
+                to_email=doctor.email,
+                html_body=html_body,
+            )
+            logger.info(f"booking_reminder: sent doctor reminder for booking {booking.id}")
+        except Exception:
+            logger.exception(f"booking_reminder: failed to send doctor email for booking {booking.id}")
 
 
 # ==========================================

@@ -208,7 +208,7 @@ class GetDoctorSlotView(APIView):
             doctor_id=doctor_id,
             start_time__gte=start_time,
             start_time__lte=end_time
-        ).exclude(state_id=4).values_list('slot_id', flat=True) # STATE_CANCELED = 4 (or similar in mapping)
+        ).exclude(state_id=SlotBooking.STATE_CANCELED).values_list('slot_id', flat=True)
 
         available_slots = set(doctor_slots) - set(booked_slots)
 
@@ -228,10 +228,16 @@ class BookingView(APIView):
 
     def post(self, request):
         patient = request.user
-        slot_id = request.data.get('slot_id')
-        start_time = request.data.get('start_time')
-        end_time = request.data.get('end_time')
-        doctor_id = request.data.get('doctor_id')
+        slot_id = request.data.get('slot_id') or request.data.get('SlotBooking[slot_id]')
+        start_time = request.data.get('start_time') or request.data.get('SlotBooking[start_time]')
+        end_time = request.data.get('end_time') or request.data.get('SlotBooking[end_time]')
+        doctor_id = request.data.get('doctor_id') or request.data.get('SlotBooking[doctor_id]')
+        room_id = request.data.get('room_id') or request.data.get('SlotBooking[room_id]') or ""
+
+        if not slot_id or not start_time or not end_time or not doctor_id:
+            logger.warning("[BookingView Abort] Missing parameters: slot_id=%s doctor_id=%s start_time=%s end_time=%s", slot_id, doctor_id, start_time, end_time)
+            return Response({"error": "Missing slot booking parameters."}, status=status.HTTP_400_BAD_REQUEST)
+
 
         # Check if already booked
         exists = SlotBooking.objects.filter(
@@ -239,7 +245,7 @@ class BookingView(APIView):
             start_time=start_time,
             end_time=end_time,
             doctor_id=doctor_id,
-            state_id__in=[1, 2] # STATE_REQUEST, STATE_ACCEPT
+            state_id__in=[SlotBooking.STATE_REQUEST, SlotBooking.STATE_ACCEPT]
         ).exists()
 
         if exists:
@@ -252,7 +258,10 @@ class BookingView(APIView):
             end_date__gte=timezone.now()
         ).exists()
 
-        video_credits = getattr(patient, 'video_credit', 0)
+        try:
+            video_credits = int(getattr(patient, 'video_credit', 0) or 0)
+        except (ValueError, TypeError):
+            video_credits = 0
         
         # Logic mapped from PHP: If not subscribed and no credits, block.
         if not has_active_subscription and video_credits <= 0:
@@ -267,11 +276,12 @@ class BookingView(APIView):
                 type_id = 0
                 
                 # Priority 1: User's video_credit
-                if patient.video_credit > 0:
-                     patient.video_credit -= 1 # User::ONE_VIDEO_CREDIT
+                if video_credits > 0:
+                     patient.video_credit = video_credits - 1
                      patient.save(update_fields=['video_credit'])
-                     type_id = 1 # SlotBooking::TYPE_BY_VIDEO_PLAN (assumed mapping)
+                     type_id = 1 # SlotBooking::TYPE_BY_VIDEO_PLAN
                      deducted = True
+
                 
                 # Priority 2: SubscribedPlan's video session
                 if not deducted:
@@ -288,15 +298,22 @@ class BookingView(APIView):
                 if not deducted:
                      return Response({"error": "Not enough video credits for booking."}, status=status.HTTP_400_BAD_REQUEST)
 
+                # Clients send room_id; fall back to the same scheme they use
+                # ({patient}_{doctor}_{slot}) so the Agora channel is never empty.
+                final_room_id = (room_id or "").strip()
+                if not final_room_id:
+                    final_room_id = f"{patient.id}_{doctor_id}_{slot_id}"
+
                 booking = SlotBooking.objects.create(
                     slot_id=slot_id,
                     start_time=start_time,
                     end_time=end_time,
                     doctor_id=doctor_id,
                     created_by=patient,
-                    state_id=2, # STATE_REQUEST
+                    state_id=SlotBooking.STATE_REQUEST,
                     type_id=type_id,
-                    is_active=0 # IS_ROOM_ACTIVE_NO
+                    is_active=0, # IS_ROOM_ACTIVE_NO
+                    room_id=final_room_id,
                 )
 
                 # Notifications...
@@ -331,12 +348,40 @@ class DoctorBookingListView(generics.ListAPIView):
     def get_queryset(self):
         start_time = self.request.query_params.get('start_time')
         end_time = self.request.query_params.get('end_time')
-        # STATE_REQUEST = usually 2, we filter out requests
-        return SlotBooking.objects.filter(
-            doctor_id=self.request.user.id,
-            start_time__gte=start_time,
-            start_time__lte=end_time
-        ).exclude(state_id=2).order_by('-id')
+        # Exclude pending requests from the doctor's schedule list (legacy PHP).
+        qs = SlotBooking.objects.filter(doctor_id=self.request.user.id)
+        if start_time and end_time:
+            qs = qs.filter(start_time__gte=start_time, start_time__lte=end_time)
+        return qs.exclude(state_id=SlotBooking.STATE_REQUEST).order_by('-id')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        try:
+            page_num = int(request.query_params.get('page') or 1)
+        except (ValueError, TypeError):
+            page_num = 1
+        per_page = 20
+        total_count = queryset.count()
+        page_count = (total_count + per_page - 1) // per_page if total_count > 0 else 0
+
+        page = self.paginate_queryset(queryset)
+        data = self.get_serializer(page if page is not None else queryset, many=True).data
+
+        return Response({
+            "list": data,
+            "_meta": {
+                "totalCount": total_count,
+                "pageCount": page_count,
+                "currentPage": page_num,
+                "perPage": per_page,
+            },
+            "_links": {
+                "self": {
+                    "href": request.build_absolute_uri()
+                }
+            }
+        }, status=status.HTTP_200_OK)
+
 
 class PatientBookingListView(generics.ListAPIView):
     permission_classes = (IsAuthenticated,)
@@ -356,20 +401,49 @@ class PatientBookingListView(generics.ListAPIView):
         )
 
         qs = SlotBooking.objects.filter(created_by_id=patient_id, doctor_id=doctor_id)
-        if str(b_type) == '1': # UPCOMING
-            qs = qs.filter(state_id__in=[2, 3]) # REQUEST, ACCEPT
-        elif str(b_type) == '2': # COMPLETED
-            qs = qs.filter(state_id__in=[4, 5]) # CANCELLED, COMPLETED
+        if str(b_type) == str(SlotBooking.UPCOMING_BOOKING):
+            qs = qs.filter(state_id__in=[SlotBooking.STATE_REQUEST, SlotBooking.STATE_ACCEPT])
+        elif str(b_type) == str(SlotBooking.COMPLETED_BOOKING):
+            qs = qs.filter(state_id__in=[SlotBooking.STATE_COMPLETED, SlotBooking.STATE_CANCELED])
         return qs.order_by('-id')
 
     def list(self, request, *args, **kwargs):
-        response = super().list(request, *args, **kwargs)
-        logger.info(
-            "PatientBookingListView response: status_code=%s, data=%s",
-            response.status_code,
-            response.data
-        )
-        return response
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        try:
+            page_num = int(request.query_params.get('page') or 1)
+        except (ValueError, TypeError):
+            page_num = 1
+            
+        per_page = 20
+        total_count = queryset.count()
+        page_count = (total_count + per_page - 1) // per_page if total_count > 0 else 0
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            data = serializer.data
+        else:
+            serializer = self.get_serializer(queryset, many=True)
+            data = serializer.data
+
+        logger.info("PatientBookingListView response: status_code=200, count=%d", total_count)
+
+        return Response({
+            "list": data,
+            "_meta": {
+                "totalCount": total_count,
+                "pageCount": page_count,
+                "currentPage": page_num,
+                "perPage": per_page,
+            },
+            "_links": {
+                "self": {
+                    "href": request.build_absolute_uri()
+                }
+            }
+        }, status=status.HTTP_200_OK)
+
 
 class DoctorBookingReqView(generics.ListAPIView):
     permission_classes = (IsAuthenticated,)
@@ -379,7 +453,39 @@ class DoctorBookingReqView(generics.ListAPIView):
         # Mark notifications read
         Notification.objects.filter(to_user_id=self.request.user.id).update(is_read=1)
         
-        return SlotBooking.objects.filter(doctor_id=self.request.user.id, state_id__in=[2]).order_by('id')
+        return SlotBooking.objects.filter(
+            doctor_id=self.request.user.id,
+            state_id=SlotBooking.STATE_REQUEST,
+        ).order_by('id')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        try:
+            page_num = int(request.query_params.get('page') or 1)
+        except (ValueError, TypeError):
+            page_num = 1
+        per_page = 20
+        total_count = queryset.count()
+        page_count = (total_count + per_page - 1) // per_page if total_count > 0 else 0
+
+        page = self.paginate_queryset(queryset)
+        data = self.get_serializer(page if page is not None else queryset, many=True).data
+
+        return Response({
+            "list": data,
+            "_meta": {
+                "totalCount": total_count,
+                "pageCount": page_count,
+                "currentPage": page_num,
+                "perPage": per_page,
+            },
+            "_links": {
+                "self": {
+                    "href": request.build_absolute_uri()
+                }
+            }
+        }, status=status.HTTP_200_OK)
+
 
 class NotificationCountView(APIView):
     permission_classes = (IsAuthenticated,)
@@ -395,17 +501,37 @@ class NotificationCountView(APIView):
 class AcceptBookingView(APIView):
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request, booking_id=None):
-        booking_id = booking_id or request.data.get("booking_id") or request.query_params.get("booking_id")
+    def _handle_accept(self, request, booking_id=None):
+        booking_id = booking_id or request.query_params.get("booking_id") or request.data.get("booking_id")
         if not booking_id:
             return Response({"error": "booking_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             booking = SlotBooking.objects.get(id=booking_id)
-            booking.state_id = 3 # ACCEPT
-            booking.save()
+            booking.state_id = SlotBooking.STATE_ACCEPT
+            booking.save(update_fields=['state_id'])
+
+            # Send Notification & Push (matching PHP SlotController 608-615)
+            user = request.user
+            doc_name = getattr(user, "first_name", "") or getattr(user, "full_name", "") or "Doctor"
+            msg = f"{doc_name} confirmed your request for"
+            
+            Notification.objects.create(
+                html=msg,
+                title=msg,
+                to_user_id=booking.created_by_id,
+                created_by=user,
+                model_type='SlotBooking'
+            )
             return Response({"message": "Booking accepted successfully"}, status=status.HTTP_200_OK)
         except SlotBooking.DoesNotExist:
             return Response({"error": "No Booking found"}, status=status.HTTP_400_BAD_REQUEST)
+
+    def get(self, request, booking_id=None):
+        return self._handle_accept(request, booking_id)
+
+    def post(self, request, booking_id=None):
+        return self._handle_accept(request, booking_id)
+
 
 class DoctorRescheduleView(APIView):
     permission_classes = (IsAuthenticated,)
@@ -427,7 +553,7 @@ class DoctorRescheduleView(APIView):
             # Load new times from post
             booking.start_time = request.data.get('start_time', booking.start_time)
             booking.end_time = request.data.get('end_time', booking.end_time)
-            booking.state_id = 3 # STATE_ACCEPT
+            booking.state_id = SlotBooking.STATE_ACCEPT
             booking.doctor_reschedule = 1 # YES
             
             booking.save()
@@ -462,10 +588,10 @@ class DoctorCancelView(APIView):
         try:
             with transaction.atomic():
                 booking = SlotBooking.objects.select_for_update().get(id=booking_id, doctor_id=doctor.id)
-                if booking.state_id == 4: # STATE_CANCELED
+                if booking.state_id == SlotBooking.STATE_CANCELED:
                      return Response({"error": "Booking is already canceled."}, status=status.HTTP_400_BAD_REQUEST)
                 
-                booking.state_id = 4 # CANCELED
+                booking.state_id = SlotBooking.STATE_CANCELED
                 booking.is_refunded = 1 # YES
                 booking.cancel_reason = "Therapist canceled the video session"
                 booking.save()
@@ -506,7 +632,6 @@ class DoctorCancelView(APIView):
                     "Session cancelled by therapist",
                     msg,
                 )
-
                 return Response({
                     "message": "Booking canceled successfully.",
                     "details": SlotBookingSerializer(booking).data
@@ -514,12 +639,14 @@ class DoctorCancelView(APIView):
         except SlotBooking.DoesNotExist:
             return Response({"error": "No booking found."}, status=status.HTTP_400_BAD_REQUEST)
 
+
+
 class PatientRescheduleView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, booking_id=None):
         user = request.user
-        booking_id = booking_id or request.data.get("booking_id") or request.query_params.get("booking_id")
+        booking_id = booking_id or request.query_params.get("booking_id") or request.data.get("booking_id")
         if not booking_id:
             return Response({"error": "booking_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         try:
@@ -530,8 +657,10 @@ class PatientRescheduleView(APIView):
         if booking.patient_reschedule == 1:
             return Response({"error": "You have already rescheduled the booking once."}, status=status.HTTP_400_BAD_REQUEST)
 
-        start_time = request.data.get("start_time")
-        end_time = request.data.get("end_time")
+        start_time = request.data.get("start_time") or request.data.get("SlotBooking[start_time]")
+        end_time = request.data.get("end_time") or request.data.get("SlotBooking[end_time]")
+        slot_id = request.data.get("slot_id") or request.data.get("SlotBooking[slot_id]")
+
         if not start_time or not end_time:
             return Response({"error": "Data not posted."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -539,11 +668,15 @@ class PatientRescheduleView(APIView):
         booking.old_end_time = booking.end_time
         booking.start_time = start_time
         booking.end_time = end_time
-        booking.state_id = 3  # STATE_ACCEPT
+        if slot_id:
+            booking.slot_id = slot_id
+        booking.state_id = SlotBooking.STATE_ACCEPT
         booking.patient_reschedule = 1  # YES
         booking.save()
 
-        message = f"{user.full_name} has rescheduled your video session to"
+
+        patient_name = getattr(user, "full_name", "") or getattr(user, "first_name", "") or "Patient"
+        message = f"{patient_name} has rescheduled your video session to"
         Notification.objects.create(
             to_user_id=booking.doctor_id,
             created_by=user,
@@ -551,19 +684,14 @@ class PatientRescheduleView(APIView):
             html=message,
             model_type="SlotBooking",
         )
-        doctor_user = User.objects.filter(id=booking.doctor_id).first()
-        send_event_email(
-            getattr(doctor_user, "email", ""),
-            "Session rescheduled by patient",
-            message,
-        )
         return Response(
             {
-                "details": SlotBookingSerializer(booking).data,
-                "message": "Booking reschedule successfully.",
+                "message": "Booking rescheduled successfully.",
+                "details": SlotBookingSerializer(booking).data
             },
             status=status.HTTP_200_OK,
         )
+
 
 class ConfirmRescheduleView(APIView):
     permission_classes = (IsAuthenticated,)

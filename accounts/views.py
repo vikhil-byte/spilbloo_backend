@@ -260,10 +260,10 @@ def _legacy_user_detail(user):
                 "plan_id": plan_obj.plan_id or "",
                 "title": plan_obj.title or "",
                 "description": plan_obj.description or "",
-                "video_description": "",
+                "video_description": getattr(plan_obj, "video_description", "") or "",
                 "no_of_video_session": plan_obj.no_of_video_session or 0,
                 "no_of_free_trial_days": plan_obj.no_of_free_trial_days or 0,
-                "discounted_price": str(plan_obj.total_price or "0"),
+                "discounted_price": str(getattr(plan_obj, "discounted_price", plan_obj.total_price) or "0"),
                 "discounted_price_calculated": int(round(total_price)),
                 "total_price": str(plan_obj.total_price or "0"),
                 "tax_price": str(plan_obj.tax_price or "0"),
@@ -272,22 +272,46 @@ def _legacy_user_detail(user):
                 "weekly_price": "{:.2f}".format(weekly_price) if weekly_price else "0",
                 "is_recommended": plan_obj.is_recommended or 0,
                 "plan_type": plan_obj.plan_type if plan_obj.plan_type is not None else 0,
-
                 "duration": plan_obj.duration or 30,
                 "currency_code": plan_obj.currency_code or "INR",
                 "company_name": "",
             }
 
+        start_dt = active_paid_subscription.start_date.strftime("%Y-%m-%d %H:%M:%S") if active_paid_subscription.start_date else ""
+        end_dt = active_paid_subscription.end_date.strftime("%Y-%m-%d %H:%M:%S") if active_paid_subscription.end_date else ""
+        renewal_dt = active_paid_subscription.renewal_date.strftime("%Y-%m-%d %H:%M:%S") if active_paid_subscription.renewal_date else ""
+        created_on_sub_str = active_paid_subscription.created_on.strftime("%Y-%m-%d %H:%M:%S") if getattr(active_paid_subscription, "created_on", None) else ""
+
         subscribed_plan = {
             "id": active_paid_subscription.id,
+            "plan_id": plan_obj.id if plan_obj else 0,
+            "start_date": start_dt,
+            "rezorpay_start_time": start_dt,
+            "trail_end_time": start_dt,
+            "end_date": end_dt,
+            "renewal_date": renewal_dt,
             "state_id": active_paid_subscription.state_id,
             "upcoming_state": active_paid_subscription.upcoming_state or 0,
-            "plan_id": plan_obj.id if plan_obj else 0,
-            "renewal_date": active_paid_subscription.renewal_date.isoformat() if active_paid_subscription.renewal_date else "",
-            "start_date": active_paid_subscription.start_date.isoformat() if active_paid_subscription.start_date else "",
-            "end_date": active_paid_subscription.end_date.isoformat() if active_paid_subscription.end_date else "",
+            "type_id": getattr(active_paid_subscription, "type_id", 0) or 0,
+            "upcoming_plan_id": getattr(active_paid_subscription, "upcoming_plan_id", 0) or (plan_obj.id if plan_obj else 0),
+            "upcoming_plan_video_credit": getattr(active_paid_subscription, "no_of_video_session", 0) or (plan_obj.no_of_video_session if plan_obj else 0),
+            "created_on": created_on_sub_str,
+            "no_of_video_session": getattr(active_paid_subscription, "no_of_video_session", 0) or (plan_obj.no_of_video_session if plan_obj else 0),
+            "is_doctor_changed": 0,
+            "created_by_id": user.id,
+            "plan_type": active_paid_subscription.plan_type if active_paid_subscription.plan_type is not None else 0,
+            "incentive_days": getattr(active_paid_subscription, "incentive_days", 0) or 0,
+            "company_coupon_type": 0,
+            "company_name": "",
             "plan_detail": plan_detail,
         }
+    else:
+        subscribed_plan = {
+            "plan_detail": {
+                "plan_type": 0
+            }
+        }
+
 
     # Fetch user symptoms
     user_symptoms_qs = UserSymptom.objects.filter(created_by=user, state_id=1).select_related('symptom')
@@ -333,9 +357,15 @@ def _legacy_user_detail(user):
         "is_ios_app_update": False,
         "is_subscribed_user": SubscribedPlan.objects.filter(created_by=user).exclude(state_id=SubscribedPlan.STATE_CREATED).exists(),
         "is_buy_subscripion": SubscribedPlan.objects.filter(created_by=user, state_id=SubscribedPlan.STATE_ACTIVE).exists(),
+        "is_buy_subscription": SubscribedPlan.objects.filter(created_by=user, state_id=SubscribedPlan.STATE_ACTIVE).exists(),
         "is_buy_video_credits": SubscribedVideo.objects.filter(created_by=user, state_id=1).exists(),
-        "video_credits": getattr(user, "video_credit", 0) or 0,
+        "video_credits": _safe_str(getattr(user, "video_credit", "0") or "0"),
+
         "subscribed_plan": subscribed_plan or {},
+
+        "upcoming_plan": {},
+        "video_credit_plan": {},
+
 
 
         "language": getattr(user, "language", "") or "",
