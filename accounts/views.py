@@ -12,8 +12,7 @@ from .serializers import UserSerializer, RegisterSerializer, CustomTokenObtainPa
 from .models import HaLogins
 from core.models import (
     ContactForm, LoginHistory, Symptom, UserSymptom, AgeGroup, 
-    AssignedTherapist, Page, Faq, Category, ApiAccessToken, SubscribedVideo, Setting,
-    TherapistEarning,
+    AssignedTherapist, Page, Faq, Category, ApiAccessToken, SubscribedVideo, Setting
 )
 
 from availability.models import Notification
@@ -21,12 +20,9 @@ from core.serializers import (
     SymptomSerializer, PageSerializer, FaqSerializer, FaqCategorySerializer, TherapistEarningSerializer
 )
 from django.db import transaction
-from django.db.models import Case, When, F, Q, Prefetch, Sum
-from django.db import models
+from django.db.models import Case, When, F, Q, Prefetch
 import random
 import logging
-import calendar
-from datetime import date, datetime
 from django.utils import timezone
 from django.contrib.auth import authenticate
 from django.core.cache import cache
@@ -595,22 +591,6 @@ class VerifyOtpView(APIView):
                 state_id=1, # STATE_SUCCESS
                 type_id=1 # TYPE_API
             )
-
-            # PHP User::sendRegistrationMailtoAdmin — notify admins of new verified user
-            try:
-                from availability.views import send_html_email_to_admins
-                send_html_email_to_admins(
-                    "New User Registered",
-                    "newUserAdmin.html",
-                    {
-                        "full_name": getattr(user, "full_name", "") or "",
-                        "email": getattr(user, "email", "") or "",
-                        "phone": getattr(user, "contact_no", "") or getattr(user, "mobile", "") or "",
-                        "role": user.get_role_id_display() if hasattr(user, "get_role_id_display") else str(user.role_id),
-                    },
-                )
-            except Exception:
-                logger.exception("newUserAdmin email failed for user_id=%s", user.id)
 
             return Response({
                 "message": "Your account successfully verified!",
@@ -1391,23 +1371,7 @@ class AssignDoctorView(APIView):
                         old_assign.changed_on = timezone.now()
                         old_assign.state_id = 2 # STATE_CHANGED
                         old_assign.save()
-                        # PHP AssignedTherapist::sendPatientLeaveMailToDoctor
-                        old_doctor = old_assign.therapist
-                        if old_doctor and old_doctor.email:
-                            try:
-                                from availability.views import send_html_email
-                                send_html_email(
-                                    old_doctor.email,
-                                    "Therapist Change",
-                                    "doctorChanged.html",
-                                    {
-                                        "therapist_name": getattr(old_doctor, "full_name", ""),
-                                        "patient_name": getattr(patient, "full_name", ""),
-                                        "changed_on_date": old_assign.changed_on.strftime("%B %d, %Y") if hasattr(old_assign.changed_on, "strftime") else str(old_assign.changed_on),
-                                    },
-                                )
-                            except Exception:
-                                logger.exception("doctorChanged email failed for old_doctor_id=%s", old_doctor.id)
+                        # old_assign.sendPatientLeaveMailToDoctor()
 
                 # Record new therapist
                 new_assign = AssignedTherapist.objects.create(
@@ -1437,26 +1401,6 @@ class AssignDoctorView(APIView):
                     to_user_id=doctor.id,
                     created_by_id=patient.id,
                 )
-
-                # PHP AssignedTherapist::sendNewPatientMailToDoctor
-                try:
-                    from availability.views import send_html_email
-                    from core.models import UserSymptom
-                    symptom_names = []
-                    for us in UserSymptom.objects.filter(user=patient).select_related("symptom"):
-                        symptom_names.append(us.symptom.title)
-                    send_html_email(
-                        doctor.email,
-                        "New User Assigned",
-                        "newPatient.html",
-                        {
-                            "therapist_name": getattr(doctor, "full_name", ""),
-                            "patient_name": getattr(patient, "full_name", ""),
-                            "symptoms": symptom_names,
-                        },
-                    )
-                except Exception:
-                    logger.exception("newPatient email failed for doctor_id=%s", doctor.id)
 
             return Response({"message": "Therapist assigned successfully."}, status=status.HTTP_200_OK)
         except Exception:
@@ -1533,20 +1477,6 @@ class AssignVideoDoctorView(APIView):
                             upcoming_state=1,
                             created_by=patient,
                         )
-                        # PHP SubscribedPlan::sendFreeSubscriptionMailtoUser
-                        try:
-                            from availability.views import send_html_email
-                            send_html_email(
-                                patient.email,
-                                "Free Trial Activated",
-                                "newFreePlan.html",
-                                {
-                                    "start_date": start_date.strftime("%B %d, %Y") if hasattr(start_date, "strftime") else str(start_date),
-                                    "end_date": end_date.strftime("%B %d, %Y") if hasattr(end_date, "strftime") else str(end_date),
-                                },
-                            )
-                        except Exception:
-                            logger.exception("newFreePlan email failed for user_id=%s", patient.id)
 
                     msg = "Tap here to send them your introduction message"
                     Notification.objects.create(
@@ -1555,26 +1485,6 @@ class AssignVideoDoctorView(APIView):
                         to_user_id=doctor.id,
                         created_by_id=patient.id,
                     )
-                    # PHP AssignedTherapist::sendNewPatientMailToDoctor
-                    try:
-                        from availability.views import send_html_email
-                        from core.models import UserSymptom
-                        symptom_names = [
-                            us.symptom.title
-                            for us in UserSymptom.objects.filter(user=patient).select_related("symptom")
-                        ]
-                        send_html_email(
-                            doctor.email,
-                            "New User Assigned",
-                            "newPatient.html",
-                            {
-                                "therapist_name": getattr(doctor, "full_name", ""),
-                                "patient_name": getattr(patient, "full_name", ""),
-                                "symptoms": symptom_names,
-                            },
-                        )
-                    except Exception:
-                        logger.exception("newPatient email failed for doctor_id=%s", doctor.id)
             
             return Response({
                 "message": "Therapist assigned successfully.",
@@ -1651,238 +1561,22 @@ class SocialLoginView(APIView):
             return Response({"error": "Unable to process social login."}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# ---------------------------------------------------------------------------
-# Therapist earnings helpers — mirror PHP User::getEarning / getMonthlyData /
-# getTotalEarning / getPlanDoctorPrice / getEstimatedDoctorPrice /
-# getTotalDoctorPrice / getUpcomingEstimatedDoctorPrice logic exactly.
-# ---------------------------------------------------------------------------
-
-_PLAN_MIN_COUNT = 0  # PHP Plan::MIN_COUNT
-
-
-def _active_subscribed_plan(patient_id):
-    """Return the patient's most recent active SubscribedPlan or None.
-
-    PHP orders by 'created_on DESC' in getPlanDoctorPrice and by 'id DESC' in
-    the estimated variants — we match each caller individually.
-    """
-    return SubscribedPlan.objects.filter(
-        created_by_id=patient_id, state_id=SubscribedPlan.STATE_ACTIVE
-    ).order_by('-created_on').first()
-
-
-def _active_subscribed_plan_by_id(patient_id):
-    return SubscribedPlan.objects.filter(
-        created_by_id=patient_id, state_id=SubscribedPlan.STATE_ACTIVE
-    ).order_by('-id').first()
-
-
-def _per_day_earning(plan_model):
-    """doctor_price / duration — the daily therapist payout for a plan."""
-    if not plan_model or not plan_model.plan:
-        return 0.0
-    try:
-        doctor_price = float(plan_model.plan.doctor_price or 0)
-        duration = int(plan_model.plan.duration or 0)
-    except (TypeError, ValueError):
-        return 0.0
-    if duration <= 0:
-        return 0.0
-    return doctor_price / duration
-
-
-def _get_plan_doctor_price(patient_id):
-    """PHP User::getPlanDoctorPrice — per-day earning formatted to 2 decimals."""
-    plan_model = _active_subscribed_plan(patient_id)
-    if not plan_model:
-        return 0.0
-    return round(_per_day_earning(plan_model), 2)
-
-
-def _get_days_between(end_date, start_date):
-    """PHP User::getDays — signed day difference (end - start)."""
-    if not end_date or not start_date:
-        return 0
-    if isinstance(end_date, datetime):
-        end_date = end_date.date()
-    if isinstance(start_date, datetime):
-        start_date = start_date.date()
-    try:
-        return (end_date - start_date).days
-    except TypeError:
-        return 0
-
-
-def _get_upcoming_days(end_date, start_date):
-    """PHP User::getUpcomingDays — day difference + 1."""
-    return _get_days_between(end_date, start_date) + 1
-
-
-def _get_estimated_doctor_price(patient_id, pending_days):
-    """PHP User::getEstimatedDoctorPrice — estimated earning for remaining
-    days of the current month, capped by plan end date."""
-    plan_model = _active_subscribed_plan_by_id(patient_id)
-    if not plan_model:
-        return 0.0
-    current_date = timezone.now().date()
-    day_diff = _get_days_between(plan_model.end_date, current_date)
-    if day_diff > _PLAN_MIN_COUNT:
-        if day_diff < pending_days:
-            pending_days = day_diff
-    else:
-        pending_days = _PLAN_MIN_COUNT
-    one_day = _per_day_earning(plan_model)
-    return one_day * pending_days
-
-
-def _get_total_doctor_price(patient_id):
-    """PHP User::getTotalDoctorPrice — total estimated future earning for a
-    patient based on remaining plan days (not capped by month length)."""
-    plan_model = _active_subscribed_plan_by_id(patient_id)
-    if not plan_model:
-        return 0.0
-    current_date = timezone.now().date()
-    day_diff = _get_days_between(plan_model.end_date, current_date)
-    if day_diff > _PLAN_MIN_COUNT:
-        pending_days = day_diff
-    else:
-        pending_days = _PLAN_MIN_COUNT
-    one_day = _per_day_earning(plan_model)
-    return one_day * pending_days
-
-
-def _get_upcoming_estimated_doctor_price(patient_id, pending_days, month_start_date):
-    """PHP User::getUpcomingEstimatedDoctorPrice — estimated earning for a
-    future month, capped by plan end date relative to month start."""
-    plan_model = _active_subscribed_plan_by_id(patient_id)
-    if not plan_model:
-        return 0.0
-    day_diff = _get_upcoming_days(plan_model.end_date, month_start_date)
-    if day_diff > _PLAN_MIN_COUNT:
-        if day_diff < pending_days:
-            pending_days = day_diff
-    else:
-        pending_days = _PLAN_MIN_COUNT
-    one_day = _per_day_earning(plan_model)
-    return one_day * pending_days
-
-
-def _assigned_patient_ids(therapist_id):
-    """Patient IDs assigned to a therapist (state_id = STATE_ASSIGNED)."""
-    return AssignedTherapist.objects.filter(
-        therapist_id=therapist_id, state_id=AssignedTherapist.STATE_ASSIGNED
-    ).values_list('created_by_id', flat=True)
-
-
-def _get_monthly_data(year, join_year, user):
-    """PHP User::getMonthlyData — list of {month, amount} for a single year.
-
-    Includes estimated future earnings for the current month and upcoming
-    months/years based on active subscription plans of assigned patients.
-    """
-    today = timezone.now().date()
-    arr = []
-    join_month = user.created_on.month if user.created_on else 1
-    start_month = join_month if year == join_year else 1
-
-    for month in range(start_month, 13):
-        month_name = date(year, month, 1).strftime('%B')
-        # Sum recorded TherapistEarning for this therapist/month/year.
-        exist_earnings = TherapistEarning.objects.filter(
-            therapist=user,
-            state_id=TherapistEarning.STATE_ACTIVE,
-            date__year=year,
-            date__month=month,
-        ).aggregate(total=models.Sum('amount'))['total'] or 0
-        try:
-            exist_earnings = float(exist_earnings)
-        except (TypeError, ValueError):
-            exist_earnings = 0.0
-
-        therapist_earnings = 0.0
-
-        if today.year == year and today.month == month:
-            # Current month — add estimate for remaining days.
-            days_in_month = calendar.monthrange(year, month)[1]
-            pending_days = days_in_month - today.day
-            patient_earnings = 0.0
-            for pid in _assigned_patient_ids(user.id):
-                if pid:
-                    patient_earnings += _get_estimated_doctor_price(pid, pending_days)
-            therapist_earnings = exist_earnings + patient_earnings
-
-        elif today.year == year and today.month < month:
-            # Future month in current year — full month estimate.
-            days_in_month = calendar.monthrange(year, month)[1]
-            month_start_date = date(year, month, 1)
-            patient_earnings = 0.0
-            for pid in _assigned_patient_ids(user.id):
-                if pid:
-                    patient_earnings += _get_upcoming_estimated_doctor_price(
-                        pid, days_in_month, month_start_date
-                    )
-            therapist_earnings = exist_earnings + patient_earnings
-
-        elif today.year < year:
-            # Future year — full month estimate.
-            days_in_month = calendar.monthrange(year, month)[1]
-            month_start_date = date(year, month, 1)
-            patient_earnings = 0.0
-            for pid in _assigned_patient_ids(user.id):
-                if pid:
-                    patient_earnings += _get_upcoming_estimated_doctor_price(
-                        pid, days_in_month, month_start_date
-                    )
-            therapist_earnings = exist_earnings + patient_earnings
-
-        else:
-            # Past month — recorded earnings only.
-            therapist_earnings = exist_earnings
-
-        amount_str = "{:.2f}".format(therapist_earnings) if therapist_earnings else "00.00"
-        arr.append({"month": month_name, "amount": amount_str})
-
-    return arr
-
-
 class EarningsView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request):
         user = request.user
         if int(user.role_id) != User.ROLE_DOCTER:
-            return Response({"error": "Only therapists have earnings."}, status=status.HTTP_403_FORBIDDEN)
-
-        today = timezone.now().date()
-        join_year = user.created_on.year if user.created_on else today.year
-
-        # Build nested [{year, value: [{month, amount}]}] from join_year → today.
-        year_list = []
-        for year in range(join_year, today.year + 1):
-            year_list.append({
-                "year": str(year),
-                "value": _get_monthly_data(year, join_year, user),
-            })
-
-        # Total earning = recorded sum + estimated future for assigned patients.
-        exist_earnings = TherapistEarning.objects.filter(
-            therapist=user, state_id=TherapistEarning.STATE_ACTIVE
-        ).aggregate(total=models.Sum('amount'))['total'] or 0
-        try:
-            exist_earnings = float(exist_earnings)
-        except (TypeError, ValueError):
-            exist_earnings = 0.0
-
-        patient_earnings = 0.0
-        for pid in _assigned_patient_ids(user.id):
-            if pid:
-                patient_earnings += _get_total_doctor_price(pid)
-
-        total_earning = exist_earnings + patient_earnings
-
+             return Response({"error": "Only therapists have earnings."}, status=status.HTTP_403_FORBIDDEN)
+             
+        earnings = TherapistEarning.objects.filter(therapist=user, state_id=1).order_by('-date')
+        
+        total_earning = sum([float(e.amount or 0) for e in earnings])
+        
+        # Pagination simplified
         return Response({
             "total_earning": "{:.2f}".format(total_earning),
-            "list": year_list,
+            "list": TherapistEarningSerializer(earnings[:50], many=True).data
         }, status=status.HTTP_200_OK)
 
 

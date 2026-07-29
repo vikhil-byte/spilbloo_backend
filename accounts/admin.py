@@ -3,15 +3,20 @@ from django import forms
 from .models import User, HaLogins
 
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from django.contrib.auth.forms import UserChangeForm, UserCreationForm
+from django.contrib.auth.forms import UserChangeForm
+
 
 class CustomUserCreationForm(forms.ModelForm):
     password = forms.CharField(widget=forms.PasswordInput, label="Password")
-    password_2 = forms.CharField(widget=forms.PasswordInput, label="Password confirmation", help_text="Enter the same password as above, for verification.")
+    password_2 = forms.CharField(
+        widget=forms.PasswordInput,
+        label="Password confirmation",
+        help_text="Enter the same password as above, for verification.",
+    )
 
     class Meta:
         model = User
-        fields = ('email',)
+        fields = ("email",)
 
     def clean_password_2(self):
         password = self.cleaned_data.get("password")
@@ -27,41 +32,213 @@ class CustomUserCreationForm(forms.ModelForm):
             user.save()
         return user
 
+
 class CustomUserChangeForm(UserChangeForm):
     class Meta:
         model = User
-        fields = '__all__'
+        fields = "__all__"
+
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
     form = CustomUserChangeForm
     add_form = CustomUserCreationForm
-    
-    list_display = ('id', 'email', 'full_name', 'role_id', 'current_subscription', 'is_active', 'is_staff', 'date_joined')
-    list_filter = ('is_active', 'is_staff', 'is_superuser', 'role_id', 'state_id')
-    search_fields = ('email', 'full_name', 'contact_no')
-    ordering = ('-date_joined',)
-    readonly_fields = ('date_joined', 'last_login', 'current_subscription')
 
-    # Exposes fields in clean sections, including groups/permissions and superuser checkbox
-    fieldsets = (
-        (None, {'fields': ('email', 'password')}),
-        ('Personal Info', {'fields': ('full_name', 'date_of_birth', 'gender', 'contact_no', 'address', 'city', 'country', 'zipcode')}),
-        ('Subscription Info', {'fields': ('current_subscription',)}),
-        ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions', 'role_id', 'state_id')}),
-        ('Important dates', {'fields': ('last_login', 'date_joined')}),
+    list_display = (
+        "id",
+        "email",
+        "full_name",
+        "role_id",
+        "state_id",
+        "current_subscription",
+        "doctor_id",
+        "video_credit",
+        "is_active",
+        "is_staff",
+        "otp_verified",
+        "date_joined",
     )
-    
+    list_filter = (
+        "is_active",
+        "is_staff",
+        "is_superuser",
+        "role_id",
+        "state_id",
+        "type_id",
+        "otp_verified",
+        "email_verified",
+        "is_available",
+        "push_enabled",
+        "email_enabled",
+    )
+    search_fields = (
+        "email",
+        "full_name",
+        "first_name",
+        "last_name",
+        "contact_no",
+        "city",
+        "country",
+        "activation_key",
+        "token",
+    )
+    ordering = ("-date_joined",)
+    readonly_fields = (
+        "id",
+        "date_joined",
+        "last_login",
+        "created_on",
+        "updated_on",
+        "current_subscription",
+    )
+    filter_horizontal = ("groups", "user_permissions")
+    raw_id_fields = ()
+
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "id",
+                    "email",
+                    "password",
+                )
+            },
+        ),
+        (
+            "Personal Info",
+            {
+                "fields": (
+                    "full_name",
+                    "first_name",
+                    "last_name",
+                    "date_of_birth",
+                    "gender",
+                    "age_group",
+                    "about_me",
+                    "profile_file",
+                    "language",
+                    "timezone",
+                )
+            },
+        ),
+        (
+            "Contact & Location",
+            {
+                "fields": (
+                    "contact_no",
+                    "address",
+                    "city",
+                    "country",
+                    "zipcode",
+                    "latitude",
+                    "longitude",
+                )
+            },
+        ),
+        (
+            "Role & Status",
+            {
+                "fields": (
+                    "role_id",
+                    "state_id",
+                    "type_id",
+                    "designation",
+                    "tos",
+                    "is_active",
+                    "is_staff",
+                    "is_superuser",
+                    "groups",
+                    "user_permissions",
+                )
+            },
+        ),
+        (
+            "Therapist / Doctor",
+            {
+                "fields": (
+                    "qualification",
+                    "experience",
+                    "sessions_completed",
+                    "online",
+                    "is_available",
+                    "therapist_gender",
+                    "doctor_id",
+                    "doctor_assigned_time",
+                )
+            },
+        ),
+        (
+            "Subscription & Credits",
+            {
+                "fields": (
+                    "current_subscription",
+                    "video_credit",
+                )
+            },
+        ),
+        (
+            "Notifications & Consent",
+            {
+                "fields": (
+                    "push_enabled",
+                    "email_enabled",
+                    "is_consent_accept",
+                    "consent_accepted_on",
+                )
+            },
+        ),
+        (
+            "OTP & Verification",
+            {
+                "fields": (
+                    "otp",
+                    "otp_verified",
+                    "email_verified",
+                )
+            },
+        ),
+        (
+            "Auth Tokens",
+            {
+                "fields": (
+                    "token",
+                    "activation_key",
+                    "login_error_count",
+                    "last_password_change",
+                )
+            },
+        ),
+        (
+            "Activity Dates",
+            {
+                "fields": (
+                    "last_login",
+                    "last_visit_time",
+                    "last_action_time",
+                    "date_joined",
+                    "created_on",
+                    "updated_on",
+                    "created_by_id",
+                )
+            },
+        ),
+    )
+
     add_fieldsets = (
-        (None, {
-            'classes': ('wide',),
-            'fields': ('email', 'password', 'password_2'),
-        }),
+        (
+            None,
+            {
+                "classes": ("wide",),
+                "fields": ("email", "password", "password_2", "full_name", "role_id", "state_id"),
+            },
+        ),
     )
 
     @admin.display(description="Subscription Plan")
     def current_subscription(self, obj):
         from plans.models import SubscribedPlan
+
         sub = SubscribedPlan.objects.filter(created_by=obj).order_by("-id").first()
         if not sub:
             return "No Subscription"
@@ -73,10 +250,10 @@ class UserAdmin(BaseUserAdmin):
 
 @admin.register(HaLogins)
 class HaLoginsAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user', 'user_id_str', 'login_provider', 'login_provider_identifier', 'created_by_id')
-    list_filter = ('login_provider',)
-    search_fields = ('user_id_str', 'login_provider', 'login_provider_identifier')
-    ordering = ('-id',)
-    
-    list_select_related = ('user',)
-    raw_id_fields = ('user',)
+    list_display = ("id", "user", "user_id_str", "login_provider", "login_provider_identifier", "created_by_id")
+    list_filter = ("login_provider",)
+    search_fields = ("user_id_str", "login_provider", "login_provider_identifier")
+    ordering = ("-id",)
+
+    list_select_related = ("user",)
+    raw_id_fields = ("user",)
