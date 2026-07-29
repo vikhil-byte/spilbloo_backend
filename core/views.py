@@ -596,7 +596,7 @@ class TherapistOnboardingView(APIView):
                     name=data['full_name'],
                     email=data['email'],
                     experience=str(data['experience']),
-                    qualification='',
+                    qualification=data['qualification'],
                     symptoms=json.dumps(data.get('symptoms', [])),
                     language_id=data.get('language_ids', [None])[0],
                     resume_file=qualification_key or None,

@@ -252,6 +252,7 @@ class TherapistOnboardingSerializer(serializers.Serializer):
     about_me = serializers.CharField(required=False, default='')
     experience = serializers.IntegerField(required=True, min_value=0, max_value=50)
     sessions_completed = serializers.IntegerField(required=True, min_value=0)
+    qualification = serializers.CharField(max_length=128, required=True)
     language_ids = serializers.ListField(
         child=serializers.IntegerField(),
         required=True,
