@@ -176,3 +176,38 @@ class CouponInvoice(models.Model):
 
     def __str__(self):
         return f"Final Invoice {self.invoice_number} - {self.company.title}"
+
+
+class CompanyCouponUser(models.Model):
+    """
+    Legacy: app\\modules\\company\\models\\CouponUser
+    Tracks usage of a company coupon by a user when subscribing via
+    actionCompanyUserSubscription.
+    """
+    STATE_INACTIVE = 0
+    STATE_ACTIVE = 1
+    STATE_DELETED = 2
+
+    STATE_CHOICES = (
+        (STATE_INACTIVE, 'New'),
+        (STATE_ACTIVE, 'Active'),
+        (STATE_DELETED, 'Deleted'),
+    )
+
+    coupon = models.ForeignKey(CompanyCoupon, on_delete=models.CASCADE, related_name='coupon_users')
+    coupon_code = models.CharField(max_length=255)
+    plan = models.ForeignKey('plans.Plan', on_delete=models.CASCADE, related_name='company_coupon_users')
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='coupon_users')
+    subscribed_plan = models.ForeignKey('plans.SubscribedPlan', on_delete=models.CASCADE, related_name='company_coupon_users')
+
+    state_id = models.SmallIntegerField(choices=STATE_CHOICES, default=STATE_ACTIVE)
+    type_id = models.IntegerField(default=0)
+
+    created_on = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='company_coupon_users_created')
+
+    class Meta:
+        db_table = 'tbl_company_coupon_user'
+
+    def __str__(self):
+        return f"CouponUser {self.id} - {self.coupon_code}"

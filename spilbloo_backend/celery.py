@@ -67,6 +67,18 @@ app.conf.beat_schedule = {
         'task': 'core.tasks.subscription_reminder',
         'schedule': crontab(hour=9, minute=0), # 9 AM daily
     },
+    'resubscribe_first_reminder_daily': {
+        'task': 'core.tasks.resubscribe_first_reminder',
+        'schedule': crontab(hour=9, minute=0), # 9 AM daily
+    },
+    'resubscribe_second_reminder_daily': {
+        'task': 'core.tasks.resubscribe_second_reminder',
+        'schedule': crontab(hour=9, minute=0), # 9 AM daily
+    },
+    'resubscribe_third_reminder_daily': {
+        'task': 'core.tasks.resubscribe_third_reminder',
+        'schedule': crontab(hour=9, minute=0), # 9 AM daily
+    },
     'admin_notifications_daily': {
         'task': 'core.tasks.admin_notifications',
         'schedule': crontab(hour=10, minute=0),

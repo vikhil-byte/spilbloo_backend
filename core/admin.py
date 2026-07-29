@@ -37,8 +37,6 @@ admin.site.register(HomeContent)
 admin.site.register(File)
 admin.site.register(Page)
 admin.site.register(Category)
-admin.site.register(NodeSubscriptionPlan)
-admin.site.register(NodeUserSelectedTherapistPlan)
 admin.site.register(HomeCard)
 admin.site.register(DailyJournal)
 admin.site.register(DailyCheckinQuestion)
@@ -48,6 +46,19 @@ admin.site.register(UserAppReview)
 admin.site.register(ChatsHistory)
 
 # Optimized Custom ModelAdmins
+@admin.register(NodeSubscriptionPlan)
+class NodeSubscriptionPlanAdmin(admin.ModelAdmin):
+    list_display = ("id", "plan_title", "plan_weekly_price", "plan_total_price", "plan_duration", "plan_type", "state_id")
+    search_fields = ("plan_title", "plan_type")
+    list_filter = ("state_id", "plan_type")
+
+
+@admin.register(NodeUserSelectedTherapistPlan)
+class NodeUserSelectedTherapistPlanAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "plan_title", "plan_weekly_price", "plan_total_price", "created_on")
+    search_fields = ("user__email", "user__full_name", "plan_title")
+
+
 @admin.register(ApiAccessToken)
 class ApiAccessTokenAdmin(admin.ModelAdmin):
     list_display = (

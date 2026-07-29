@@ -287,6 +287,10 @@ AGORA_APP_ID = os.environ.get("AGORA_APP_ID", "77ef4b9e55564562a45a27ddd17c8619"
 AGORA_APP_CERTIFICATE = os.environ.get("AGORA_APP_CERTIFICATE", "")
 AGORA_TOKEN_EXPIRE_SECONDS = int(os.environ.get("AGORA_TOKEN_EXPIRE_SECONDS", "3600"))
 
+# Force-update fallbacks when tbl_setting.versionSettings is empty (PHP common.php defaults)
+ANDROID_APP_VERSION = float(os.environ.get("ANDROID_APP_VERSION", "1.0"))
+IOS_APP_VERSION = float(os.environ.get("IOS_APP_VERSION", "1.0"))
+
 # Celery Configuration Options
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/0")
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/1")

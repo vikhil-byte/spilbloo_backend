@@ -4,14 +4,15 @@ from .views import (
     AuthenticateSubscriptionView, AuthenticateOneTimeSubView, CancelCompanyView,
     CancelView, BuyVideoPlanView, CheckBuyVideoPlanView, VideoPlanListView,
     ApplyCouponView, ApplyVideoCouponView, UpdateSubscriptionView,
-    FreeSubscriptionView, OneTimeSubscriptionView, CurrencyListView, RazorpayWebhookView
+    FreeSubscriptionView, OneTimeSubscriptionView, CurrencyListView, RazorpayWebhookView,
+    CompanyUserSubscriptionView
 )
 
 urlpatterns = [
     path('list/', PlanListView.as_view(), name='plan_list'),
     path('company-user-plan-list/', CompanyUserPlanListView.as_view(), name='company_user_plan_list'),
     path('my-plans/', MyPlansView.as_view(), name='my_plans'),
-    path('company-user-subscription/', AuthenticateSubscriptionView.as_view(), name='company_user_subscription'), # Dummy mapping
+    path('company-user-subscription/', CompanyUserSubscriptionView.as_view(), name='company_user_subscription'),
     path('create-subscription/', CreateSubscriptionView.as_view(), name='create_subscription'),
     path('authenticate-subscription/', AuthenticateSubscriptionView.as_view(), name='authenticate_subscription'),
     path('authenticate-one-time-sub/', AuthenticateOneTimeSubView.as_view(), name='authenticate_one_time_sub'),

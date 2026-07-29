@@ -564,6 +564,43 @@ class Setting(models.Model):
     def __str__(self):
         return self.title
 
+    @classmethod
+    def get_version_config(cls):
+        """
+        Read force-update versions from tbl_setting.key = versionSettings.
+
+        Stored value shape (PHP Settings component):
+          {"ios_version": {"type": ..., "value": "1.9"}, "android_version": {...}}
+        """
+        import json
+        from django.conf import settings as django_settings
+
+        defaults = {
+            "ios_version": getattr(django_settings, "IOS_APP_VERSION", 1.9),
+            "android_version": getattr(django_settings, "ANDROID_APP_VERSION", 18),
+        }
+        try:
+            row = cls.objects.filter(key="versionSettings", state_id=cls.STATE_ACTIVE).first()
+            if not row or not row.value:
+                return defaults
+            parsed = json.loads(row.value)
+            if not isinstance(parsed, dict):
+                return defaults
+            for field in ("ios_version", "android_version"):
+                raw = parsed.get(field)
+                if isinstance(raw, dict):
+                    val = raw.get("value")
+                else:
+                    val = raw
+                if val not in (None, ""):
+                    try:
+                        defaults[field] = float(val)
+                    except (TypeError, ValueError):
+                        pass
+        except Exception:
+            pass
+        return defaults
+
 class Disclaimer(models.Model):
     # States
     STATE_INACTIVE = 0
@@ -964,7 +1001,7 @@ class NodeSubscriptionPlan(models.Model):
     plan_type = models.TextField(blank=True, null=True)
 
     class Meta:
-        managed = True
+        managed = False
         db_table = "tbl_subscription_plan"
 
 

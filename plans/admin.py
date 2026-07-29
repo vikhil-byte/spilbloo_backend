@@ -10,6 +10,7 @@ class PlanAdmin(admin.ModelAdmin):
         "title",
         "plan_id",
         "currency_code",
+        "weekly_price",
         "final_price",
         "discounted_price",
         "get_plan_type_display",

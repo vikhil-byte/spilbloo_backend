@@ -139,11 +139,46 @@ class CategorySerializer(serializers.ModelSerializer):
         model = Category
         fields = '__all__'
 
+
 class FaqSerializer(serializers.ModelSerializer):
     category_name = serializers.ReadOnlyField(source='category.title')
+
     class Meta:
         model = Faq
         fields = '__all__'
+
+
+class FaqListItemSerializer(serializers.ModelSerializer):
+    """PHP Faq::asJson() shape used under Category.faqs."""
+
+    class Meta:
+        model = Faq
+        fields = (
+            "id",
+            "question",
+            "answer",
+            "category_id",
+            "state_id",
+            "type_id",
+            "created_on",
+            "created_by_id",
+        )
+
+
+class FaqCategorySerializer(serializers.ModelSerializer):
+    """PHP Category::asJson() shape expected by iOS FAQsTypeModel."""
+
+    faqs = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Category
+        fields = ("id", "title", "type_id", "faqs")
+
+    def get_faqs(self, obj):
+        # Prefer prefetched active faqs from FaqView; still guard state_id.
+        faqs = [f for f in obj.faqs.all() if f.state_id == Faq.STATE_ACTIVE]
+        faqs.sort(key=lambda f: f.id)
+        return FaqListItemSerializer(faqs, many=True).data
 
 class TherapistApplicationSerializer(serializers.ModelSerializer):
     resume_file = serializers.FileField(required=True, write_only=True)

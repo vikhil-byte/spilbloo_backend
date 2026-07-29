@@ -205,14 +205,22 @@ class CompanyUserPlanListView(generics.ListAPIView):
     permission_classes = (IsAuthenticated,)
     serializer_class = PlanSerializer
 
-    def get_queryset(self):
+    def _resolve_company(self):
+        if hasattr(self, "_company"):
+            return self._company
         user = self.request.user
         email = getattr(user, "email", "") or ""
         domain = email.split("@")[-1].lower() if "@" in email else ""
-        if not domain:
-            return Plan.objects.filter(state_id=1, plan_type=0, type_id=0).order_by("-is_recommended")
+        company = None
+        if domain:
+            company = Company.objects.filter(
+                state_id=Company.STATE_ACTIVE, email_domain__iexact=domain
+            ).first()
+        self._company = company
+        return company
 
-        company = Company.objects.filter(state_id=Company.STATE_ACTIVE, email_domain__iexact=domain).first()
+    def get_queryset(self):
+        company = self._resolve_company()
         if not company:
             return Plan.objects.filter(state_id=1, plan_type=0, type_id=0).order_by("-is_recommended")
 
@@ -221,6 +229,17 @@ class CompanyUserPlanListView(generics.ListAPIView):
             state_id=CompanyCoupon.STATE_ACTIVE,
         ).values_list("plan_id", flat=True)
         return Plan.objects.filter(state_id=1, id__in=coupon_plan_ids).order_by("-is_recommended")
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx["company"] = self._resolve_company()
+        return ctx
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        # Legacy clients expect `{list: [...]}` (same envelope as plan/list).
+        return Response({"list": serializer.data}, status=status.HTTP_200_OK)
 
 class MyPlansView(generics.ListAPIView):
     permission_classes = (IsAuthenticated,)
@@ -964,6 +983,10 @@ class FreeSubscriptionView(APIView):
         user = request.user
         plan_id = request.data.get("plan_id") or request.query_params.get("plan_id")
         coupon_code = request.data.get("coupon") or request.data.get("code")
+        address = request.data.get("address") or getattr(user, "address", None)
+        city = request.data.get("city") or getattr(user, "city", None)
+        country = request.data.get("country") or getattr(user, "country", None)
+        contact = request.data.get("contact") or getattr(user, "contact_no", None)
         if not plan_id:
             return Response({"error": "plan_id is required."}, status=status.HTTP_400_BAD_REQUEST)
         if not coupon_code:
@@ -1011,14 +1034,16 @@ class FreeSubscriptionView(APIView):
                 free_plan.state_id = 3
                 free_plan.save(update_fields=["state_id"])
 
-        return Response(
-            {
-                "message": "Subscription created successfully.",
-                "detail": _legacy_user_detail(user),
-                "subscription_id": subscribed.id,
-            },
-            status=status.HTTP_200_OK,
-        )
+            return Response(
+                {
+                    "message": "Subscription created successfully.",
+                    "detail": _legacy_user_detail(user),
+                    "subscription_id": subscribed.id,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response({"error": "Invalid or expired coupon code."}, status=status.HTTP_400_BAD_REQUEST)
 
 class OneTimeSubscriptionView(APIView):
     permission_classes = (IsAuthenticated,)

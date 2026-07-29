@@ -110,7 +110,7 @@ class SlotBookingSerializer(serializers.ModelSerializer):
         return getattr(obj, "is_active", 0) == 1
 
     def get_is_call_end(self, obj):
-        return False
+        return getattr(obj, "is_call_end", 0) == 1
 
     def get_description(self, obj):
         return getattr(obj, "description", "") or ""
@@ -122,7 +122,7 @@ class SlotBookingSerializer(serializers.ModelSerializer):
         return getattr(obj, "call_duration", "00:00:00") or "00:00:00"
 
     def get_duration_millisec(self, obj):
-        return ""
+        return getattr(obj, "duration_millisec", "") or ""
 
     def get_createdBy(self, obj):
         user = obj.created_by

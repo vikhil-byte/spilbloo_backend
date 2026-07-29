@@ -374,7 +374,131 @@ def subscription_reminder():
     
     for user in users:
         if not SubscribedPlan.objects.filter(created_by=user).exists():
-            logger.info(f"[EMAIL MOCK] Reminder: Purchase a plan sent to {user.email}")
+            # PHP User::sendPlanReminderMailtoUser
+            try:
+                from django.template.loader import render_to_string
+                from core.email_service import get_email_client
+                from django.conf import settings as dj_settings
+                html_content = render_to_string("emails/subscriptionReminder.html", {
+                    "full_name": getattr(user, "full_name", "") or "",
+                })
+                get_email_client().send_email(
+                    subject="You're almost there!",
+                    body=html_content,
+                    to_email=user.email,
+                    from_email=getattr(dj_settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com"),
+                    html_body=html_content,
+                )
+            except Exception:
+                logger.exception("subscription_reminder email failed for user_id=%s", user.id)
+
+
+@shared_task
+def resubscribe_first_reminder():
+    """
+    Legacy: User::reSubscribeFirstReminder()
+    Sends first reminder to users whose plan expires in 3 days.
+    """
+    logger.info("Running: resubscribe_first_reminder")
+    reminder_date = now() + timedelta(days=3)
+    plans = SubscribedPlan.objects.filter(
+        state_id=SubscribedPlan.STATE_ACTIVE,
+        plan_type__in=[SubscribedPlan.PLAN_TYPE_PAID, SubscribedPlan.PLAN_TYPE_COMPANY],
+        end_date__date=reminder_date.date(),
+    )
+    for plan in plans:
+        user = plan.created_by
+        if user and user.email:
+            try:
+                from django.template.loader import render_to_string
+                from core.email_service import get_email_client
+                from django.conf import settings as dj_settings
+                html_content = render_to_string("emails/subscriptionFirstReminder.html", {
+                    "full_name": getattr(user, "full_name", "") or "",
+                    "plan_title": getattr(plan.plan, "title", "") if plan.plan else "",
+                    "end_date": plan.end_date.strftime("%B %d, %Y") if hasattr(plan.end_date, "strftime") else str(plan.end_date),
+                })
+                get_email_client().send_email(
+                    subject="Subscription reminder",
+                    body=html_content,
+                    to_email=user.email,
+                    from_email=getattr(dj_settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com"),
+                    html_body=html_content,
+                )
+            except Exception:
+                logger.exception("resubscribe_first_reminder email failed for plan_id=%s", plan.id)
+
+
+@shared_task
+def resubscribe_second_reminder():
+    """
+    Legacy: User::reSubscribeSecondReminder()
+    Sends second reminder to users whose plan expires in 1 day.
+    """
+    logger.info("Running: resubscribe_second_reminder")
+    reminder_date = now() + timedelta(days=1)
+    plans = SubscribedPlan.objects.filter(
+        state_id=SubscribedPlan.STATE_ACTIVE,
+        plan_type__in=[SubscribedPlan.PLAN_TYPE_PAID, SubscribedPlan.PLAN_TYPE_COMPANY],
+        end_date__date=reminder_date.date(),
+    )
+    for plan in plans:
+        user = plan.created_by
+        if user and user.email:
+            try:
+                from django.template.loader import render_to_string
+                from core.email_service import get_email_client
+                from django.conf import settings as dj_settings
+                html_content = render_to_string("emails/subscriptionSecondReminder.html", {
+                    "full_name": getattr(user, "full_name", "") or "",
+                    "plan_title": getattr(plan.plan, "title", "") if plan.plan else "",
+                    "end_date": plan.end_date.strftime("%B %d, %Y") if hasattr(plan.end_date, "strftime") else str(plan.end_date),
+                })
+                get_email_client().send_email(
+                    subject="Subscription reminder",
+                    body=html_content,
+                    to_email=user.email,
+                    from_email=getattr(dj_settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com"),
+                    html_body=html_content,
+                )
+            except Exception:
+                logger.exception("resubscribe_second_reminder email failed for plan_id=%s", plan.id)
+
+
+@shared_task
+def resubscribe_third_reminder():
+    """
+    Legacy: User::reSubscribeThirdReminder()
+    Sends third reminder to users whose plan has just expired.
+    """
+    logger.info("Running: resubscribe_third_reminder")
+    today = now().date()
+    plans = SubscribedPlan.objects.filter(
+        state_id=SubscribedPlan.STATE_ACTIVE,
+        plan_type__in=[SubscribedPlan.PLAN_TYPE_PAID, SubscribedPlan.PLAN_TYPE_COMPANY],
+        end_date__date=today,
+    )
+    for plan in plans:
+        user = plan.created_by
+        if user and user.email:
+            try:
+                from django.template.loader import render_to_string
+                from core.email_service import get_email_client
+                from django.conf import settings as dj_settings
+                html_content = render_to_string("emails/subscriptionThirdReminder.html", {
+                    "full_name": getattr(user, "full_name", "") or "",
+                    "plan_title": getattr(plan.plan, "title", "") if plan.plan else "",
+                    "end_date": plan.end_date.strftime("%B %d, %Y") if hasattr(plan.end_date, "strftime") else str(plan.end_date),
+                })
+                get_email_client().send_email(
+                    subject="Subscription reminder",
+                    body=html_content,
+                    to_email=user.email,
+                    from_email=getattr(dj_settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com"),
+                    html_body=html_content,
+                )
+            except Exception:
+                logger.exception("resubscribe_third_reminder email failed for plan_id=%s", plan.id)
 
 
 @shared_task

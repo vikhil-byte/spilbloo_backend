@@ -7,7 +7,10 @@ class Call(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='calls_received', null=True, blank=True)
     booking_id = models.IntegerField(null=True, blank=True)
     session_id = models.CharField(max_length=255, null=True, blank=True) # room_id equivalent
+    call_end_id = models.IntegerField(null=True, blank=True)
+    token = models.CharField(max_length=512, null=True, blank=True)
     state_id = models.IntegerField(default=1) # 1=Join, 2=Left, 3=Completed
+    type_id = models.IntegerField(default=0)
     
     start_time = models.DateTimeField(null=True, blank=True)
     end_time = models.DateTimeField(null=True, blank=True)

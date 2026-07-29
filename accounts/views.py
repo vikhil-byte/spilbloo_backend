@@ -12,13 +12,15 @@ from .serializers import UserSerializer, RegisterSerializer, CustomTokenObtainPa
 from .models import HaLogins
 from core.models import (
     ContactForm, LoginHistory, Symptom, UserSymptom, AgeGroup, 
-    AssignedTherapist, Page, Faq, ApiAccessToken, SubscribedVideo
+    AssignedTherapist, Page, Faq, Category, ApiAccessToken, SubscribedVideo, Setting
 )
 
 from availability.models import Notification
-from core.serializers import SymptomSerializer, PageSerializer, FaqSerializer, TherapistEarningSerializer
+from core.serializers import (
+    SymptomSerializer, PageSerializer, FaqSerializer, FaqCategorySerializer, TherapistEarningSerializer
+)
 from django.db import transaction
-from django.db.models import Case, When, F, Q
+from django.db.models import Case, When, F, Q, Prefetch
 import random
 import logging
 from django.utils import timezone
@@ -228,7 +230,31 @@ def _safe_str(value, default=""):
         return default
 
 
-def _legacy_user_detail(user):
+def _client_app_version(request):
+    """Read legacy `version` request header used by PHP force-update checks."""
+    if request is None:
+        return 0.0
+    return _safe_float(request.headers.get("version", 0), 0.0)
+
+
+def _force_update_flags(request):
+    """
+    Mirror PHP User::asJson force-update flags from tbl_setting.versionSettings.
+
+    is_app_update      -> Android needs update (client version < android_version)
+    is_ios_app_update  -> iOS needs update (client version < ios_version)
+    """
+    client_version = _client_app_version(request)
+    config = Setting.get_version_config()
+    android_required = _safe_float(config.get("android_version"), getattr(settings, "ANDROID_APP_VERSION", 1.0))
+    ios_required = _safe_float(config.get("ios_version"), getattr(settings, "IOS_APP_VERSION", 1.0))
+    return {
+        "is_app_update": not (client_version >= android_required),
+        "is_ios_app_update": not (client_version >= ios_required),
+    }
+
+
+def _legacy_user_detail(user, request=None):
     """
     Build compatibility payload expected by legacy iOS user model parsing.
     """
@@ -334,6 +360,8 @@ def _legacy_user_detail(user):
         except Exception:
             pass
 
+    force_update = _force_update_flags(request)
+
     return {
         "id": user.id,
         "email": user.email or "",
@@ -354,7 +382,7 @@ def _legacy_user_detail(user):
         "isOnline": _safe_str(getattr(user, "online", "") or ""),
         "otp_verified": otp_verified,
         #"otp": _safe_str(getattr(user, "otp", "") or "") if settings.DEBUG else "",
-        "is_ios_app_update": False,
+        "is_ios_app_update": force_update["is_ios_app_update"],
         "is_subscribed_user": SubscribedPlan.objects.filter(created_by=user).exclude(state_id=SubscribedPlan.STATE_CREATED).exists(),
         "is_buy_subscripion": SubscribedPlan.objects.filter(created_by=user, state_id=SubscribedPlan.STATE_ACTIVE).exists(),
         "is_buy_subscription": SubscribedPlan.objects.filter(created_by=user, state_id=SubscribedPlan.STATE_ACTIVE).exists(),
@@ -380,7 +408,7 @@ def _legacy_user_detail(user):
         "gender": getattr(user, "gender", 0) or 0,
         "inr_payment_bottom_sheet_url": "",
         "is_android_under_maintenance": 0,
-        "is_app_update": False,
+        "is_app_update": force_update["is_app_update"],
         "is_available": 1 if getattr(user, "is_available", True) else 0,
         "is_consent_accept": getattr(user, "is_consent_accept", 0) or 0,
         "is_ios_under_maintenance": 0,
@@ -526,7 +554,7 @@ class RegisterView(generics.CreateAPIView):
 
         return Response({
             "message": "Please verify your OTP.",
-            "detail": _legacy_user_detail(user)
+            "detail": _legacy_user_detail(user, request)
         }, status=status.HTTP_200_OK)
 
 class VerifyOtpView(APIView):
@@ -568,7 +596,7 @@ class VerifyOtpView(APIView):
                 "message": "Your account successfully verified!",
                 "access-token": str(refresh.access_token),
                 "refresh-token": str(refresh),
-                "detail": _legacy_user_detail(user)
+                "detail": _legacy_user_detail(user, request)
             }, status=status.HTTP_200_OK)
         else:
             return Response({"error": "Incorrect OTP"}, status=status.HTTP_400_BAD_REQUEST)
@@ -626,19 +654,36 @@ class DoctorContactView(APIView):
 class CustomTokenRefreshView(TokenRefreshView):
     def post(self, request, *args, **kwargs):
         # Support legacy payload keys 'refresh-token' or 'refresh'
-        raw_refresh = request.data.get("refresh") or request.data.get("refresh-token") or request.data.get("refreshToken")
+        raw_refresh = (
+            request.data.get("refresh")
+            or request.data.get("refresh-token")
+            or request.data.get("refreshToken")
+        )
         if raw_refresh and "refresh" not in request.data:
-            request.data["refresh"] = raw_refresh
+            # QueryDict may be immutable depending on parser; copy when needed.
+            try:
+                request.data._mutable = True  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            try:
+                request.data["refresh"] = raw_refresh
+            except Exception:
+                # Fallback: rebuild via private attribute used by DRF Request
+                data = request.data.copy() if hasattr(request.data, "copy") else dict(request.data)
+                data["refresh"] = raw_refresh
+                request._full_data = data
 
         response = super().post(request, *args, **kwargs)
 
         if response.status_code == 200:
             access_token = response.data.get("access") or response.data.get("access-token")
-            refresh_token_str = response.data.get("refresh") or raw_refresh
+            # With ROTATE_REFRESH_TOKENS, SimpleJWT returns a new refresh under "refresh".
+            rotated_refresh = response.data.get("refresh")
+            refresh_token_str = rotated_refresh or raw_refresh
 
             if access_token:
                 response.data["access-token"] = access_token
-            if refresh_token_str and "refresh-token" not in response.data:
+            if refresh_token_str:
                 response.data["refresh-token"] = refresh_token_str
 
             try:
@@ -646,7 +691,7 @@ class CustomTokenRefreshView(TokenRefreshView):
                     from rest_framework_simplejwt.tokens import UntypedToken
                     token_obj = UntypedToken(raw_refresh)
                     user_id = token_obj.get("user_id")
-                    if user_id:
+                    if user_id and access_token:
                         user = User.objects.get(id=user_id)
                         user.activation_key = str(access_token)
                         user.save(update_fields=["activation_key"])
@@ -708,7 +753,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                     return Response(
                         {
                             "message": "Details already exist. You need to verify your otp first",
-                            "detail": _legacy_user_detail(user),
+                            "detail": _legacy_user_detail(user, request),
                         },
                         status=status.HTTP_200_OK,
                     )
@@ -721,7 +766,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 send_otp_via_email(user.email, otp)
                 return Response({
                     "message": "Please verify your OTP.",
-                    "detail": _legacy_user_detail(user)
+                    "detail": _legacy_user_detail(user, request)
                 }, status=status.HTTP_200_OK)
 
             auth_user = authenticate(request, username=email, password=password) or authenticate(request, email=email, password=password)
@@ -737,7 +782,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 "message": "Login Successfully",
                 "access-token": str(refresh.access_token),
                 "refresh-token": str(refresh),
-                "detail": _legacy_user_detail(auth_user)
+                "detail": _legacy_user_detail(auth_user, request)
             }
 
             # OTP challenge for newer versions (legacy behavior).
@@ -787,8 +832,17 @@ class CheckView(APIView):
                 self.request.headers.get("User-Agent", ""),
                 self.request.content_type,
             )
-            # Legacy PHP actionCheck returns guest payload instead of 401
-            # when user is unauthenticated/expired.
+            # If the client sent a Bearer token that failed (expired/invalid), return 401
+            # so mobile refresh interceptors can rotate access via /user/login/refresh/.
+            # Only return the legacy guest 200 payload when no credentials were provided.
+            if auth_header.strip():
+                return Response(
+                    {
+                        "detail": "Given token not valid for any token type",
+                        "code": "token_not_valid",
+                    },
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
             return Response(
                 {"message": "User not authenticated. No device token found"},
                 status=status.HTTP_200_OK,
@@ -816,7 +870,7 @@ class CheckView(APIView):
         user.save(update_fields=["last_action_time"])
 
         return Response({
-            "detail": _legacy_user_detail(user)
+            "detail": _legacy_user_detail(user, request)
         }, status=status.HTTP_200_OK)
 
     def get(self, request):
@@ -892,7 +946,7 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         return Response({
-            "detail": _legacy_user_detail(instance)
+            "detail": _legacy_user_detail(instance, request)
         }, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):
@@ -1025,7 +1079,7 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
                 return Response({"error": e.messages}, status=status.HTTP_400_BAD_REQUEST)
 
             return Response({
-                "detail": _legacy_user_detail(instance)
+                "detail": _legacy_user_detail(instance, request)
             }, status=status.HTTP_200_OK)
         except Exception as exc:
             logger.exception("Error in UserProfileView.update")
@@ -1103,7 +1157,7 @@ class DetailView(generics.RetrieveAPIView):
     def retrieve(self, request, *args, **kwargs):
         try:
             instance = self.get_object()
-            return Response({"detail": _legacy_user_detail(instance)}, status=status.HTTP_200_OK)
+            return Response({"detail": _legacy_user_detail(instance, request)}, status=status.HTTP_200_OK)
         except Http404:
             return Response({"error": "Data Not Found"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1258,15 +1312,37 @@ class MatchesListView(APIView):
         }, status=status.HTTP_200_OK)
 
 class FaqView(APIView):
-    permission_classes = (AllowAny,)
-    
+    """
+    PHP parity for `user/faq`: return active FAQ *categories* with nested `faqs`.
+    iOS FAQsTypeModel expects `{list: [{title, faqs: [{id, question, answer}, ...]}, ...]}`.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    # Match PHP Category::TYPE_PATIENT / TYPE_DOCTOR
+    TYPE_PATIENT = 1
+    TYPE_DOCTOR = 2
+
     def get(self, request):
-        type_id = request.query_params.get('type_id') # e.g. User Role
-        faqs = Faq.objects.filter(state_id=1)
-        if type_id:
-            faqs = faqs.filter(type_id=type_id)
-            
-        return Response({"list": FaqSerializer(faqs, many=True).data}, status=status.HTTP_200_OK)
+        # PHP ignores query type_id and picks from logged-in role.
+        if getattr(request.user, "role_id", None) == User.ROLE_DOCTER:
+            type_id = self.TYPE_DOCTOR
+        else:
+            type_id = self.TYPE_PATIENT
+
+        categories = (
+            Category.objects.filter(state_id=Category.STATE_ACTIVE, type_id=type_id)
+            .prefetch_related(
+                Prefetch(
+                    "faqs",
+                    queryset=Faq.objects.filter(state_id=Faq.STATE_ACTIVE).order_by("id"),
+                )
+            )
+            .order_by("-id")
+        )
+        return Response(
+            {"list": FaqCategorySerializer(categories, many=True).data},
+            status=status.HTTP_200_OK,
+        )
 
 class AssignDoctorView(APIView):
     permission_classes = (IsAuthenticated,)
