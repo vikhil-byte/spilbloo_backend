@@ -48,15 +48,15 @@ admin.site.register(ChatsHistory)
 # Optimized Custom ModelAdmins
 @admin.register(NodeSubscriptionPlan)
 class NodeSubscriptionPlanAdmin(admin.ModelAdmin):
-    list_display = ("id", "plan_title", "plan_weekly_price", "plan_total_price", "plan_duration", "plan_type", "state_id")
-    search_fields = ("plan_title", "plan_type")
-    list_filter = ("state_id", "plan_type")
+    list_display = ("id", "plan_name", "plan_weekly_price", "total_price", "plan_duration", "plan_type")
+    search_fields = ("plan_name", "plan_type")
+    list_filter = ("plan_type",)
 
 
 @admin.register(NodeUserSelectedTherapistPlan)
 class NodeUserSelectedTherapistPlanAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "plan_title", "plan_weekly_price", "plan_total_price", "created_on")
-    search_fields = ("user__email", "user__full_name", "plan_title")
+    list_display = ("id", "user_id", "therapist_id", "plan_id", "selected_on")
+    search_fields = ("user_id", "therapist_id", "plan_id")
 
 
 @admin.register(ApiAccessToken)

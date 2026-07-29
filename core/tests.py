@@ -261,7 +261,7 @@ class PushNotificationTokenResolutionTests(TestCase):
         
         from firebase_admin._messaging_utils import UnregisteredError
         with patch("firebase_admin.messaging.send", side_effect=UnregisteredError("NotRegistered")):
-            with patch("core.firebase._load_firebase_credentials", return_value=MagicMock()):
+            with patch("firebase_admin.get_app", return_value=MagicMock()):
                 from core.firebase import _send_fcm
                 result = _send_fcm("expired_mock_token_789", "Title", "Body")
                 self.assertFalse(result)
