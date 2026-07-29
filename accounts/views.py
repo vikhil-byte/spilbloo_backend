@@ -185,24 +185,6 @@ def _save_api_access_token(user, request_data, access_token_str=""):
         )
 
 
-def _enforce_ios_version_gate(user, device_type: int, version: float):
-    """
-    Mirror legacy PHP check/login version gate for iOS users.
-    """
-    if device_type != DEVICE_IOS:
-        return None
-    if version >= 3.0:
-        return None
-    if user.role_id == User.ROLE_DOCTER:
-        return None
-    if SubscribedPlan.objects.filter(created_by=user, state_id=1).exists():
-        return None
-    return Response(
-        {"error": "A new version of app is available please update your app."},
-        status=status.HTTP_400_BAD_REQUEST,
-    )
-
-
 def _safe_int(value, default=0):
     try:
         if value in (None, ""):
@@ -221,6 +203,29 @@ def _safe_float(value, default=0.0):
         return default
 
 
+def _parse_app_version(value, default=0.0):
+    """
+    Parse client version headers like "1.0", "1.0.0", "4.3".
+    Uses major.minor as a float for comparisons (patch is ignored).
+    """
+    if value in (None, ""):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        pass
+    try:
+        text = str(value).strip()
+        parts = text.split(".")
+        if not parts:
+            return default
+        major = int(parts[0])
+        minor = int(parts[1]) if len(parts) > 1 else 0
+        return float(f"{major}.{minor}")
+    except (TypeError, ValueError):
+        return default
+
+
 def _safe_str(value, default=""):
     if value is None:
         return default
@@ -234,7 +239,34 @@ def _client_app_version(request):
     """Read legacy `version` request header used by PHP force-update checks."""
     if request is None:
         return 0.0
-    return _safe_float(request.headers.get("version", 0), 0.0)
+    return _parse_app_version(request.headers.get("version", 0), 0.0)
+
+
+def _enforce_ios_version_gate(user, device_type: int, version: float):
+    """
+    Force-update gate for iOS clients.
+
+    Compares the client version header against tbl_setting.versionSettings
+    (ios_version), falling back to settings.IOS_APP_VERSION.
+    Legacy hardcoded "must be >= 3.0" cutoff removed so new 1.x builds work.
+    """
+    if device_type != DEVICE_IOS:
+        return None
+    if user.role_id == User.ROLE_DOCTER:
+        return None
+
+    client_version = _parse_app_version(version, 0.0)
+    required = _parse_app_version(
+        Setting.get_version_config().get("ios_version"),
+        getattr(settings, "IOS_APP_VERSION", 1.0),
+    )
+    if client_version >= required:
+        return None
+
+    return Response(
+        {"error": "A new version of app is available please update your app."},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
 
 
 def _force_update_flags(request):
@@ -246,8 +278,12 @@ def _force_update_flags(request):
     """
     client_version = _client_app_version(request)
     config = Setting.get_version_config()
-    android_required = _safe_float(config.get("android_version"), getattr(settings, "ANDROID_APP_VERSION", 1.0))
-    ios_required = _safe_float(config.get("ios_version"), getattr(settings, "IOS_APP_VERSION", 1.0))
+    android_required = _parse_app_version(
+        config.get("android_version"), getattr(settings, "ANDROID_APP_VERSION", 1.0)
+    )
+    ios_required = _parse_app_version(
+        config.get("ios_version"), getattr(settings, "IOS_APP_VERSION", 1.0)
+    )
     return {
         "is_app_update": not (client_version >= android_required),
         "is_ios_app_update": not (client_version >= ios_required),
@@ -524,7 +560,7 @@ class RegisterView(generics.CreateAPIView):
             )
 
         device_type = _safe_int(normalized_data.get('device_type'), 0)
-        version = _safe_float(request.headers.get('version', 0), 0.0)
+        version = _parse_app_version(request.headers.get('version', 0), 0.0)
 
         # PHP logic: (deviceType == 1 && version >= 30) || (deviceType == 2 && version >= 2.7)
         # device_type 1 = Android, 2 = iOS (or vice versa depending on mapping, let's assume 1=Android, 2=iOS)
@@ -723,7 +759,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
         password = request.data.get('password') or request.data.get('LoginForm[password]')
         role_id = int(request.data.get('role_id') or request.data.get('LoginForm[role_id]') or 0)
         device_type = int(request.data.get('device_type') or request.data.get('LoginForm[device_type]') or 0)
-        version = float(request.headers.get('version', 0))
+        version = _parse_app_version(request.headers.get('version', 0), 0.0)
 
         try:
             if not email:
@@ -859,7 +895,7 @@ class CheckView(APIView):
 
         user = request.user
         device_type = int(request.headers.get('device-type', 0))
-        version = float(request.headers.get('version', 0))
+        version = _parse_app_version(request.headers.get('version', 0), 0.0)
 
         legacy_version_gate_error = _enforce_ios_version_gate(user, device_type, version)
         if legacy_version_gate_error:
