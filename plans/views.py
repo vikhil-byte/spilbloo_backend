@@ -17,6 +17,7 @@ from accounts.views import _legacy_user_detail
 import json
 import logging
 import random
+import calendar
 from decimal import Decimal, InvalidOperation
 import base64
 import urllib.request
@@ -769,6 +770,35 @@ class BuyVideoPlanView(APIView):
                         created_by=user,
                     )
 
+                # PHP SubscribedVideo::sendCreditPurchaseMailtoUser + sendVideoInvoiceMail
+                try:
+                    from availability.views import send_html_email
+                    first_name = getattr(user, "full_name", "") or getattr(user, "first_name", "") or ""
+                    purchase_date = timezone.now().strftime("%Y-%m-%d")
+                    credits = int(getattr(plan, "credit", 0) or 0)
+                    send_html_email(
+                        user.email,
+                        "Video Session Credits",
+                        "newVideoCredit.html",
+                        {
+                            "first_name": first_name,
+                            "credits": credits,
+                            "date": purchase_date,
+                        },
+                    )
+                    send_html_email(
+                        user.email,
+                        "Your Video Plan Invoice",
+                        "videoInvoice.html",
+                        {
+                            "plan_title": getattr(plan, "title", ""),
+                            "invoice_id": str(purchase.id),
+                            "purchase_date": purchase_date,
+                        },
+                    )
+                except Exception:
+                    logger.exception("video credit emails failed for user_id=%s", user.id)
+
             logger.info(
                 "buy-video-plan success: user_id=%s plan_id=%s purchase_id=%s",
                 getattr(user, "id", None),
@@ -1044,6 +1074,168 @@ class FreeSubscriptionView(APIView):
             )
 
         return Response({"error": "Invalid or expired coupon code."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CompanyUserSubscriptionView(APIView):
+    """
+    Legacy: PlanController::actionCompanyUserSubscription
+    Creates a company coupon subscription (no Razorpay payment).
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        user = request.user
+        plan_id = request.data.get("plan_id") or request.query_params.get("plan_id")
+
+        if not plan_id:
+            return Response({"error": "Plan not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        plan_model = Plan.objects.filter(plan_id=plan_id).first()
+        if not plan_model:
+            return Response({"error": "Plan not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Guard: user must NOT already have an active non-free subscription
+        existing = SubscribedPlan.objects.filter(
+            created_by=user,
+            state_id=SubscribedPlan.STATE_ACTIVE,
+        ).exclude(plan_type=SubscribedPlan.PLAN_TYPE_FREE).first()
+        if existing:
+            return Response({"error": "You are alredy on a plan."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Extract body fields (PHP mass-assigns via load($post))
+        coupon_code = request.data.get("coupon") or request.data.get("SubscribedPlan[coupon]")
+        address = request.data.get("address") or request.data.get("SubscribedPlan[address]")
+        country = request.data.get("country") or request.data.get("SubscribedPlan[country]")
+        state = request.data.get("state") or request.data.get("SubscribedPlan[state]")
+        city = request.data.get("city") or request.data.get("SubscribedPlan[city]")
+        contact = request.data.get("contact") or request.data.get("SubscribedPlan[contact]")
+
+        # Address handling: if user has no prior subscription, require state field
+        has_prior = SubscribedPlan.objects.filter(created_by=user).exists()
+        if not has_prior:
+            if not state:
+                return Response({"error": "Please provide address details."}, status=status.HTTP_400_BAD_REQUEST)
+            # Save billing address to user profile
+            update_fields = []
+            if address and hasattr(user, "address"):
+                user.address = address
+                update_fields.append("address")
+            if country and hasattr(user, "country"):
+                user.country = country
+                update_fields.append("country")
+            if state and hasattr(user, "state"):
+                user.state = state
+                update_fields.append("state")
+            if city and hasattr(user, "city"):
+                user.city = city
+                update_fields.append("city")
+            if contact and hasattr(user, "contact_no"):
+                user.contact_no = contact
+                update_fields.append("contact_no")
+            if update_fields:
+                user.save(update_fields=update_fields)
+        else:
+            # Copy address from user profile
+            address = getattr(user, "address", "") or ""
+            country = getattr(user, "country", "") or ""
+            state = getattr(user, "state", "") or ""
+            city = getattr(user, "city", "") or ""
+            contact = getattr(user, "contact_no", "") or ""
+
+        # Coupon is REQUIRED
+        if not coupon_code:
+            return Response({"error": "coupon code is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        from company.models import CompanyCoupon, CompanyCouponUser
+        coupon_model = CompanyCoupon.objects.filter(code=coupon_code).first()
+        if not coupon_model:
+            return Response({"error": "coupon not found"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                now_dt = timezone.now()
+
+                # Price calculation based on coupon type
+                amount = coupon_model.one_day_price
+                if coupon_model.coupon_type == CompanyCoupon.COUPON_TYPE_LIMITED:
+                    duration = coupon_model.no_of_free_trial_days
+                    final_dt = now_dt + timedelta(days=duration)
+                    amount = amount * coupon_model.no_of_free_trial_days
+                else:
+                    # UNLIMITED: end of current month at 23:59:59
+                    last_day = calendar.monthrange(now_dt.year, now_dt.month)[1]
+                    final_dt = now_dt.replace(day=last_day, hour=23, minute=59, second=59, microsecond=0)
+                    amount = amount * 1  # one_day_price for unlimited
+
+                # GST calculation: round((tax_percentage / 100) * amount)
+                try:
+                    tax_pct = float(plan_model.tax_percentage or 0)
+                except (TypeError, ValueError):
+                    tax_pct = 0
+                gst_price = round((tax_pct / 100) * float(amount))
+                final_price = round(gst_price + float(amount))
+
+                subscribed = SubscribedPlan.objects.create(
+                    plan=plan_model,
+                    created_by=user,
+                    subscription_id=str(coupon_model.company_id),
+                    coupon=coupon_code,
+                    plan_price=amount,
+                    gst_price=gst_price,
+                    final_price=final_price,
+                    start_date=now_dt,
+                    start_at=now_dt,
+                    rezorpay_start_time=now_dt,
+                    trail_end_time=now_dt,
+                    end_date=final_dt,
+                    end_at=final_dt,
+                    renewal_date=final_dt,
+                    plan_type=SubscribedPlan.PLAN_TYPE_COMPANY,
+                    type_id=SubscribedPlan.TYPE_COUPON_APPLIED,
+                    company_coupon=coupon_model,
+                    company_coupon_type=coupon_model.coupon_type,
+                    state_id=SubscribedPlan.STATE_ACTIVE,
+                    upcoming_state=SubscribedPlan.STATE_ACTIVE,
+                    upcoming_plan_id=plan_model.id,
+                    coupon_free_trial_days=0,
+                    no_of_video_session=coupon_model.no_of_video_session,
+                    upcoming_plan_video_credit=coupon_model.no_of_video_session,
+                    address=address,
+                    country=country,
+                    state=state,
+                    city=city,
+                    contact=contact,
+                )
+
+                # Create CompanyCouponUser record (coupon usage tracking)
+                CompanyCouponUser.objects.create(
+                    coupon=coupon_model,
+                    coupon_code=coupon_code,
+                    plan=plan_model,
+                    company=coupon_model.company,
+                    subscribed_plan=subscribed,
+                    state_id=CompanyCouponUser.STATE_ACTIVE,
+                    created_by=user,
+                )
+
+                # Cancel any existing free plan
+                free_plan = SubscribedPlan.objects.filter(
+                    created_by=user,
+                    state_id=SubscribedPlan.STATE_ACTIVE,
+                    plan_type=SubscribedPlan.PLAN_TYPE_FREE,
+                ).first()
+                if free_plan:
+                    free_plan.state_id = SubscribedPlan.STATE_CANCELED
+                    free_plan.save(update_fields=["state_id"])
+
+            return Response({
+                "message": "Subscription created successfully.",
+                "detail": _legacy_user_detail(user),
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.exception("company-user-subscription failed: user_id=%s", getattr(user, "id", None))
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class OneTimeSubscriptionView(APIView):
     permission_classes = (IsAuthenticated,)

@@ -35,6 +35,38 @@ def send_event_email(to_email, subject, message):
     )
 
 
+def send_html_email(to_email, subject, template_name, context):
+    """Render an HTML email template and send it."""
+    if not to_email:
+        return
+    from django.template.loader import render_to_string
+    html_content = render_to_string(f"emails/{template_name}", context)
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
+    get_email_client().send_email(
+        subject=subject,
+        body=html_content,
+        to_email=to_email,
+        from_email=from_email,
+        html_body=html_content,
+    )
+
+
+def send_html_email_to_admins(subject, template_name, context):
+    """Send an HTML email to all admin users (role_id=0)."""
+    from django.template.loader import render_to_string
+    admins = User.objects.filter(role_id=User.ROLE_ADMIN, is_active=True, email__isnull=False).exclude(email='')
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
+    html_content = render_to_string(f"emails/{template_name}", context)
+    for admin in admins:
+        get_email_client().send_email(
+            subject=subject,
+            body=html_content,
+            to_email=admin.email,
+            from_email=from_email,
+            html_body=html_content,
+        )
+
+
 from core.models import RefundLog, ApiAccessToken
 
 def send_push_notification(user, title, description, data=None):
@@ -327,11 +359,25 @@ class BookingView(APIView):
                 
                 doctor_user = User.objects.filter(id=doctor_id).first()
                 send_push_notification(doctor_user, "New Booking Request", msg)
-                send_event_email(
-                    getattr(doctor_user, "email", ""),
-                    "New booking request",
-                    msg,
-                )
+                # PHP SlotBooking::sendBookingRequestmailtoDoctor
+                if doctor_user:
+                    session_date = (start_time.strftime("%B %d, %Y") if hasattr(start_time, "strftime") else str(start_time))
+                    session_day = (start_time.strftime("%A") if hasattr(start_time, "strftime") else "")
+                    session_start = (start_time.strftime("%I:%M %p") if hasattr(start_time, "strftime") else str(start_time))
+                    session_end = (end_time.strftime("%I:%M %p") if hasattr(end_time, "strftime") else str(end_time))
+                    send_html_email(
+                        doctor_user.email,
+                        "Video Session Request",
+                        "newBooking.html",
+                        {
+                            "therapist_name": getattr(doctor_user, "full_name", ""),
+                            "patient_name": getattr(patient, "full_name", ""),
+                            "session_date": session_date,
+                            "session_day": session_day,
+                            "session_start_time": session_start,
+                            "session_end_time": session_end,
+                        },
+                    )
             
             return Response({
                 "message": "Booking added successfully.",
@@ -524,6 +570,21 @@ class AcceptBookingView(APIView):
                 model_type='SlotBooking'
             )
             send_push_notification(booking.created_by, msg, "")
+            # PHP SlotBooking::sendBookingConfirmationMail
+            doctor_user = user
+            if booking.created_by and doctor_user:
+                session_date = (booking.start_time.strftime("%B %d, %Y") if hasattr(booking.start_time, "strftime") else str(booking.start_time))
+                session_start = (booking.start_time.strftime("%I:%M %p") if hasattr(booking.start_time, "strftime") else str(booking.start_time))
+                send_html_email(
+                    booking.created_by.email,
+                    "Video Session Confirmed",
+                    "confirmBooking.html",
+                    {
+                        "therapist_name": getattr(doctor_user, "full_name", ""),
+                        "session_date": session_date,
+                        "session_start_time": session_start,
+                    },
+                )
             return Response({"message": "Booking accepted successfully"}, status=status.HTTP_200_OK)
         except SlotBooking.DoesNotExist:
             return Response({"error": "No Booking found"}, status=status.HTTP_400_BAD_REQUEST)
@@ -569,11 +630,50 @@ class DoctorRescheduleView(APIView):
                 model_id=booking.id,
             )
             send_push_notification(booking.created_by, "Session rescheduled", msg)
-            send_event_email(
-                getattr(booking.created_by, "email", ""),
-                "Session rescheduled by therapist",
-                msg,
-            )
+            # PHP SlotBooking::sendBookingRescheduleMailToUser + sendBookingRescheduleMailToDoctor
+            patient_user = booking.created_by
+            if patient_user and doctor:
+                fmt = lambda dt: dt.strftime("%B %d, %Y") if hasattr(dt, "strftime") else str(dt)
+                fmt_day = lambda dt: dt.strftime("%A") if hasattr(dt, "strftime") else ""
+                fmt_time = lambda dt: dt.strftime("%I:%M %p") if hasattr(dt, "strftime") else str(dt)
+                old_start = booking.old_start_time or booking.start_time
+                old_end = booking.old_end_time or booking.end_time
+                # Email to patient
+                send_html_email(
+                    patient_user.email,
+                    "Video Session Rescheduled",
+                    "reschedulePatient.html",
+                    {
+                        "therapist_name": getattr(doctor, "full_name", ""),
+                        "patient_name": getattr(patient_user, "full_name", ""),
+                        "old_session_date": fmt(old_start),
+                        "old_session_day": fmt_day(old_start),
+                        "old_session_start_time": fmt_time(old_start),
+                        "old_session_end_time": fmt_time(old_end),
+                        "session_date": fmt(booking.start_time),
+                        "session_day": fmt_day(booking.start_time),
+                        "session_start_time": fmt_time(booking.start_time),
+                        "session_end_time": fmt_time(booking.end_time),
+                    },
+                )
+                # Email to doctor
+                send_html_email(
+                    doctor.email,
+                    "Video Session Rescheduled",
+                    "rescheduleDoctor.html",
+                    {
+                        "therapist_name": getattr(doctor, "full_name", ""),
+                        "patient_name": getattr(patient_user, "full_name", ""),
+                        "old_session_date": fmt(old_start),
+                        "old_session_day": fmt_day(old_start),
+                        "old_session_start_time": fmt_time(old_start),
+                        "old_session_end_time": fmt_time(old_end),
+                        "session_date": fmt(booking.start_time),
+                        "session_day": fmt_day(booking.start_time),
+                        "session_start_time": fmt_time(booking.start_time),
+                        "session_end_time": fmt_time(booking.end_time),
+                    },
+                )
             return Response({
                 "message": "Booking reschedule successfully.",
                 "details": SlotBookingSerializer(booking).data
@@ -633,11 +733,24 @@ class DoctorCancelView(APIView):
                     model_id=booking.id,
                 )
                 send_push_notification(patient, "Session cancelled", msg)
-                send_event_email(
-                    getattr(patient, "email", ""),
-                    "Session cancelled by therapist",
-                    msg,
-                )
+                # PHP SlotBooking::sendBookingCancelMailToUser
+                if patient:
+                    fmt = lambda dt: dt.strftime("%B %d, %Y") if hasattr(dt, "strftime") else str(dt)
+                    fmt_day = lambda dt: dt.strftime("%A") if hasattr(dt, "strftime") else ""
+                    fmt_time = lambda dt: dt.strftime("%I:%M %p") if hasattr(dt, "strftime") else str(dt)
+                    send_html_email(
+                        patient.email,
+                        "Video Session Cancelled",
+                        "bookingCancel.html",
+                        {
+                            "first_name": getattr(patient, "full_name", "") or getattr(patient, "first_name", ""),
+                            "therapist_name": getattr(doctor, "full_name", ""),
+                            "session_date": fmt(booking.start_time),
+                            "session_day": fmt_day(booking.start_time),
+                            "session_start_time": fmt_time(booking.start_time),
+                            "session_end_time": fmt_time(booking.end_time),
+                        },
+                    )
                 return Response({
                     "message": "Booking canceled successfully.",
                     "details": SlotBookingSerializer(booking).data

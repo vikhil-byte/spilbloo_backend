@@ -284,8 +284,13 @@ class LeaveView(APIView):
                 created_by=user
             )
 
-            booking.call_duration = duration
-            booking.duration_millisec = duration_millisec
+            # PHP stores call_duration as HH:MM:SS string (varchar) — convert
+            # integer seconds back to that format for SlotBooking CharField.
+            _dur = int(duration or 0)
+            _hours, _remainder = divmod(_dur, 3600)
+            _mins, _secs = divmod(_remainder, 60)
+            booking.call_duration = f"{_hours:02d}:{_mins:02d}:{_secs:02d}"
+            booking.duration_millisec = str(duration_millisec)
             booking.is_call_end = 1  # YES
             booking.save(update_fields=['call_duration', 'duration_millisec', 'is_call_end'])
 

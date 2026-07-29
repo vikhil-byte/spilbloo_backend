@@ -76,6 +76,10 @@ class SubscribedPlan(models.Model):
     UPCOMING_STATE_CANCELED = 4
     UPCOMING_STATE_IMMEDIATE_CANCELED = 5
 
+    # type_id constants (PHP SubscribedPlan)
+    TYPE_COUPON_NOT_APPLIED = 0
+    TYPE_COUPON_APPLIED = 1
+
     UPCOMING_STATE_CHOICES = (
         (UPCOMING_STATE_NONE, "None"),
         (UPCOMING_STATE_UPCOMING, "Upcoming"),
