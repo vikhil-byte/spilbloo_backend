@@ -1433,7 +1433,7 @@ class AssignDoctorView(APIView):
                 msg = "Tap here to send them your introduction message"
                 Notification.objects.create(
                     title=msg,
-                    html=msg,
+                    description=msg,
                     to_user_id=doctor.id,
                     created_by_id=patient.id,
                 )
@@ -1517,7 +1517,7 @@ class AssignVideoDoctorView(APIView):
                     msg = "Tap here to send them your introduction message"
                     Notification.objects.create(
                         title=msg,
-                        html=msg,
+                        description=msg,
                         to_user_id=doctor.id,
                         created_by_id=patient.id,
                     )
@@ -1658,7 +1658,7 @@ class SendMessageView(APIView):
         # Direct message alert is a per-user notification row.
         Notification.objects.create(
             title=title,
-            html=description,
+            description=description,
             to_user_id=to_id,
             created_by_id=request.user.id,
         )
