@@ -354,7 +354,7 @@ class BookingView(APIView):
                     to_user_id=doctor_id,
                     created_by=patient,
                     title=msg,
-                    html=msg
+                    description=msg
                 )
                 
                 doctor_user = User.objects.filter(id=doctor_id).first()
@@ -562,7 +562,7 @@ class AcceptBookingView(APIView):
             msg = f"{doc_name} confirmed your request for"
             
             Notification.objects.create(
-                html=msg,
+                description=msg,
                 title=msg,
                 to_user_id=booking.created_by_id,
                 created_by=user,
@@ -626,7 +626,7 @@ class DoctorRescheduleView(APIView):
                 to_user_id=booking.created_by_id,
                 created_by=doctor,
                 title=msg,
-                html=msg,
+                description=msg,
                 model_id=booking.id,
             )
             send_push_notification(booking.created_by, "Session rescheduled", msg)
@@ -729,7 +729,7 @@ class DoctorCancelView(APIView):
                     to_user_id=patient.id,
                     created_by=doctor,
                     title=msg,
-                    html=msg,
+                    description=msg,
                     model_id=booking.id,
                 )
                 send_push_notification(patient, "Session cancelled", msg)
@@ -800,7 +800,7 @@ class PatientRescheduleView(APIView):
             to_user_id=booking.doctor_id,
             created_by=user,
             title=message,
-            html=message,
+            description=message,
             model_id=booking.id,
             model_type="SlotBooking",
         )
