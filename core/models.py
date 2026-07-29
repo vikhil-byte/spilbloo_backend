@@ -576,8 +576,8 @@ class Setting(models.Model):
         from django.conf import settings as django_settings
 
         defaults = {
-            "ios_version": getattr(django_settings, "IOS_APP_VERSION", 1.9),
-            "android_version": getattr(django_settings, "ANDROID_APP_VERSION", 18),
+            "ios_version": getattr(django_settings, "IOS_APP_VERSION", 1.0),
+            "android_version": getattr(django_settings, "ANDROID_APP_VERSION", 1.0),
         }
         try:
             row = cls.objects.filter(key="versionSettings", state_id=cls.STATE_ACTIVE).first()
