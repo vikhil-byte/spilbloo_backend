@@ -301,6 +301,9 @@ class FetchUserSelectedTherapistAndPlanView(NodeBaseAPIView):
                 "profile_file": f"/user/image/{therapist.get('id')}?file={quote(str(therapist.get('profile_file') or ''))}",
                 "experience": to_int(therapist.get("experience"), default=0),
                 "sessions_completed": to_int(therapist.get("sessions_completed"), default=0),
+                "state_id": to_int(therapist.get("state_id"), default=1),
+                "is_active": 1 if therapist.get("is_active") else 0,
+                "is_available": 1 if therapist.get("is_available") else 0,
                 "token": therapist.get("token") or "",
                 "device_token": therapist.get("token") or "",
                 "online": online_status,
@@ -342,11 +345,7 @@ class FetchUserAppReviewView(NodeBaseAPIView):
 class FetchTherapistsView(NodeBaseAPIView):
     def get(self, request):
         try:
-            try:
-                results = list(User.objects.filter(role_id=5, is_available=True).values())
-            except Exception:
-                # Fallback for migrated schemas where is_available column doesn't exist yet.
-                results = list(User.objects.filter(role_id=5).values())
+            results = list(User.objects.filter(role_id=5, is_available=True).values())
             logger.info(
                 "node.fetch_therapists raw_rows=%s user_id=%s auth=%s",
                 len(results),
@@ -376,6 +375,9 @@ class FetchTherapistsView(NodeBaseAPIView):
                         "profile_file": f"/user/image/{row.get('id')}?file={quote(str(row.get('profile_file') or ''))}",
                         "experience": to_int(row.get("experience"), default=0),
                         "sessions_completed": to_int(row.get("sessions_completed"), default=0),
+                        "state_id": to_int(row.get("state_id"), default=1),
+                        "is_active": 1 if row.get("is_active") else 0,
+                        "is_available": 1 if row.get("is_available") else 0,
                         "token": row.get("token") or "",
                         "device_token": row.get("token") or "",
                         "online": online_status,
