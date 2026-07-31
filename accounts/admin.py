@@ -43,6 +43,7 @@ class CustomUserChangeForm(UserChangeForm):
 class UserAdmin(BaseUserAdmin):
     form = CustomUserChangeForm
     add_form = CustomUserCreationForm
+    actions = ["reset_user_state"]
 
     list_display = (
         "id",
@@ -246,6 +247,37 @@ class UserAdmin(BaseUserAdmin):
         state_str = state_map.get(sub.state_id, f"State {sub.state_id}")
         upcoming_str = " (Auto-Renewal Stopped)" if sub.upcoming_state in [4, 5] else ""
         return f"{sub.plan.title if sub.plan else 'Plan'} - {state_str}{upcoming_str}"
+
+    @admin.action(description="Reset selected user(s) state to fresh (unassign therapist & clear payments)")
+    def reset_user_state(self, request, queryset):
+        from plans.models import SubscribedPlan
+        from core.models import AssignedTherapist, SubscribedVideo, UserSymptom, DoctorRequest
+
+        count = 0
+        for user in queryset:
+            # 1. Reset user therapist and credit fields
+            user.doctor_id = None
+            user.doctor_assigned_time = None
+            user.video_credit = "0"
+            user.save()
+
+            # 2. Clear assigned therapist records
+            AssignedTherapist.objects.filter(created_by=user).delete()
+
+            # 3. Clear plan subscriptions & video credits
+            SubscribedPlan.objects.filter(created_by=user).delete()
+            SubscribedVideo.objects.filter(created_by=user).delete()
+
+            # 4. Clear onboarding symptoms and doctor requests
+            UserSymptom.objects.filter(created_by=user).delete()
+            DoctorRequest.objects.filter(created_by=user).delete()
+
+            count += 1
+
+        self.message_user(
+            request,
+            f"Successfully reset state for {count} user(s). Unassigned therapist, cleared plan subscriptions, video credits, and intake requests."
+        )
 
 
 @admin.register(HaLogins)
