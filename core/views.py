@@ -632,3 +632,37 @@ class TherapistOnboardingView(APIView):
             )
 
 
+class PublicTherapistListView(APIView):
+    permission_classes = (AllowAny,)
+
+    def get(self, request):
+        from core.models import UserSymptom
+        doctors = User.objects.filter(
+            role_id=User.ROLE_DOCTER,
+            state_id=User.STATE_ACTIVE,
+            is_active=True
+        ).order_by('-id')
+
+        data = []
+        for doc in doctors:
+            symptom_names = list(
+                UserSymptom.objects.filter(created_by=doc)
+                .values_list('symptom__title', flat=True)
+            )
+
+            data.append({
+                "id": doc.id,
+                "full_name": doc.full_name or doc.first_name or f"Therapist #{doc.id}",
+                "title": doc.qualification or "",
+                "qualification": doc.qualification or "",
+                "experience": f"{doc.experience}+ Years Experience" if doc.experience else "",
+                "sessions_completed": f"{doc.sessions_completed}+" if doc.sessions_completed else "",
+                "about_me": doc.about_me or "",
+                "language": doc.language or "",
+                "specialties": symptom_names,
+                "gender": doc.gender,
+            })
+        return Response({"results": data, "count": len(data)}, status=status.HTTP_200_OK)
+
+
+

@@ -21,6 +21,11 @@ from django.http import HttpResponse
 from accounts.views import LogoutView, CardDeleteView, UserImageView
 
 def robots_txt(request):
+    host = request.get_host().lower()
+    if 'dev.' in host or 'staging' in host:
+        response = HttpResponse("User-agent: *\nDisallow: /\n", content_type="text/plain")
+        response['X-Robots-Tag'] = 'noindex, nofollow'
+        return response
     content = "User-agent: *\nDisallow: /admin/\nDisallow: /api/\nSitemap: https://spilbloo.com/sitemap.xml\n"
     return HttpResponse(content, content_type="text/plain")
 
