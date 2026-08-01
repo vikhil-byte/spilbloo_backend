@@ -115,6 +115,9 @@ def _parse_duration_to_seconds(val):
 class JoinView(APIView):
     permission_classes = (IsAuthenticated,)
 
+    def get(self, request, *args, **kwargs):
+        return self.post(request, *args, **kwargs)
+
     def post(self, request):
         user = request.user
         data = request.data or {}
@@ -228,6 +231,9 @@ class JoinView(APIView):
 class LeaveView(APIView):
     permission_classes = (IsAuthenticated,)
 
+    def get(self, request, *args, **kwargs):
+        return self.post(request, *args, **kwargs)
+
     def post(self, request):
         user = request.user
         data = request.data or {}
@@ -321,6 +327,9 @@ class LeaveView(APIView):
 
 class CompleteBookingView(APIView):
     permission_classes = (IsAuthenticated, IsDoctor)
+
+    def get(self, request, booking_id=None):
+        return self.post(request, booking_id=booking_id)
 
     def post(self, request, booking_id=None):
         user = request.user
