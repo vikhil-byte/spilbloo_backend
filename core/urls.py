@@ -9,7 +9,8 @@ from .views import (
     SettingViewSet, DisclaimerViewSet, PushNotificationViewSet,
     FileViewSet, CurrencyViewSet, RefundLogViewSet, InvoiceViewSet,
     HomeContentViewSet, LoginHistoryViewSet, TherapistApplicationViewSet,
-    TherapistInviteViewSet, TherapistOnboardingView, LanguageViewSet
+    TherapistInviteViewSet, TherapistOnboardingView, LanguageViewSet,
+    PublicTherapistListView
 )
 
 router = DefaultRouter()
@@ -44,4 +45,5 @@ router.register(r'languages', LanguageViewSet)
 urlpatterns = [
     path('', include(router.urls)),
     path('therapist-onboarding/', TherapistOnboardingView.as_view(), name='therapist_onboarding'),
+    path('public-therapists/', PublicTherapistListView.as_view(), name='public_therapists'),
 ]
