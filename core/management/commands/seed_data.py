@@ -3,7 +3,7 @@ from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
 from core.models import (
     Symptom, NodeSubscriptionPlan, HomeCard, DailyCheckinQuestion, DailyCheckinAnswer,
-    DailyJournal, TherapistApplication, Language
+    DailyJournal, TherapistApplication, Language, Category, Faq
 )
 from availability.models import Slot
 
@@ -347,5 +347,86 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"  + Seeded {langs_seeded_count} Indian languages."))
         else:
             self.stdout.write("  Indian languages already seeded.")
+
+        # Seed FAQ Categories and FAQs
+        self.stdout.write("Seeding FAQ categories & FAQs...")
+        categories_data = [
+            (1, 'General', 1),
+            (2, 'Text & Video', 1),
+            (3, 'Account & Privacy', 1),
+            (4, 'Subscriptions & Billing', 1),
+            (5, 'Therapist FAQs', 2),
+        ]
+        for cat_id, cat_title, type_id in categories_data:
+            Category.objects.get_or_create(
+                id=cat_id,
+                defaults={'title': cat_title, 'state_id': Category.STATE_ACTIVE, 'type_id': type_id}
+            )
+
+        faqs_data = [
+            {'id': 1, 'question': 'What is Spilbloo?', 'answer': '<p>Spilbloo is a text and video therapy platform that helps connect you with the right professional therapist. Text, share voice notes or schedule video calls, all on the app, and as per your convenience with a therapist that you select.</p>\n', 'category_id': 1},
+            {'id': 2, 'question': 'Who is Spilbloo for?', 'answer': '<p>Spilbloo is for everyone who needs it. Spilbloo is for everyone across the race, gender and sexuality spectrum. Our goal is to make mental healthcare more accessible than it currently is.</p>\n', 'category_id': 1},
+            {'id': 3, 'question': 'Who are the therapists on Spilbloo?', 'answer': '<p>All therapists on Spilbloo are clinical Mental Health Professionals (MHPs) who have completed their education of at least a post-graduate level typically as MA / MSc (Clinical or Counselling Psychology) and/or MPhil (Clinical Psychology). They deal with different fields of psychology, each with their own expertise.</p>\n', 'category_id': 1},
+            {'id': 4, 'question': 'How much does it cost?', 'answer': '<p>Spilbloo has various subscription plans ranging from INR 499 to INR 699 per week. Our goal is to make quality mental healthcare affordable across the spectrum. To put that into perspective, Spilbloo is up to 5 times cheaper than in-person therapy.</p>\n', 'category_id': 1},
+            {'id': 5, 'question': 'Is Spilbloo for emergency or SOS cases?', 'answer': '<p>No, Spilbloo is not for emergency, life-threatening or SOS cases. If you find yourself or someone you know in such a situation, please click on this link to use these third-party resources.</p>\n', 'category_id': 1},
+            {'id': 6, 'question': 'Do I choose the therapist myself?', 'answer': '<p>Yes, our algorithm matches you with multiple options of therapists who are best suited to work with you. You select who you would like to speak with.</p>\n', 'category_id': 1},
+            {'id': 7, 'question': 'What if I’m not happy with my therapist on Spilbloo?', 'answer': '<p>In case\xa0you are not happy with your current therapist, you can switch to a different one once during each subscription cycle. To do so, you can find the option under your \'Profile\'.</p>\n', 'category_id': 1},
+            {'id': 8, 'question': 'What platforms is Spilbloo available on?', 'answer': '<p>Spilbloo is available on the iOS App Store and the Google Play Store.</p>\n', 'category_id': 1},
+            {'id': 9, 'question': 'How do I communicate with the therapist?', 'answer': '<p>You can text and share voice notes with your therapist. Depending on the plan you have purchased, you can also schedule video sessions with them.</p>\n', 'category_id': 2},
+            {'id': 10, 'question': 'How do I schedule video sessions?', 'answer': '<p>Tap on Book New Session on the Home screen. From there you can see the availability of your therapist by selecting the date. Once you select a time and book the session, the therapist will soon confirm.</p>\n', 'category_id': 2},
+            {'id': 11, 'question': 'Can I take my video calls on the desktop or web?', 'answer': '<p>No, as of now you can only connect via the app.</p>\n', 'category_id': 2},
+            {'id': 12, 'question': 'What happens if I need to reschedule my video session?', 'answer': '<p>To reschedule a session, tap on the 3 dots on the right of your scheduled session on the Home Screen. There you will be able to reschedule the session to a different time of your choosing. Sessions can only be rescheduled up to 24 hours prior to the commencement of the session.</p>\n', 'category_id': 2},
+            {'id': 13, 'question': 'If I switch therapists, do I have access to the old messages?', 'answer': '<p>Yes. The chats still remain as an archive on your Chats tab.</p>\n', 'category_id': 2},
+            {'id': 14, 'question': 'What personal information of mine does the therapist have access to?', 'answer': '<p>The therapist has no access to your contact information or full name. For example, if your name is Jay Malhotra, they can only see your contact as &lsquo;Jay M&rsquo;.</p>\n', 'category_id': 3},
+            {'id': 15, 'question': 'Does client-therapist confidentiality apply to text-based therapy?', 'answer': '<p>Yes, your chats are secure and confidential on the Spilbloo app.</p>\n', 'category_id': 3},
+            {'id': 16, 'question': 'Do I have the option of adding a passcode to access the app?', 'answer': '<p>Yes, you can add a passcode to the app. The option is available under &lsquo;Profile&rsquo;.</p>\n', 'category_id': 3},
+            {'id': 17, 'question': 'Do you offer a free trial?', 'answer': '<p>Yes, all our subscription plans have a 7-day trial when you first subscribe.</p>\n', 'category_id': 4},
+            {'id': 18, 'question': 'What happens if I don’t want to continue after the trial?', 'answer': '<p>Simple, you cancel your subscription before your trial ends. You will not be charged anything for this period.</p>\n', 'category_id': 4},
+            {'id': 19, 'question': 'What is the duration of the subscription?', 'answer': '<p>We have different plans ranging from 30 day to 90 day periods. All subscriptions work on auto-renewal basis.</p>\n', 'category_id': 4},
+            {'id': 20, 'question': 'When do I get charged?', 'answer': '<p>Your first charge will be at the end of the free trial. After that, all our plans auto-renew as per the duration of the plan purchased.</p>\n', 'category_id': 4},
+            {'id': 21, 'question': 'How do I cancel my subscription?', 'answer': '<p>You can cancel your subscription under the &lsquo;Manage Subscription&rsquo; option in your Profile.</p>\n', 'category_id': 4},
+            {'id': 22, 'question': 'Can I change my subscription?', 'answer': '<p>You can change your subscription under the &lsquo;Manage Subscription&rsquo; option in your Profile. However, your new subscription plan will only go into effect once the current plan ends.</p>\n', 'category_id': 4},
+            {'id': 23, 'question': 'Can I purchase additional video sessions with my therapist?', 'answer': '<p>Yes, you can purchase additional video sessions</p>\n', 'category_id': 4},
+            {'id': 24, 'question': 'Can I use my insurance to cover the subscription fees?', 'answer': '<p>No, Spilbloo does not support any insurance providers as of now.</p>\n', 'category_id': 4},
+            {'id': 25, 'question': 'How long do I have before my unused video session credits expire?', 'answer': '<p>You have to use your video session credits before your primary text subscription expires.</p>\n', 'category_id': 4},
+            {'id': 26, 'question': 'How will I know if a new client has been assigned to me?', 'answer': '<p>You will receive a push notification on your app as well as an e-mail notification on your registered email address.</p>\n', 'category_id': 5},
+            {'id': 27, 'question': 'How do I know the details of this client and what they are dealing with?', 'answer': '<p>Tap on the name of the client in the top bar in the chat to learn more about the client, what they are dealing with and their subscription plan details.</p>\n', 'category_id': 5},
+            {'id': 28, 'question': 'How do I set my availability for video calls on the app?', 'answer': '<p>Go to: Schedule &gt; Manage &gt; Select Date &gt; Select available time slots &gt; Save</p>\n', 'category_id': 5},
+            {'id': 29, 'question': 'Can I set my availability for multiple dates at once?', 'answer': '<p>Yes please! We encourage you having your availability set on the app up to 30 days in advance.</p>\n\n<p>Go to: Schedule &gt; Manage &gt; Multi-Select &gt; Select multiple dates &gt; Select available time slots &gt; Save</p>\n', 'category_id': 5},
+            {'id': 30, 'question': 'Can the client send me images/video?', 'answer': '<p>No, to protect your privacy we have only enabled the image send option for you. So you can use the image tool to share relevant resources with the client, but they can only share text messages and voice notes with you.</p>\n', 'category_id': 5},
+            {'id': 31, 'question': 'How do I report wrongful/indecent behaviour on the client’s part?', 'answer': '<p>Please reach out to <a href="mailto:mhp@spilbloo.com">mhp@spilbloo.com</a> with the subject line &ldquo;Report User: &lt;User Name&gt;&rdquo; and we will respond to that on priority.</p>\n', 'category_id': 5},
+            {'id': 32, 'question': 'What do I do if a client is threatening self-harm on the app?', 'answer': '<p>Spilbloo is not an emergency or an SOS therapy platform. Please share the relevant resources such as the Emergency Resources link with them to help guide them in the right direction. Please refer to the Therapist Onboarding Deck for further details.</p>\n', 'category_id': 5},
+            {'id': 33, 'question': 'Where can I view my earnings on the app?', 'answer': '<p>You can go to Profile &gt; Earnings to view your lifetime as well monthly breakdown of earnings on Spilbloo.</p>\n', 'category_id': 5},
+            {'id': 34, 'question': 'If I need a further breakdown or clarification of my monthly earnings, what do I do?', 'answer': '<p>You can reach out to us at <a href="mailto:mhp@spilbloo.com">mhp@spilbloo.com</a> with your request and we will get back to you with the requested information.</p>\n', 'category_id': 5},
+            {'id': 35, 'question': 'Do I need to activate my App Passcode to use the app?', 'answer': '<p>Yes, we require all therapists to have a mandatory App Passcode to add an extra layer of security for the clients&rsquo; confidentiality.</p>\n', 'category_id': 5},
+            {'id': 36, 'question': 'Up till when can I reschedule or cancel a video session?', 'answer': '<p>You can reschedule or cancel a video session up to 24 hours prior to the session beginning. We always recommend that you reach out to the client over the chat and inform them before doing so and always provide an alternative time in the event of a cancellation.</p>\n', 'category_id': 5},
+            {'id': 37, 'question': 'How do I make edits to my profile or profile picture?', 'answer': '<p>You can reach out to us at <a href="mailto:mhp@spilbloo.com">mhp@spilbloo.com</a> with the requested edits and we can help you with the same.</p>\n', 'category_id': 5},
+        ]
+
+        faqs_seeded_count = 0
+        for item in faqs_data:
+            _, created = Faq.objects.update_or_create(
+                id=item['id'],
+                defaults={
+                    'question': item['question'],
+                    'answer': item['answer'],
+                    'category_id': item['category_id'],
+                    'state_id': Faq.STATE_ACTIVE,
+                    'type_id': 0
+                }
+            )
+            if created:
+                faqs_seeded_count += 1
+
+        if faqs_seeded_count > 0:
+            self.stdout.write(self.style.SUCCESS(f"  + Seeded {faqs_seeded_count} FAQs."))
+        else:
+            self.stdout.write("  FAQs already seeded and updated.")
+
+        from django.db import connection
+        if connection.vendor == 'postgresql':
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT setval(pg_get_serial_sequence('tbl_category', 'id'), coalesce(max(id), 1)) FROM tbl_category;")
+                cursor.execute("SELECT setval(pg_get_serial_sequence('tbl_faq', 'id'), coalesce(max(id), 1)) FROM tbl_faq;")
 
         self.stdout.write(self.style.SUCCESS("Database seeding completed successfully!"))

@@ -476,3 +476,63 @@ class PlanListParityTests(APITestCase):
         self.assertEqual(p30["tax_percentage"], "18")
         self.assertEqual(p30["company_name"], "")
 
+
+class MyPlansDateFormatTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="myplans_date@spilbloo.local",
+            password="Test@1234",
+            full_name="Date Format Tester",
+            role_id=User.ROLE_PATIENT,
+            state_id=User.STATE_ACTIVE,
+        )
+        self.client.force_authenticate(user=self.user)
+        self.url = reverse("my_plans")
+        now = timezone.now()
+        self.plan = Plan.objects.create(
+            title="My Plans Date Test Plan",
+            plan_id="plan_date_001",
+            total_price=Decimal("1000.00"),
+            final_price=Decimal("1180.00"),
+            duration=30,
+            plan_type=0,
+            type_id=0,
+            state_id=1,
+        )
+        self.subscribed_plan = SubscribedPlan.objects.create(
+            plan=self.plan,
+            created_by=self.user,
+            plan_type=0,
+            state_id=1,
+            subscription_id="sub_date_123",
+            start_date=now,
+            end_date=now + timezone.timedelta(days=14),
+            renewal_date=now + timezone.timedelta(days=14),
+            plan_price=Decimal("1016.00"),
+            gst_price=Decimal("183.00"),
+            final_price=Decimal("1199.00"),
+        )
+
+    def test_my_plans_datetime_format(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("list", response.data)
+        item = response.data["list"][0]
+
+        import re
+        date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+
+        self.assertTrue(
+            date_pattern.match(item["start_date"]),
+            f"start_date '{item['start_date']}' does not match YYYY-MM-DD HH:MM:SS format"
+        )
+        self.assertTrue(
+            date_pattern.match(item["end_date"]),
+            f"end_date '{item['end_date']}' does not match YYYY-MM-DD HH:MM:SS format"
+        )
+        self.assertTrue(
+            date_pattern.match(item["renewal_date"]),
+            f"renewal_date '{item['renewal_date']}' does not match YYYY-MM-DD HH:MM:SS format"
+        )
+
+
