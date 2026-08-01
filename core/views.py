@@ -639,7 +639,8 @@ class PublicTherapistListView(APIView):
         from core.models import UserSymptom
         doctors = User.objects.filter(
             role_id=User.ROLE_DOCTER,
-            state_id=User.STATE_ACTIVE
+            state_id=User.STATE_ACTIVE,
+            is_active=True
         ).order_by('-id')
 
         KNOWN_MODALITIES = ['CBT', 'DBT', 'ACT', 'REBT', 'Mindfulness', 'Psychodynamic', 'Gestalt', 'Solution-Focused', 'Somatic', 'Behavioral Therapy']
