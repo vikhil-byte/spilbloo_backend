@@ -642,12 +642,23 @@ class PublicTherapistListView(APIView):
             state_id=User.STATE_ACTIVE
         ).order_by('-id')
 
+        KNOWN_MODALITIES = ['CBT', 'DBT', 'ACT', 'REBT', 'Mindfulness', 'Psychodynamic', 'Gestalt', 'Solution-Focused', 'Somatic', 'Behavioral Therapy']
+
         data = []
         for doc in doctors:
             symptom_names = list(
                 UserSymptom.objects.filter(created_by=doc)
                 .values_list('symptom__title', flat=True)
             )
+
+            # Extract modalities dynamically from doctor text
+            doc_text = f"{doc.about_me or ''} {doc.qualification or ''}"
+            detected_modalities = [
+                m for m in KNOWN_MODALITIES if m.lower() in doc_text.lower()
+            ]
+            if not detected_modalities:
+                detected_modalities = ['Counseling', 'Talk Therapy']
+
             data.append({
                 "id": doc.id,
                 "full_name": doc.full_name or doc.first_name or f"Therapist {doc.id}",
@@ -657,7 +668,8 @@ class PublicTherapistListView(APIView):
                 "sessions_completed": f"{doc.sessions_completed or 100}+",
                 "about_me": doc.about_me or "",
                 "language": doc.language or "English, Hindi",
-                "specialties": symptom_names if symptom_names else ["Anxiety", "Depression", "CBT"],
+                "specialties": symptom_names if symptom_names else ["Counseling", "Mental Wellness"],
+                "modalities": detected_modalities,
                 "gender": doc.gender,
             })
         return Response({"results": data, "count": len(data)}, status=status.HTTP_200_OK)
