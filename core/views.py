@@ -643,8 +643,6 @@ class PublicTherapistListView(APIView):
             is_active=True
         ).order_by('-id')
 
-        KNOWN_MODALITIES = ['CBT', 'DBT', 'ACT', 'REBT', 'Mindfulness', 'Psychodynamic', 'Gestalt', 'Solution-Focused', 'Somatic', 'Behavioral Therapy']
-
         data = []
         for doc in doctors:
             symptom_names = list(
@@ -652,25 +650,16 @@ class PublicTherapistListView(APIView):
                 .values_list('symptom__title', flat=True)
             )
 
-            # Extract modalities dynamically from doctor text
-            doc_text = f"{doc.about_me or ''} {doc.qualification or ''}"
-            detected_modalities = [
-                m for m in KNOWN_MODALITIES if m.lower() in doc_text.lower()
-            ]
-            if not detected_modalities:
-                detected_modalities = ['Counseling', 'Talk Therapy']
-
             data.append({
                 "id": doc.id,
-                "full_name": doc.full_name or doc.first_name or f"Therapist {doc.id}",
-                "title": doc.qualification or "Counseling Psychologist",
-                "qualification": doc.qualification or "M.A. Counseling Psychology",
-                "experience": f"{doc.experience or 5}+ Years Experience",
-                "sessions_completed": f"{doc.sessions_completed or 100}+",
+                "full_name": doc.full_name or doc.first_name or f"Therapist #{doc.id}",
+                "title": doc.qualification or "",
+                "qualification": doc.qualification or "",
+                "experience": f"{doc.experience}+ Years Experience" if doc.experience else "",
+                "sessions_completed": f"{doc.sessions_completed}+" if doc.sessions_completed else "",
                 "about_me": doc.about_me or "",
-                "language": doc.language or "English, Hindi",
-                "specialties": symptom_names if symptom_names else ["Counseling", "Mental Wellness"],
-                "modalities": detected_modalities,
+                "language": doc.language or "",
+                "specialties": symptom_names,
                 "gender": doc.gender,
             })
         return Response({"results": data, "count": len(data)}, status=status.HTTP_200_OK)
