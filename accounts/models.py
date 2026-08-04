@@ -74,6 +74,11 @@ class User(AbstractUser):
     state_id = models.SmallIntegerField(choices=STATE_CHOICES, default=STATE_ACTIVE)
     type_id = models.SmallIntegerField(default=0)
 
+    # When True, this user (typically a demo/review therapist) is excluded from
+    # patient-facing therapist directories but can still log in and be queried
+    # directly by id. Set via the setup_review_accounts management command.
+    is_hidden_from_directory = models.BooleanField(default=False)
+
     qualification = models.CharField(max_length=255, blank=True, null=True)
     experience = models.IntegerField(default=0, blank=True, null=True)
     sessions_completed = models.IntegerField(default=0, blank=True, null=True)

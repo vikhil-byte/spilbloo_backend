@@ -191,7 +191,9 @@ class Command(BaseCommand):
         return user
 
     def _create_therapist(self, email, password):
-        """Create the demo THERAPIST account. Login is email + password."""
+        """Create the demo THERAPIST account. Login is email + password.
+        Marked is_hidden_from_directory=True so it never appears in patient-facing
+        therapist lists, while remaining loginable for the therapist-app review."""
         t, created = User.objects.get_or_create(
             email=email,
             defaults={
@@ -199,6 +201,7 @@ class Command(BaseCommand):
                 'role_id': User.ROLE_DOCTER,
                 'state_id': User.STATE_ACTIVE,
                 'is_active': True,
+                'is_hidden_from_directory': True,
                 'qualification': 'M.A. Counseling Psychology',
                 'experience': 7,
                 'sessions_completed': 120,
@@ -219,13 +222,14 @@ class Command(BaseCommand):
         if not created:
             t.is_active = True
             t.state_id = User.STATE_ACTIVE
+            t.is_hidden_from_directory = True
             t.set_password(password)
             t.save()
-            self.stdout.write(f'  ↻ Reactivated existing therapist: {email}')
+            self.stdout.write(f'  ↻ Reactivated existing therapist (hidden from directory): {email}')
         else:
             t.set_password(password)
             t.save()
-            self.stdout.write(f'  + Created therapist (password login): {email}')
+            self.stdout.write(f'  + Created therapist (password login, hidden from directory): {email}')
         return t
 
     # ------------------------------------------------------------------ seed

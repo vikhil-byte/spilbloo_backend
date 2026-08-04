@@ -640,7 +640,8 @@ class PublicTherapistListView(APIView):
         doctors = User.objects.filter(
             role_id=User.ROLE_DOCTER,
             state_id=User.STATE_ACTIVE,
-            is_active=True
+            is_active=True,
+            is_hidden_from_directory=False,
         ).order_by('-id')
 
         data = []
