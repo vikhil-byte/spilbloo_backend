@@ -31,6 +31,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DEBUG = os.environ.get("DEBUG", "True") == "True"
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "staging").lower()
 
+# Per-email magic OTP for store review accounts (App Store / Play Store).
+# When BOTH vars below are set in .env, the user with REVIEW_OTP_EMAIL can log in
+# using REVIEW_OTP — even in production. This is scoped to ONE email address only,
+# so real users are never affected. Leave blank/absent to disable entirely.
+REVIEW_OTP_EMAIL = os.environ.get("REVIEW_OTP_EMAIL", "").strip().lower()
+REVIEW_OTP = os.environ.get("REVIEW_OTP", "").strip()
+
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get("SECRET_KEY")
 if not SECRET_KEY:

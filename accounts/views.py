@@ -610,7 +610,25 @@ class VerifyOtpView(APIView):
 
         stored_otp = _get_user_otp(user)
         is_staging = getattr(settings, "ENVIRONMENT", "staging").lower() in ["staging", "dev", "development"]
-        is_otp_valid = (stored_otp is not None and str(stored_otp) == str(otp)) or (is_staging and str(otp) == "1234")
+
+        # Per-email magic OTP for store review accounts (App Store / Play Store).
+        # Scoped to ONE email configured via REVIEW_OTP_EMAIL in .env. Works in any
+        # environment, including production, but only for that exact email. Disabled
+        # entirely when either env var is absent.
+        review_email = getattr(settings, "REVIEW_OTP_EMAIL", "").strip().lower()
+        review_otp = getattr(settings, "REVIEW_OTP", "").strip()
+        is_review_account = (
+            bool(review_email)
+            and bool(review_otp)
+            and email == review_email
+            and str(otp) == review_otp
+        )
+
+        is_otp_valid = (
+            (stored_otp is not None and str(stored_otp) == str(otp))
+            or (is_staging and str(otp) == "1234")
+            or is_review_account
+        )
 
         if is_otp_valid:
             user.state_id = User.STATE_ACTIVE
