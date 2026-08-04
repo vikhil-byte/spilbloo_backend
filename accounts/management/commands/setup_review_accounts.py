@@ -51,13 +51,13 @@ from core.models import (
 import os
 
 DEFAULT_USER_EMAIL = os.environ.get(
-    'REVIEW_USER_EMAIL', 'reviewer.user@spilbloo.com'
+    'REVIEW_USER_EMAIL', 'user@spilbloo.com'
 )
 DEFAULT_THERAPIST_EMAIL = os.environ.get(
-    'REVIEW_THERAPIST_EMAIL', 'reviewer.therapist@spilbloo.com'
+    'REVIEW_THERAPIST_EMAIL', 'therapist@spilbloo.com'
 )
 DEFAULT_THERAPIST_PASSWORD = os.environ.get(
-    'REVIEW_THERAPIST_PASSWORD', 'Spilbloo@Review2026'
+    'REVIEW_THERAPIST_PASSWORD', 'demo1234'
 )
 # Magic OTP that works on staging/dev for any user account.
 MAGIC_STAGING_OTP = os.environ.get('REVIEW_USER_OTP', '1234')
@@ -146,12 +146,14 @@ class Command(BaseCommand):
 
     def _create_user(self, email):
         """Create the demo USER account. Login is OTP-based — no password set.
-        On staging/dev the magic OTP (default '1234') verifies any account."""
+        On staging/dev the magic OTP (default '1234') verifies any account.
+        Uses ROLE_PATIENT (4) because that's the role_id the iOS/Android user
+        app sends on login (SelectRole.pateint = 4)."""
         user, created = User.objects.get_or_create(
             email=email,
             defaults={
                 'full_name': 'Demo Reviewer',
-                'role_id': User.ROLE_USER,
+                'role_id': User.ROLE_PATIENT,
                 'state_id': User.STATE_ACTIVE,
                 'is_active': True,
                 'city': 'Mumbai',
@@ -164,11 +166,23 @@ class Command(BaseCommand):
             },
         )
         if not created:
-            # Existing account — just reactivate. Password irrelevant for OTP login.
-            user.is_active = True
-            user.state_id = User.STATE_ACTIVE
-            user.save()
-            self.stdout.write(f'  ↻ Reactivated existing user: {email}')
+            # Existing account — reactivate AND fix role_id in case it was created
+            # with the wrong role (e.g. ROLE_USER=2 instead of ROLE_PATIENT=4).
+            changed = []
+            if user.is_active is not True:
+                user.is_active = True
+                changed.append('is_active')
+            if user.state_id != User.STATE_ACTIVE:
+                user.state_id = User.STATE_ACTIVE
+                changed.append('state_id')
+            if user.role_id != User.ROLE_PATIENT:
+                user.role_id = User.ROLE_PATIENT
+                changed.append(f'role_id→{User.ROLE_PATIENT} (patient)')
+            if changed:
+                user.save()
+                self.stdout.write(f'  ↻ Reactivated + fixed {email} ({", ".join(changed)})')
+            else:
+                self.stdout.write(f'  ↻ Already correct: {email}')
         else:
             # OTP users get an unusable password so password login can never succeed.
             user.set_unusable_password()
