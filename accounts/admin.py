@@ -55,12 +55,14 @@ class UserAdmin(BaseUserAdmin):
         "doctor_id",
         "video_credit",
         "is_active",
+        "is_hidden_from_directory",
         "is_staff",
         "otp_verified",
         "date_joined",
     )
     list_filter = (
         "is_active",
+        "is_hidden_from_directory",
         "is_staff",
         "is_superuser",
         "role_id",
@@ -147,6 +149,7 @@ class UserAdmin(BaseUserAdmin):
                     "designation",
                     "tos",
                     "is_active",
+                    "is_hidden_from_directory",
                     "is_staff",
                     "is_superuser",
                     "groups",

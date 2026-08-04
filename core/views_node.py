@@ -345,7 +345,7 @@ class FetchUserAppReviewView(NodeBaseAPIView):
 class FetchTherapistsView(NodeBaseAPIView):
     def get(self, request):
         try:
-            results = list(User.objects.filter(role_id=5, is_available=True).values())
+            results = list(User.objects.filter(role_id=5, is_available=True, is_hidden_from_directory=False).values())
             logger.info(
                 "node.fetch_therapists raw_rows=%s user_id=%s auth=%s",
                 len(results),
