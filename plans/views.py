@@ -187,8 +187,13 @@ class PlanListView(generics.ListAPIView):
     def get_queryset(self):
         type_id = self.request.query_params.get('type_id', 0)
         currency = self.request.query_params.get('currency', 'INR')
-        qs = Plan.objects.filter(state_id=1, plan_type=0, type_id=0, currency_code=currency) # 0=Paid, 0=Visible
-        
+        base_filters = dict(state_id=1, plan_type=0, type_id=0) # 0=Paid, 0=Visible
+        qs = Plan.objects.filter(currency_code=currency, **base_filters)
+        if not qs.exists() and currency != 'INR':
+            # No plans priced in the requested currency yet (e.g. new market) - show INR
+            # pricing rather than an empty screen.
+            qs = Plan.objects.filter(currency_code='INR', **base_filters)
+
         if str(type_id) == '1': # PLAN_TEXT (Lite)
             qs = qs.filter(no_of_video_session=0)
         elif str(type_id) == '2': # PLAN_VIDEO_AND_TEXT (Plus)
@@ -832,7 +837,12 @@ class VideoPlanListView(generics.ListAPIView):
 
     def get_queryset(self):
         currency = self.request.query_params.get('currency', 'INR')
-        return VideoPlan.objects.filter(state_id=1, currency_code=currency).order_by('-id')
+        qs = VideoPlan.objects.filter(state_id=1, currency_code=currency)
+        if not qs.exists() and currency != 'INR':
+            # No plans priced in the requested currency yet (e.g. new market) - show INR
+            # pricing rather than an empty screen.
+            qs = VideoPlan.objects.filter(state_id=1, currency_code='INR')
+        return qs.order_by('-id')
 
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()

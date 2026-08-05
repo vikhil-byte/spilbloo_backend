@@ -1471,8 +1471,8 @@ class AssignDoctorView(APIView):
 class AssignVideoDoctorView(APIView):
     permission_classes = (IsAuthenticated,)
 
-    def post(self, request):
-        doctor_id = request.data.get('doctor_id')
+    def _assign(self, request):
+        doctor_id = request.data.get('doctor_id') or request.query_params.get('doctor_id')
         patient = request.user
 
         try:
@@ -1547,6 +1547,13 @@ class AssignVideoDoctorView(APIView):
         except Exception:
             logger.exception("assign-video-doctor failed: user_id=%s doctor_id=%s", getattr(request.user, "id", None), doctor_id)
             return Response({"error": "Unable to assign therapist right now."}, status=status.HTTP_400_BAD_REQUEST)
+
+    def post(self, request):
+        return self._assign(request)
+
+    def get(self, request):
+        # Android calls assign-video-doctor with query params (see AssignDoctorView).
+        return self._assign(request)
 
 class SocialLoginView(APIView):
     permission_classes = (AllowAny,)
