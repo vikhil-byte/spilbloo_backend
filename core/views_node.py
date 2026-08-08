@@ -19,6 +19,7 @@ from .models import (
     DailyCheckinQuestionAndAnswer, UserAppReview, ChatsHistory,
     ApiAccessToken
 )
+from availability.models import Notification
 
 
 User = get_user_model()
@@ -457,7 +458,7 @@ class SendPushNotificationView(NodeBaseAPIView):
                 logger.warning("SendPushNotification: User not found for id=%s", to_id)
                 return Response(node_error("User not found", 404), status=404)
 
-            # Discover tokens from both direct user.token and ApiAccessToken records
+            # Discover tokens from user.token and ApiAccessToken records
             unique_tokens = set()
             if getattr(user, "token", None) and str(user.token).strip():
                 unique_tokens.add(str(user.token).strip())
@@ -468,6 +469,18 @@ class SendPushNotificationView(NodeBaseAPIView):
                     unique_tokens.add(str(t).strip())
 
             logger.info("SendPushNotification: found %d total tokens for user_id=%s", len(unique_tokens), to_id)
+
+            # Persist notification into database (tbl_notification) for audit and inbox
+            try:
+                Notification.objects.create(
+                    title=title,
+                    description=title,
+                    to_user_id=user.id,
+                    created_by=user,
+                    state_id=1,
+                )
+            except Exception as e:
+                logger.error("SendPushNotification DB Persistence Error for user_id=%s: %s", to_id, e)
 
             if not unique_tokens:
                 logger.warning("SendPushNotification: no tokens found for user_id=%s", to_id)

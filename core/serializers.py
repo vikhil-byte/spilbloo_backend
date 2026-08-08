@@ -6,8 +6,19 @@ from .models import (
     VideoPlan, VideoCoupon, CouponUser, SubscribedVideo, UserSymptom,
     Setting, Disclaimer, PushNotification, File, Currency, RefundLog,
     Invoice, HomeContent, LoginHistory, Page, Category, Faq, TherapistApplication,
-    Language, TherapistInvite
+    Language, TherapistInvite, BlogPost
 )
+
+class BlogPostSerializer(serializers.ModelSerializer):
+    date = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BlogPost
+        fields = '__all__'
+
+    def get_date(self, obj):
+        return obj.formatted_date()
+
 
 class TherapistEarningSerializer(serializers.ModelSerializer):
     class Meta:

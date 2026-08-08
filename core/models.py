@@ -1223,3 +1223,55 @@ class TherapistInvite(models.Model):
         return f"{self.email} ({'used' if self.used else 'pending'})"
 
 
+class BlogPost(models.Model):
+    STATE_INACTIVE = 0
+    STATE_PUBLISHED = 1
+    STATE_DRAFT = 2
+
+    STATE_CHOICES = (
+        (STATE_INACTIVE, 'Inactive'),
+        (STATE_PUBLISHED, 'Published'),
+        (STATE_DRAFT, 'Draft'),
+    )
+
+    slug = models.SlugField(max_length=255, unique=True)
+    title = models.CharField(max_length=255)
+    meta_description = models.TextField(blank=True, null=True)
+    category = models.CharField(max_length=100, default='Mental Wellness')
+    author = models.CharField(max_length=100, default='Spilbloo Clinical Team')
+    reviewed_by = models.CharField(max_length=255, default='Dr. Ananya Sharma, RCI Registered Clinical Psychologist')
+    date = models.DateField(default=timezone.now)
+    read_time = models.CharField(max_length=50, blank=True, null=True)
+    featured = models.BooleanField(default=False)
+    image = models.URLField(max_length=1024, blank=True, null=True)
+    excerpt = models.TextField()
+    intro = models.TextField()
+    content_json = models.TextField(blank=True, null=True)  # Structured sections & bullet lists JSON string
+    faqs_json = models.TextField(blank=True, null=True)     # FAQs JSON string
+    state_id = models.SmallIntegerField(choices=STATE_CHOICES, default=STATE_PUBLISHED)
+    created_on = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'tbl_blog_post'
+        verbose_name = 'Blog Post'
+        verbose_name_plural = 'Blog Posts'
+        ordering = ['-created_on']
+
+    def save(self, *args, **kwargs):
+        # Auto-calculate reading time based on 200 words per minute
+        if not self.read_time:
+            text = f"{self.intro} {self.excerpt} {self.content_json or ''}"
+            word_count = len(text.split())
+            mins = max(1, round(word_count / 200))
+            self.read_time = f"{mins} min read"
+
+        super().save(*args, **kwargs)
+
+    def formatted_date(self):
+        return self.date.strftime('%B %d, %Y') if self.date else ''
+
+    def __str__(self):
+        return self.title
+
+
+

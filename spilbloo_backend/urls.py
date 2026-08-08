@@ -30,28 +30,23 @@ def robots_txt(request):
     return HttpResponse(content, content_type="text/plain")
 
 def sitemap_xml(request):
+    try:
+        import os
+        sitemap_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "spilbloo-site", "public", "sitemap.xml")
+        if os.path.exists(sitemap_path):
+            with open(sitemap_path, "r", encoding="utf-8") as f:
+                return HttpResponse(f.read(), content_type="application/xml")
+    except Exception:
+        pass
     content = """<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url>
-    <loc>https://spilbloo.com/</loc>
-    <priority>1.00</priority>
-  </url>
-  <url>
-    <loc>https://spilbloo.com/careers</loc>
-    <priority>0.80</priority>
-  </url>
-  <url>
-    <loc>https://spilbloo.com/resources</loc>
-    <priority>0.80</priority>
-  </url>
-  <url>
-    <loc>https://spilbloo.com/privacy-policy</loc>
-    <priority>0.50</priority>
-  </url>
-  <url>
-    <loc>https://spilbloo.com/terms-of-use</loc>
-    <priority>0.50</priority>
-  </url>
+  <url><loc>https://www.spilbloo.com/</loc><lastmod>2026-08-08</lastmod><priority>1.0</priority></url>
+  <url><loc>https://www.spilbloo.com/therapists</loc><lastmod>2026-08-08</lastmod><priority>0.95</priority></url>
+  <url><loc>https://www.spilbloo.com/blog</loc><lastmod>2026-08-08</lastmod><priority>0.95</priority></url>
+  <url><loc>https://www.spilbloo.com/resources</loc><lastmod>2026-08-08</lastmod><priority>0.8</priority></url>
+  <url><loc>https://www.spilbloo.com/careers</loc><lastmod>2026-08-08</lastmod><priority>0.8</priority></url>
+  <url><loc>https://www.spilbloo.com/privacy</loc><lastmod>2026-08-08</lastmod><priority>0.4</priority></url>
+  <url><loc>https://www.spilbloo.com/terms</loc><lastmod>2026-08-08</lastmod><priority>0.4</priority></url>
 </urlset>"""
     return HttpResponse(content, content_type="application/xml")
 

@@ -74,6 +74,11 @@ def send_push_notification(user, title, description, data=None):
         logger.warning("[Push Notify Abort] No user object passed to send_push_notification.")
         return
 
+    # Respect user preference: If user has muted push notifications (is_notify == 0), skip FCM dispatch
+    if getattr(user, 'is_notify', 1) == 0:
+        logger.info("[Push Notify Muted] User ID %s has notification toggle turned off (is_notify=0).", user.id)
+        return
+
     logger.info("[Push Notify Request] Target User ID: %s (%s) | Title: %r", user.id, getattr(user, 'email', 'N/A'), title)
 
     # 1. Resolve tokens from direct attributes & ApiAccessToken table
@@ -112,6 +117,18 @@ def send_push_notification(user, title, description, data=None):
 
     logger.info("[Push Notify Summary] User ID: %s | Title: %r | Sent Succeeded: %d | Failed: %d",
                 user.id, title, sent_count, fail_count)
+
+    # Persist notification into database (tbl_notification) for audit and in-app inbox
+    try:
+        Notification.objects.create(
+            title=title,
+            description=description or title,
+            to_user_id=user.id,
+            created_by=user,
+            state_id=1,
+        )
+    except Exception as e:
+        logger.error("[Push Notify DB Persistence Error] Failed logging notification for User ID %s: %s", user.id, e)
 
 class AddScheduleView(APIView):
     permission_classes = (IsAuthenticated,)
