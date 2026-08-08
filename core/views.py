@@ -209,15 +209,13 @@ class DisclaimerViewSet(viewsets.ModelViewSet):
 class PushNotificationViewSet(viewsets.ModelViewSet):
     queryset = PushNotification.objects.all()
     serializer_class = PushNotificationSerializer
-    permission_classes = [IsOwnerOrAdmin]
+    permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
         user = self.request.user
         if not user or not user.is_authenticated:
             return PushNotification.objects.none()
-        if user.is_staff:
-            return PushNotification.objects.all()
-        return PushNotification.objects.filter(Q(created_by=user) | Q(user=user))
+        return PushNotification.objects.all()
 
 class FileViewSet(viewsets.ModelViewSet):
     queryset = File.objects.all()
