@@ -458,10 +458,8 @@ class SendPushNotificationView(NodeBaseAPIView):
                 logger.warning("SendPushNotification: User not found for id=%s", to_id)
                 return Response(node_error("User not found", 404), status=404)
 
-            # Discover tokens from user.device_token, user.token, and ApiAccessToken records
+            # Discover tokens from user.token and ApiAccessToken records
             unique_tokens = set()
-            if getattr(user, "device_token", None) and str(user.device_token).strip():
-                unique_tokens.add(str(user.device_token).strip())
             if getattr(user, "token", None) and str(user.token).strip():
                 unique_tokens.add(str(user.token).strip())
 
