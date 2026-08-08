@@ -53,7 +53,7 @@ from .models import (
     VideoPlan, VideoCoupon, CouponUser, SubscribedVideo, UserSymptom,
     Setting, Disclaimer, PushNotification, File, Currency, RefundLog,
     Invoice, HomeContent, LoginHistory, TherapistApplication,
-    Language, TherapistInvite
+    Language, TherapistInvite, BlogPost
 )
 from .serializers import (
     TherapistEarningSerializer, ContactFormSerializer, DoctorReasonSerializer,
@@ -64,7 +64,8 @@ from .serializers import (
     SettingSerializer, DisclaimerSerializer, PushNotificationSerializer,
     FileSerializer, CurrencySerializer, RefundLogSerializer, InvoiceSerializer,
     HomeContentSerializer, LoginHistorySerializer, TherapistApplicationSerializer,
-    LanguageSerializer, TherapistInviteSerializer, TherapistOnboardingSerializer
+    LanguageSerializer, TherapistInviteSerializer, BlogPostSerializer,
+    TherapistOnboardingSerializer
 )
 
 class TherapistEarningViewSet(viewsets.ModelViewSet):
@@ -664,6 +665,23 @@ class PublicTherapistListView(APIView):
                 "gender": doc.gender,
             })
         return Response({"results": data, "count": len(data)}, status=status.HTTP_200_OK)
+
+
+class BlogPostViewSet(viewsets.ModelViewSet):
+    queryset = BlogPost.objects.all()
+    serializer_class = BlogPostSerializer
+    permission_classes = (IsAdminOrReadOnly,)
+    lookup_field = 'slug'
+
+
+class PublicBlogPostListView(APIView):
+    permission_classes = (AllowAny,)
+
+    def get(self, request):
+        posts = BlogPost.objects.filter(state_id=BlogPost.STATE_PUBLISHED).order_by('-created_on')
+        serializer = BlogPostSerializer(posts, many=True)
+        return Response({"results": serializer.data, "count": posts.count()}, status=status.HTTP_200_OK)
+
 
 
 

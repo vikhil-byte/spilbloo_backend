@@ -9,7 +9,7 @@ from .models import (
     Setting, Disclaimer, PushNotification, File, Page, Category, Faq,
     NodeSubscriptionPlan, NodeUserSelectedTherapistPlan, HomeCard, DailyJournal,
     DailyCheckinQuestion, DailyCheckinAnswer, DailyCheckinQuestionAndAnswer,
-    UserAppReview, ChatsHistory, ApiAccessToken
+    UserAppReview, ChatsHistory, ApiAccessToken, BlogPost
 )
 
 # Custom branding
@@ -261,4 +261,14 @@ class TherapistApplicationAdmin(admin.ModelAdmin):
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.exception("Failed to queue therapist application status email Celery task from admin: %s", str(e))
+
+
+@admin.register(BlogPost)
+class BlogPostAdmin(admin.ModelAdmin):
+    list_display = ('title', 'category', 'author', 'reviewed_by', 'featured', 'state_id', 'created_on')
+    list_filter = ('category', 'featured', 'state_id')
+    search_fields = ('title', 'excerpt', 'intro', 'slug')
+    prepopulated_fields = {'slug': ('title',)}
+    list_editable = ('featured', 'state_id')
+
 
