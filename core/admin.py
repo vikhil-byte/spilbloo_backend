@@ -1,3 +1,4 @@
+import json
 from django.contrib import admin
 from django.utils.html import format_html, mark_safe
 from core.s3_utils import get_file_url
@@ -43,7 +44,26 @@ admin.site.register(DailyCheckinQuestion)
 admin.site.register(DailyCheckinAnswer)
 admin.site.register(DailyCheckinQuestionAndAnswer)
 admin.site.register(UserAppReview)
-admin.site.register(ChatsHistory)
+
+@admin.register(ChatsHistory)
+class ChatsHistoryAdmin(admin.ModelAdmin):
+    list_display = ("id", "user_id", "message_count", "created_on")
+    search_fields = ("user_id", "chats_message")
+    ordering = ("-created_on",)
+
+    def message_count(self, obj):
+        try:
+            if isinstance(obj.chats_message, str):
+                msgs = json.loads(obj.chats_message or "[]")
+            elif isinstance(obj.chats_message, list):
+                msgs = obj.chats_message
+            else:
+                msgs = []
+            return len(msgs)
+        except Exception:
+            return 0
+
+    message_count.short_description = "Total Messages"
 
 # Optimized Custom ModelAdmins
 @admin.register(NodeSubscriptionPlan)
