@@ -10,7 +10,7 @@ from .models import (
     Setting, Disclaimer, PushNotification, File, Page, Category, Faq,
     NodeSubscriptionPlan, NodeUserSelectedTherapistPlan, HomeCard, DailyJournal,
     DailyCheckinQuestion, DailyCheckinAnswer, DailyCheckinQuestionAndAnswer,
-    UserAppReview, ChatsHistory, ApiAccessToken, BlogPost
+    UserAppReview, Chat, ApiAccessToken, BlogPost
 )
 
 # Custom branding
@@ -45,25 +45,18 @@ admin.site.register(DailyCheckinAnswer)
 admin.site.register(DailyCheckinQuestionAndAnswer)
 admin.site.register(UserAppReview)
 
-@admin.register(ChatsHistory)
-class ChatsHistoryAdmin(admin.ModelAdmin):
-    list_display = ("id", "user_id", "message_count", "created_on")
-    search_fields = ("user_id", "chats_message")
+
+@admin.register(Chat)
+class ChatAdmin(admin.ModelAdmin):
+    list_display = ("id", "from_id", "to_id", "message_preview", "is_read", "created_on")
+    search_fields = ("message", "from_id", "to_id")
+    list_filter = ("is_read", "type_id")
     ordering = ("-created_on",)
 
-    def message_count(self, obj):
-        try:
-            if isinstance(obj.chats_message, str):
-                msgs = json.loads(obj.chats_message or "[]")
-            elif isinstance(obj.chats_message, list):
-                msgs = obj.chats_message
-            else:
-                msgs = []
-            return len(msgs)
-        except Exception:
-            return 0
-
-    message_count.short_description = "Total Messages"
+    def message_preview(self, obj):
+        msg = str(obj.message or "")
+        return msg[:50] + "..." if len(msg) > 50 else msg
+    message_preview.short_description = "Message"
 
 # Optimized Custom ModelAdmins
 @admin.register(NodeSubscriptionPlan)

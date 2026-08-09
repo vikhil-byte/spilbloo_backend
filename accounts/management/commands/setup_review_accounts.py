@@ -33,7 +33,7 @@ from core.models import (
     NodeSubscriptionPlan,
     NodeUserSelectedTherapistPlan,
     TherapistEarning,
-    ChatsHistory,
+    Chat,
 )
 
 # ----------------------------------------------------------------------------
@@ -277,13 +277,15 @@ class Command(BaseCommand):
     def _seed_chat(self, user_email, therapist):
         """One sample chat message so the chat screen shows content."""
         user = User.objects.get(email=user_email)
-        ChatsHistory.objects.get_or_create(
-            user_id=user.id,
-            chats_message='Hi Dr. Review Therapist, I would like to book a session.',
+        Chat.objects.get_or_create(
+            from_id=user.id,
+            to_id=therapist.id,
+            message='Hi Dr. Review Therapist, I would like to book a session.',
         )
-        ChatsHistory.objects.get_or_create(
-            user_id=therapist.id,
-            chats_message='Hello! Welcome to Spilbloo. I have slots available this week.',
+        Chat.objects.get_or_create(
+            from_id=therapist.id,
+            to_id=user.id,
+            message='Hello! Welcome to Spilbloo. I have slots available this week.',
         )
         self.stdout.write('  + Seeded sample chat messages')
 
