@@ -227,36 +227,39 @@ def _blacklist_all_tokens_for_user(user):
 
 def send_account_deletion_otp_email(email, otp):
     subject = "Confirm your Spilbloo account deletion"
-    message = (
-        f"Use this code to confirm you want to delete your Spilbloo account: {otp}\n\n"
-        "This code is valid for 10 minutes. If you did not request this, "
-        "you can safely ignore this email — your account will not be affected."
-    )
+    message = f"Use this code to confirm you want to delete your Spilbloo account: {otp}. It is valid for 10 minutes."
+    html_content = render_to_string("emails/account_deletion_otp.html", {"subject": subject, "otp": otp})
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
-    get_email_client().send_email(subject=subject, body=message, to_email=email, from_email=from_email)
+    get_email_client().send_email(subject=subject, body=message, to_email=email, from_email=from_email, html_body=html_content)
+
+
+def send_account_deletion_cancel_otp_email(email, otp):
+    subject = "Confirm cancelling your Spilbloo account deletion"
+    message = f"Use this code to cancel your pending Spilbloo account deletion: {otp}. It is valid for 10 minutes."
+    html_content = render_to_string("emails/account_deletion_cancel_otp.html", {"subject": subject, "otp": otp})
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
+    get_email_client().send_email(subject=subject, body=message, to_email=email, from_email=from_email, html_body=html_content)
 
 
 def send_account_deletion_confirmed_email(email, purge_date):
     subject = "Your Spilbloo account deletion is scheduled"
+    purge_date_str = purge_date.strftime('%d %B %Y')
     message = (
-        "We've received and confirmed your request to delete your Spilbloo account.\n\n"
-        f"Your account is deactivated immediately. Your data will be permanently "
-        f"erased on {purge_date.strftime('%d %B %Y')}.\n\n"
-        "Changed your mind? You can cancel this request any time before that date "
-        "by contacting support or using the cancel-deletion option in the app."
+        f"We've confirmed your request to delete your Spilbloo account. Your account is "
+        f"deactivated immediately. Your data will be permanently erased on {purge_date_str}. "
+        "Changed your mind? You can cancel this request any time before that date."
     )
+    html_content = render_to_string("emails/account_deletion_confirmed.html", {"subject": subject, "purge_date": purge_date_str})
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
-    get_email_client().send_email(subject=subject, body=message, to_email=email, from_email=from_email)
+    get_email_client().send_email(subject=subject, body=message, to_email=email, from_email=from_email, html_body=html_content)
 
 
 def send_account_deletion_cancelled_email(email):
     subject = "Your Spilbloo account deletion was cancelled"
-    message = (
-        "Your account deletion request has been cancelled and your account is active again.\n\n"
-        "If you didn't request this, please contact support immediately."
-    )
+    message = "Your account deletion request has been cancelled and your account is active again."
+    html_content = render_to_string("emails/account_deletion_cancelled.html", {"subject": subject})
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
-    get_email_client().send_email(subject=subject, body=message, to_email=email, from_email=from_email)
+    get_email_client().send_email(subject=subject, body=message, to_email=email, from_email=from_email, html_body=html_content)
 
 
 def _safe_int(value, default=0):
@@ -1181,7 +1184,7 @@ class RequestCancelAccountDeletionView(APIView):
 
         otp = str(random.randint(1000, 9999))
         cache.set(_account_deletion_otp_cache_key(user.id), otp, timeout=600)
-        send_account_deletion_otp_email(user.email, otp)
+        send_account_deletion_cancel_otp_email(user.email, otp)
 
         return Response({"message": "Verification code sent to your email to cancel account deletion."}, status=status.HTTP_200_OK)
 
