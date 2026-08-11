@@ -1095,15 +1095,27 @@ class UserAppReview(models.Model):
         db_table = "tbl_user_app_review"
 
 
-class ChatsHistory(models.Model):
+class Chat(models.Model):
     id = models.AutoField(primary_key=True)
-    user_id = models.IntegerField(blank=True, null=True)
-    chats_message = models.TextField(blank=True, null=True)
-    created_on = models.DateTimeField(auto_now_add=True)
+    message = models.TextField(blank=True, null=True)
+    users = models.TextField(blank=True, null=True)
+    from_id = models.IntegerField(blank=True, null=True)
+    to_id = models.IntegerField(blank=True, null=True)
+    readers = models.TextField(blank=True, null=True)
+    from_role = models.IntegerField(blank=True, null=True)
+    to_role = models.IntegerField(blank=True, null=True)
+    group_id = models.IntegerField(blank=True, null=True)
+    created_on = models.DateTimeField(default=timezone.now)
+    updated_on = models.DateTimeField(auto_now=True, null=True)
+    is_read = models.IntegerField(default=0)
+    notified_users = models.TextField(blank=True, null=True)
+    role = models.IntegerField(blank=True, null=True)
+    state_id = models.IntegerField(default=1)
+    type_id = models.IntegerField(default=0)
 
     class Meta:
         managed = True
-        db_table = "tbl_chats_history"
+        db_table = "tbl_chat"
 
 
 class ApiAccessToken(models.Model):

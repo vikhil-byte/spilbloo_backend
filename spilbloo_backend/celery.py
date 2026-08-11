@@ -115,4 +115,8 @@ app.conf.beat_schedule = {
         'task': 'core.tasks.notify_subscribed_user',
         'schedule': crontab(hour=12, minute=0),
     },
+    'purge_pending_account_deletions_daily': {
+        'task': 'core.tasks.purge_pending_account_deletions',
+        'schedule': crontab(hour=5, minute=0),
+    },
 }

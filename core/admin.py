@@ -1,3 +1,4 @@
+import json
 from django.contrib import admin
 from django.utils.html import format_html, mark_safe
 from core.s3_utils import get_file_url
@@ -9,7 +10,7 @@ from .models import (
     Setting, Disclaimer, PushNotification, File, Page, Category, Faq,
     NodeSubscriptionPlan, NodeUserSelectedTherapistPlan, HomeCard, DailyJournal,
     DailyCheckinQuestion, DailyCheckinAnswer, DailyCheckinQuestionAndAnswer,
-    UserAppReview, ChatsHistory, ApiAccessToken, BlogPost
+    UserAppReview, Chat, ApiAccessToken, BlogPost
 )
 
 # Custom branding
@@ -43,7 +44,19 @@ admin.site.register(DailyCheckinQuestion)
 admin.site.register(DailyCheckinAnswer)
 admin.site.register(DailyCheckinQuestionAndAnswer)
 admin.site.register(UserAppReview)
-admin.site.register(ChatsHistory)
+
+
+@admin.register(Chat)
+class ChatAdmin(admin.ModelAdmin):
+    list_display = ("id", "from_id", "to_id", "message_preview", "is_read", "created_on")
+    search_fields = ("message", "from_id", "to_id")
+    list_filter = ("is_read", "type_id")
+    ordering = ("-created_on",)
+
+    def message_preview(self, obj):
+        msg = str(obj.message or "")
+        return msg[:50] + "..." if len(msg) > 50 else msg
+    message_preview.short_description = "Message"
 
 # Optimized Custom ModelAdmins
 @admin.register(NodeSubscriptionPlan)

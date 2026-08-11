@@ -86,9 +86,18 @@ class CouponUserSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class SubscribedVideoSerializer(serializers.ModelSerializer):
+    plan_title = serializers.SerializerMethodField()
+    created_by_email = serializers.SerializerMethodField()
+
     class Meta:
         model = SubscribedVideo
         fields = '__all__'
+
+    def get_plan_title(self, obj):
+        return obj.plan.title if obj.plan else ''
+
+    def get_created_by_email(self, obj):
+        return obj.created_by.email if obj.created_by else ''
 
 class UserSymptomSerializer(serializers.ModelSerializer):
     class Meta:
@@ -136,9 +145,21 @@ class HomeContentSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class LoginHistorySerializer(serializers.ModelSerializer):
+    user_email = serializers.SerializerMethodField()
+    user_name = serializers.SerializerMethodField()
+
     class Meta:
         model = LoginHistory
         fields = '__all__'
+
+    def get_user_email(self, obj):
+        return obj.user.email if obj.user else ''
+
+    def get_user_name(self, obj):
+        if not obj.user:
+            return ''
+        name = getattr(obj.user, 'full_name', None) or f"{obj.user.first_name} {obj.user.last_name}".strip()
+        return name if name else obj.user.email
 
 class PageSerializer(serializers.ModelSerializer):
     class Meta:

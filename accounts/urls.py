@@ -6,7 +6,8 @@ from .views import (
     ForgotPasswordView, SymptomListView, MatchesListView, FaqView, AssignDoctorView,
     AssignVideoDoctorView, SocialLoginView, EarningsView, AcceptConsentView, SendMessageView,
     GetCountryView, GetCityView, UserSearchView, DefaultAddressView, CardDeleteView,
-    ResetPasswordConfirmView
+    ResetPasswordConfirmView, RequestAccountDeletionView, ConfirmAccountDeletionView,
+    RequestCancelAccountDeletionView, CancelAccountDeletionView
 )
 from .views_notification import NotificationOnOffView
 
@@ -43,4 +44,8 @@ urlpatterns = [
     path('login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('login/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),
     path('update-profile/', UserProfileView.as_view(), name='user_profile'),
+    path('request-account-deletion/', RequestAccountDeletionView.as_view(), name='request_account_deletion'),
+    path('confirm-account-deletion/', ConfirmAccountDeletionView.as_view(), name='confirm_account_deletion'),
+    path('request-cancel-account-deletion/', RequestCancelAccountDeletionView.as_view(), name='request_cancel_account_deletion'),
+    path('cancel-account-deletion/', CancelAccountDeletionView.as_view(), name='cancel_account_deletion'),
 ]

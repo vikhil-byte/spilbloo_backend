@@ -3,13 +3,18 @@ import razorpay
 import logging
 from datetime import timedelta
 from django.utils.timezone import now
-from django.db import models
+from django.db import models, transaction
+from django.core.files.storage import default_storage
 from celery import shared_task
 
 # Django Models
-from availability.models import SlotBooking, Notification
-from accounts.models import User
-from core.models import RefundLog, PushNotification, TherapistEarning, AssignedTherapist
+from availability.models import SlotBooking, Notification, DoctorSlot, PrescriptionUpload
+from accounts.models import User, HaLogins
+from core.models import (
+    RefundLog, PushNotification, TherapistEarning, AssignedTherapist,
+    DailyJournal, DailyCheckinQuestionAndAnswer, UserSymptom, UserAppReview,
+    Chat, ApiAccessToken, LoginHistory,
+)
 from plans.models import SubscribedPlan, Coupon
 from company.models import Company, CompanyCoupon, MonthlyInvoice, CouponInvoice
 from calls.models import Call
@@ -922,7 +927,7 @@ def send_therapist_application_emails(application_id):
             html_body=html_content,
             bcc=[from_email]
         )
-        logger.info("Sent confirmation email to applicant: %s (BCC: %s)", instance.email, from_email)
+        logger.info("Sent confirmation email to applicant_id: %s (BCC: %s)", instance.id, from_email)
 
         # 2. Email to Career Team (Notification)
         subject_admin = f"New Therapist Application - {instance.name}"
@@ -1002,7 +1007,7 @@ def send_therapist_application_status_email(application_id, status_id):
             cc=["sarah@spilbloo.com"],
             bcc=[from_email]
         )
-        logger.info(f"Sent status email (status: {status_id}) to applicant: {instance.email} with CC: sarah@spilbloo.com, BCC: {from_email}")
+        logger.info(f"Sent status email (status: {status_id}) to applicant_id: {instance.id} with CC: sarah@spilbloo.com, BCC: {from_email}")
     except Exception as e:
         logger.exception("Failed to send therapist application status email: %s", str(e))
 
@@ -1047,9 +1052,113 @@ def send_therapist_application_schedule_email(application_id):
             cc=["sarah@spilbloo.com"],
             bcc=[from_email]
         )
-        logger.info(f"Sent schedule interview email to applicant: {instance.email} with CC: sarah@spilbloo.com, BCC: {from_email}")
+        logger.info(f"Sent schedule interview email to applicant_id: {instance.id} with CC: sarah@spilbloo.com, BCC: {from_email}")
     except Exception as e:
         logger.exception("Failed to send therapist application schedule email: %s", str(e))
+
+
+# ==========================================
+# BATCH X: Account Deletion (DPDP Act erasure)
+# ==========================================
+
+@shared_task
+def purge_pending_account_deletions():
+    """
+    Legacy: none — new self-service flow (accounts.views.ConfirmAccountDeletionView).
+
+    Finds users whose grace period has passed and permanently erases the data
+    that has no legal/financial retention reason. Financial/audit records
+    (Invoice, TherapistEarning, RefundLog, SubscribedPlan, company invoices,
+    etc.) are deliberately left untouched: the User row itself is anonymized
+    below, and since those tables SET_NULL or keep pointing at the same
+    (now-anonymous) user id, they become de-identified by proxy without
+    needing per-row changes.
+    """
+    logger.info("Running: purge_pending_account_deletions")
+    users = User.objects.filter(
+        state_id=User.STATE_DELETED,
+        deletion_scheduled_purge_on__isnull=False,
+        deletion_scheduled_purge_on__lte=now(),
+    )
+
+    for user in users:
+        try:
+            with transaction.atomic():
+                _purge_user_data(user)
+            logger.info(f"Purged account data for user_id: {user.id}")
+        except Exception:
+            logger.exception(f"Failed to purge account data for user_id: {user.id}")
+
+
+def _purge_user_data(user):
+    # Safety net: cancel anything still active in case the confirm-deletion
+    # request-time cancellation (accounts/views.py) failed or was skipped.
+    for plan in SubscribedPlan.objects.filter(created_by=user, state_id__in=[SubscribedPlan.STATE_ACTIVE, SubscribedPlan.STATE_UPCOMING]):
+        if razorpay_client and plan.subscription_id:
+            try:
+                razorpay_client.subscription.cancel(plan.subscription_id, {'cancel_at_cycle_end': 0})
+            except Exception:
+                logger.exception(f"Razorpay cancel failed during purge for plan_id: {plan.id}")
+        plan.mark_cancelled(immediate=True, reason="Account deleted")
+
+    # --- Sensitive content: hard delete, no retention reason ---
+    DailyJournal.objects.filter(created_by=user).delete()
+    DailyCheckinQuestionAndAnswer.objects.filter(created_by=user).delete()
+    UserSymptom.objects.filter(created_by=user).delete()
+    UserAppReview.objects.filter(created_by=user).delete()
+    ApiAccessToken.objects.filter(created_by=user).delete()
+    LoginHistory.objects.filter(user=user).delete()
+    HaLogins.objects.filter(user=user).delete()
+    Call.objects.filter(models.Q(user=user) | models.Q(created_by=user)).delete()
+
+    # --- Has a real FileField: delete the file, then the row ---
+    for prescription in PrescriptionUpload.objects.filter(created_by=user):
+        if prescription.file:
+            prescription.file.delete(save=False)
+    PrescriptionUpload.objects.filter(created_by=user).delete()
+
+    # --- No FK at all (or a plain-int pointer, not a real FK) — on_delete
+    # cascading never applies to these, so they need explicit queries. This
+    # also covers the therapist side of bookings/slots via doctor_id /
+    # availability_doctor_id, which Django's ORM has no way to find otherwise.
+    Chat.objects.filter(models.Q(from_id=user.id) | models.Q(to_id=user.id)).delete()
+    Notification.objects.filter(models.Q(created_by=user) | models.Q(to_user_id=user.id)).delete()
+    SlotBooking.objects.filter(models.Q(created_by=user) | models.Q(doctor_id=user.id)).delete()
+    DoctorSlot.objects.filter(models.Q(created_by=user) | models.Q(availability_doctor_id=user.id)).delete()
+
+    # --- Profile photo: profile_file is a path string, not a FileField ---
+    if user.profile_file:
+        try:
+            if default_storage.exists(user.profile_file):
+                default_storage.delete(user.profile_file)
+        except Exception:
+            logger.exception(f"Failed to delete profile_file for user_id: {user.id}")
+
+    # --- Anonymize the User row itself. Kept (not row-deleted) so id stays
+    # valid for the financial/audit trail that survives above. ---
+    user.email = f"deleted-user-{user.id}@spilbloo-deleted.local"
+    user.full_name = "Deleted User"
+    user.first_name = ""
+    user.last_name = ""
+    user.date_of_birth = None
+    user.gender = None
+    user.about_me = None
+    user.contact_no = None
+    user.address = None
+    user.latitude = None
+    user.longitude = None
+    user.city = None
+    user.country = None
+    user.zipcode = None
+    user.profile_file = None
+    user.token = ""
+    user.activation_key = None
+    user.otp = None
+    user.doctor_id = None
+    user.is_available = False
+    user.online = 'no'
+    user.set_unusable_password()
+    user.save()
 
 
 

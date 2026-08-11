@@ -43,7 +43,7 @@ class CustomUserChangeForm(UserChangeForm):
 class UserAdmin(BaseUserAdmin):
     form = CustomUserChangeForm
     add_form = CustomUserCreationForm
-    actions = ["reset_user_state"]
+    actions = ["reset_user_state", "purge_account_deletion_now"]
 
     list_display = (
         "id",
@@ -93,6 +93,8 @@ class UserAdmin(BaseUserAdmin):
         "created_on",
         "updated_on",
         "current_subscription",
+        "deletion_requested_on",
+        "deletion_scheduled_purge_on",
     )
     filter_horizontal = ("groups", "user_permissions")
     raw_id_fields = ()
@@ -154,6 +156,8 @@ class UserAdmin(BaseUserAdmin):
                     "is_superuser",
                     "groups",
                     "user_permissions",
+                    "deletion_requested_on",
+                    "deletion_scheduled_purge_on",
                 )
             },
         ),
@@ -280,6 +284,25 @@ class UserAdmin(BaseUserAdmin):
         self.message_user(
             request,
             f"Successfully reset state for {count} user(s). Unassigned therapist, cleared plan subscriptions, video credits, and intake requests."
+        )
+
+    @admin.action(description="Grievance/support: purge account deletion now (skips grace period)")
+    def purge_account_deletion_now(self, request, queryset):
+        from core.tasks import _purge_user_data
+
+        skipped = []
+        count = 0
+        for user in queryset:
+            if user.state_id != User.STATE_DELETED:
+                skipped.append(user.email)
+                continue
+            _purge_user_data(user)
+            count += 1
+
+        self.message_user(
+            request,
+            f"Purged {count} user(s) immediately."
+            + (f" Skipped (not in PENDING_DELETION state): {', '.join(skipped)}" if skipped else "")
         )
 
 

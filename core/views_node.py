@@ -4,6 +4,7 @@ import random
 from urllib.parse import quote
 
 from django.db import connection
+from django.db.models import Q
 from django.contrib.auth import get_user_model
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -16,7 +17,7 @@ from .firebase import _send_fcm
 from .models import (
     NodeSubscriptionPlan, NodeUserSelectedTherapistPlan, HomeCard,
     DailyJournal, DailyCheckinQuestion, DailyCheckinAnswer,
-    DailyCheckinQuestionAndAnswer, UserAppReview, ChatsHistory,
+    DailyCheckinQuestionAndAnswer, UserAppReview, Chat,
     ApiAccessToken
 )
 from availability.models import Notification
@@ -508,21 +509,15 @@ class SendPushNotificationView(NodeBaseAPIView):
 class FetchChatMessagesView(NodeBaseAPIView):
     def get(self, request, user_id):
         try:
-            rows = ChatsHistory.objects.filter(user_id=user_id).order_by("created_on")
-            chat_messages = []
-            for row in rows:
-                msg = row.chats_message
-                if isinstance(msg, str):
-                    try:
-                        msg = json.loads(msg or "[]")
-                    except Exception:
-                        msg = []
-                elif msg is None:
-                    msg = []
-                chat_messages.append(msg)
-            first = chat_messages[0] if chat_messages else []
+            chats = Chat.objects.filter(
+                Q(from_id=user_id) | Q(to_id=user_id)
+            ).order_by("created_on")
+            messages = []
+            for chat in chats:
+                is_sent = (chat.from_id == int(user_id))
+                messages.append({"message": chat.message, "is_sent": is_sent})
             return Response(
-                node_success("Chat messages retrieved successfully", {"messages": first}, 200),
+                node_success("Chat messages retrieved successfully", {"messages": messages}, 200),
                 status=200,
             )
         except Exception:
@@ -533,7 +528,8 @@ class AddChatMessageView(NodeBaseAPIView):
     def post(self, request):
         user_id = request.data.get("user_id")
         chat_message = request.data.get("chats_message") or {}
-        user_message = str(chat_message.get("message", "")).lower()
+        user_text = str(chat_message.get("message", ""))
+        user_message = user_text.lower()
         if user_message == "hi":
             bot_response = "Hey"
         elif user_message == "hello":
@@ -543,24 +539,20 @@ class AddChatMessageView(NodeBaseAPIView):
 
         bot_chat = {"message": bot_response, "is_sent": False}
         try:
-            row = ChatsHistory.objects.filter(user_id=user_id).first()
-            if row:
-                existing = row.chats_message
-                if isinstance(existing, str):
-                    try:
-                        existing = json.loads(existing or "[]")
-                    except Exception:
-                        existing = []
-                elif existing is None:
-                    existing = []
-                existing.extend([chat_message, bot_chat])
-                row.chats_message = json.dumps(existing)
-                row.save()
-            else:
-                ChatsHistory.objects.create(
-                    user_id=user_id,
-                    chats_message=json.dumps([chat_message, bot_chat])
+            if user_id:
+                Chat.objects.create(
+                    from_id=int(user_id),
+                    to_id=0,
+                    message=user_text,
+                    is_read=1
                 )
+                Chat.objects.create(
+                    from_id=0,
+                    to_id=int(user_id),
+                    message=bot_response,
+                    is_read=0
+                )
+
             return Response(
                 node_success(
                     "Messages added successfully",
