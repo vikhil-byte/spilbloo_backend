@@ -40,7 +40,7 @@ REVIEW_OTP = os.environ.get("REVIEW_OTP", "").strip()
 
 # DPDP Act erasure-request grace period: days between a user confirming account
 # deletion and the background purge job permanently anonymizing/erasing their data.
-ACCOUNT_DELETION_GRACE_DAYS = int(os.environ.get("ACCOUNT_DELETION_GRACE_DAYS", "30"))
+ACCOUNT_DELETION_GRACE_DAYS = int(os.environ.get("ACCOUNT_DELETION_GRACE_DAYS", "7"))
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get("SECRET_KEY")
