@@ -112,6 +112,14 @@ class User(AbstractUser):
     updated_on = models.DateTimeField(auto_now=True)
     created_by_id = models.IntegerField(blank=True, null=True)
 
+    # Self-service account deletion (DPDP Act erasure request lifecycle).
+    # Set when the user confirms deletion via OTP; state_id becomes STATE_DELETED
+    # and is_active becomes False immediately (blocks login), but the row is kept
+    # as an anonymized shell until deletion_scheduled_purge_on, when a background
+    # job hard-deletes/anonymizes the associated data.
+    deletion_requested_on = models.DateTimeField(blank=True, null=True)
+    deletion_scheduled_purge_on = models.DateTimeField(blank=True, null=True)
+
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['full_name']
 
