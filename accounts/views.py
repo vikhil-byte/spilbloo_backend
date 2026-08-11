@@ -11,11 +11,13 @@ from rest_framework_simplejwt.exceptions import TokenError
 from .serializers import UserSerializer, RegisterSerializer, CustomTokenObtainPairSerializer
 from .models import HaLogins
 from core.models import (
-    ContactForm, LoginHistory, Symptom, UserSymptom, AgeGroup, 
-    AssignedTherapist, Page, Faq, Category, ApiAccessToken, SubscribedVideo, Setting
+    ContactForm, LoginHistory, Symptom, UserSymptom, AgeGroup,
+    AssignedTherapist, Page, Faq, Category, ApiAccessToken, SubscribedVideo, Setting,
+    DoctorRequest, TherapistEarning
 )
 
-from availability.models import Notification
+from availability.models import Notification, SlotBooking
+from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 from core.serializers import (
     SymptomSerializer, PageSerializer, FaqSerializer, FaqCategorySerializer, TherapistEarningSerializer
 )
@@ -34,7 +36,9 @@ from plans.models import Plan, SubscribedPlan
 from django.core import signing
 import hashlib
 import secrets
+from datetime import timedelta
 from core.email_service import get_email_client
+from core.tasks import razorpay_client
 
 
 logger = logging.getLogger(__name__)
@@ -183,6 +187,76 @@ def _save_api_access_token(user, request_data, access_token_str=""):
                 "device_name": str(device_name),
             }
         )
+
+
+def _account_deletion_otp_cache_key(user_id: int) -> str:
+    return f"spilbloo:account_deletion_otp:{user_id}"
+
+
+def _get_account_deletion_blockers(user):
+    """
+    Returns a list of human-readable reasons blocking self-service deletion,
+    or an empty list if the user is clear to proceed. Only therapists carry
+    active-care obligations to other users; patients have none.
+    """
+    if user.role_id != User.ROLE_DOCTER:
+        return []
+
+    reasons = []
+    if AssignedTherapist.objects.filter(therapist=user, state_id=AssignedTherapist.STATE_ASSIGNED).exists():
+        reasons.append("You are currently assigned to one or more patients. Please contact support to reassign them first.")
+    if DoctorRequest.objects.filter(doctor=user, state_id=DoctorRequest.STATE_ACTIVE).exists():
+        reasons.append("You have pending patient requests awaiting your response.")
+    # doctor_id on SlotBooking is a plain int, not a ForeignKey, so this must be
+    # checked explicitly rather than relying on any on_delete behavior.
+    if SlotBooking.objects.filter(
+        doctor_id=user.id,
+        state_id__in=[SlotBooking.STATE_REQUEST, SlotBooking.STATE_ACCEPT],
+        start_time__gte=timezone.now(),
+    ).exists():
+        reasons.append("You have upcoming sessions booked with patients.")
+    if TherapistEarning.objects.filter(therapist=user, state_id=TherapistEarning.STATE_ACTIVE).exists():
+        reasons.append("You have pending earnings that need to be settled first.")
+    return reasons
+
+
+def _blacklist_all_tokens_for_user(user):
+    for token in OutstandingToken.objects.filter(user=user):
+        BlacklistedToken.objects.get_or_create(token=token)
+
+
+def send_account_deletion_otp_email(email, otp):
+    subject = "Confirm your Spilbloo account deletion"
+    message = (
+        f"Use this code to confirm you want to delete your Spilbloo account: {otp}\n\n"
+        "This code is valid for 10 minutes. If you did not request this, "
+        "you can safely ignore this email — your account will not be affected."
+    )
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
+    get_email_client().send_email(subject=subject, body=message, to_email=email, from_email=from_email)
+
+
+def send_account_deletion_confirmed_email(email, purge_date):
+    subject = "Your Spilbloo account deletion is scheduled"
+    message = (
+        "We've received and confirmed your request to delete your Spilbloo account.\n\n"
+        f"Your account is deactivated immediately. Your data will be permanently "
+        f"erased on {purge_date.strftime('%d %B %Y')}.\n\n"
+        "Changed your mind? You can cancel this request any time before that date "
+        "by contacting support or using the cancel-deletion option in the app."
+    )
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
+    get_email_client().send_email(subject=subject, body=message, to_email=email, from_email=from_email)
+
+
+def send_account_deletion_cancelled_email(email):
+    subject = "Your Spilbloo account deletion was cancelled"
+    message = (
+        "Your account deletion request has been cancelled and your account is active again.\n\n"
+        "If you didn't request this, please contact support immediately."
+    )
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
+    get_email_client().send_email(subject=subject, body=message, to_email=email, from_email=from_email)
 
 
 def _safe_int(value, default=0):
@@ -799,6 +873,12 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             if user.role_id == User.ROLE_ADMIN and not user.is_staff:
                 return Response({"error": "You are not allowed to login."}, status=status.HTTP_400_BAD_REQUEST)
 
+            if user.state_id == User.STATE_DELETED:
+                return Response({"error": "This account has been deleted."}, status=status.HTTP_400_BAD_REQUEST)
+
+            if user.state_id == User.STATE_BANNED:
+                return Response({"error": "Your account is blocked, Please contact Particulars Admin"}, status=status.HTTP_403_FORBIDDEN)
+
             # Legacy branch parity:
             # - inactive + otp not verified => 200 guidance response
             # - inactive otherwise => error
@@ -987,6 +1067,162 @@ class ChangePasswordView(APIView):
         user.save()
 
         return Response({"message": "Password changed successfully"}, status=status.HTTP_200_OK)
+
+
+class RequestAccountDeletionView(APIView):
+    """
+    Step 1 of self-service account deletion (DPDP Act erasure request).
+    Runs the blocking checks and, if clear, emails an OTP that must be
+    passed to ConfirmAccountDeletionView. Reusing password re-auth here
+    would break social-login users, whose password is never chosen by
+    them (see SocialLoginView) — OTP works for every login method.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        user = request.user
+
+        if user.state_id == User.STATE_DELETED and user.deletion_scheduled_purge_on:
+            return Response({
+                "message": "Account deletion is already pending.",
+                "scheduled_purge_on": user.deletion_scheduled_purge_on,
+            }, status=status.HTTP_200_OK)
+
+        blockers = _get_account_deletion_blockers(user)
+        if blockers:
+            return Response({"error": "Cannot delete account yet.", "reasons": blockers}, status=status.HTTP_400_BAD_REQUEST)
+
+        otp = str(random.randint(1000, 9999))
+        cache.set(_account_deletion_otp_cache_key(user.id), otp, timeout=600)
+        send_account_deletion_otp_email(user.email, otp)
+
+        return Response({"message": "Verification code sent to your email to confirm account deletion."}, status=status.HTTP_200_OK)
+
+
+class ConfirmAccountDeletionView(APIView):
+    """
+    Step 2: verifies the OTP, then immediately deactivates the account
+    (state_id=STATE_DELETED, is_active=False) and schedules the permanent
+    purge after ACCOUNT_DELETION_GRACE_DAYS. Active Razorpay subscriptions
+    are cancelled right away so the user isn't billed during the grace
+    window. All outstanding JWTs are blacklisted so existing sessions are
+    cut immediately rather than waiting for access-token expiry.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        user = request.user
+        otp = str(request.data.get('otp') or '').strip()
+
+        if not otp:
+            return Response({"error": "OTP is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        cache_key = _account_deletion_otp_cache_key(user.id)
+        stored_otp = cache.get(cache_key)
+        is_staging = getattr(settings, "ENVIRONMENT", "staging").lower() in ["staging", "dev", "development"]
+        if not ((stored_otp is not None and str(stored_otp) == otp) or (is_staging and otp == "1234")):
+            return Response({"error": "Incorrect OTP"}, status=status.HTTP_400_BAD_REQUEST)
+
+        blockers = _get_account_deletion_blockers(user)
+        if blockers:
+            return Response({"error": "Cannot delete account yet.", "reasons": blockers}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Cancel any active/upcoming subscriptions before locking the account.
+        for plan in SubscribedPlan.objects.filter(created_by=user, state_id__in=[SubscribedPlan.STATE_ACTIVE, SubscribedPlan.STATE_UPCOMING]):
+            if razorpay_client and plan.subscription_id:
+                try:
+                    razorpay_client.subscription.cancel(plan.subscription_id, {'cancel_at_cycle_end': 0})
+                except Exception:
+                    logger.exception("Razorpay cancel failed during account deletion for plan_id=%s", plan.id)
+            plan.mark_cancelled(immediate=True, reason="Account deletion requested")
+
+        purge_on = timezone.now() + timedelta(days=getattr(settings, "ACCOUNT_DELETION_GRACE_DAYS", 30))
+        user.state_id = User.STATE_DELETED
+        user.is_active = False
+        user.deletion_requested_on = timezone.now()
+        user.deletion_scheduled_purge_on = purge_on
+        user.save(update_fields=["state_id", "is_active", "deletion_requested_on", "deletion_scheduled_purge_on"])
+
+        cache.delete(cache_key)
+        _blacklist_all_tokens_for_user(user)
+        send_account_deletion_confirmed_email(user.email, purge_on)
+
+        return Response({
+            "message": "Your account has been deactivated and is scheduled for deletion.",
+            "scheduled_purge_on": purge_on,
+        }, status=status.HTTP_200_OK)
+
+
+class RequestCancelAccountDeletionView(APIView):
+    """
+    Step 1 of reversing a pending deletion. Not IsAuthenticated: once
+    is_active=False, SIMPLE_JWT rejects the user's token at the
+    authentication layer (CHECK_USER_IS_ACTIVE), so a deactivated user
+    cannot hold an authenticated session at all. Verification is by
+    email + OTP instead, same as the forgot-password flow.
+    """
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        email = _normalize_email(request.data.get('email'))
+        if not email:
+            return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({"error": "No account found for that email."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if user.state_id != User.STATE_DELETED or not user.deletion_scheduled_purge_on:
+            return Response({"error": "This account does not have a pending deletion."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if user.deletion_scheduled_purge_on <= timezone.now():
+            return Response({"error": "The deletion grace period has already ended."}, status=status.HTTP_400_BAD_REQUEST)
+
+        otp = str(random.randint(1000, 9999))
+        cache.set(_account_deletion_otp_cache_key(user.id), otp, timeout=600)
+        send_account_deletion_otp_email(user.email, otp)
+
+        return Response({"message": "Verification code sent to your email to cancel account deletion."}, status=status.HTTP_200_OK)
+
+
+class CancelAccountDeletionView(APIView):
+    """Step 2: verifies the OTP and restores the account to active."""
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        email = _normalize_email(request.data.get('email'))
+        otp = str(request.data.get('otp') or '').strip()
+        if not email or not otp:
+            return Response({"error": "Email and OTP are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({"error": "No account found for that email."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if user.state_id != User.STATE_DELETED or not user.deletion_scheduled_purge_on:
+            return Response({"error": "This account does not have a pending deletion."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if user.deletion_scheduled_purge_on <= timezone.now():
+            return Response({"error": "The deletion grace period has already ended."}, status=status.HTTP_400_BAD_REQUEST)
+
+        cache_key = _account_deletion_otp_cache_key(user.id)
+        stored_otp = cache.get(cache_key)
+        is_staging = getattr(settings, "ENVIRONMENT", "staging").lower() in ["staging", "dev", "development"]
+        if not ((stored_otp is not None and str(stored_otp) == otp) or (is_staging and otp == "1234")):
+            return Response({"error": "Incorrect OTP"}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.state_id = User.STATE_ACTIVE
+        user.is_active = True
+        user.deletion_requested_on = None
+        user.deletion_scheduled_purge_on = None
+        user.save(update_fields=["state_id", "is_active", "deletion_requested_on", "deletion_scheduled_purge_on"])
+
+        cache.delete(cache_key)
+        send_account_deletion_cancelled_email(user.email)
+
+        return Response({"message": "Account deletion cancelled. Your account is active again."}, status=status.HTTP_200_OK)
 
 
 class UserProfileView(generics.RetrieveUpdateAPIView):
@@ -1600,6 +1836,8 @@ class SocialLoginView(APIView):
                 else:
                     # Already exists
                     user = auth.user
+                    if user.state_id == User.STATE_DELETED:
+                        return Response({"message": "This account has been deleted."}, status=status.HTTP_403_FORBIDDEN)
                     if user.state_id == User.STATE_BANNED:
                         return Response({"message": "Your account is blocked, Please contact Particulars Admin"}, status=status.HTTP_403_FORBIDDEN)
                     if user.state_id == User.STATE_INACTIVE:
