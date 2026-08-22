@@ -10,6 +10,7 @@ from availability.views import send_push_notification
 from availability.models import SlotBooking, Notification
 from availability.serializers import SlotBookingSerializer
 from accounts.models import User
+from discover.models import DiscoveryBooking
 import logging
 import time
 
@@ -380,6 +381,11 @@ class CompleteBookingView(APIView):
             booking.is_active = 0  # NO
             booking.complete_reason = "Therapist change the state to completed"
             booking.save(update_fields=['state_id', 'is_active', 'complete_reason'])
+
+            if booking.type_id == SlotBooking.TYPE_DISCOVERY:
+                DiscoveryBooking.objects.filter(slot_booking_id=booking.id).update(
+                    state_id=DiscoveryBooking.STATE_COMPLETED
+                )
 
             # Notification with doctor name (matches PHP behavior)
             doctor_name = ""

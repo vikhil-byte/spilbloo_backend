@@ -9,6 +9,7 @@ from django.utils import timezone
 from core.models import RefundLog
 from django.contrib.auth import get_user_model
 from plans.models import SubscribedPlan
+from discover.models import DiscoveryBooking
 from django.core.mail import send_mail
 from django.conf import settings
 import os
@@ -129,6 +130,20 @@ def send_push_notification(user, title, description, data=None):
         )
     except Exception as e:
         logger.error("[Push Notify DB Persistence Error] Failed logging notification for User ID %s: %s", user.id, e)
+
+def _sync_discovery_booking_reschedule(booking):
+    """Keep DiscoveryBooking's denormalized time fields in sync after a
+    reschedule, and reopen it from COMPLETED (e.g. a no-show) back to PAID
+    since the call is now scheduled again."""
+    if booking.type_id != SlotBooking.TYPE_DISCOVERY:
+        return
+    DiscoveryBooking.objects.filter(slot_booking_id=booking.id).update(
+        start_time=booking.start_time,
+        end_time=booking.end_time,
+        date=booking.start_time.date() if hasattr(booking.start_time, "date") else booking.date,
+        state_id=DiscoveryBooking.STATE_PAID,
+    )
+
 
 class AddScheduleView(APIView):
     permission_classes = (IsAuthenticated,)
@@ -635,9 +650,10 @@ class DoctorRescheduleView(APIView):
             booking.end_time = request.data.get('end_time', booking.end_time)
             booking.state_id = SlotBooking.STATE_ACCEPT
             booking.doctor_reschedule = 1 # YES
-            
+
             booking.save()
-            
+            _sync_discovery_booking_reschedule(booking)
+
             msg = f"{doctor.full_name} has rescheduled your video session."
             Notification.objects.create(
                 to_user_id=booking.created_by_id,
@@ -809,7 +825,7 @@ class PatientRescheduleView(APIView):
         booking.state_id = SlotBooking.STATE_ACCEPT
         booking.patient_reschedule = 1  # YES
         booking.save()
-
+        _sync_discovery_booking_reschedule(booking)
 
         patient_name = getattr(user, "full_name", "") or getattr(user, "first_name", "") or "Patient"
         message = f"{patient_name} has rescheduled your video session to"
