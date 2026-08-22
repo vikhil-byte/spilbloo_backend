@@ -14,6 +14,7 @@ from .serializers import (
 )
 from accounts.serializers import UserSerializer
 from accounts.views import _legacy_user_detail
+from discover.services import try_refund_discovery_credit
 import json
 import logging
 import random
@@ -487,6 +488,7 @@ class AuthenticateSubscriptionView(APIView):
 
                 # Activate subscription through domain model method (safely protects terminal CANCELED states)
                 subscribed_plan.activate(transaction_id=transaction_id)
+                try_refund_discovery_credit(user)
 
 
             logger.info(
@@ -576,6 +578,7 @@ class AuthenticateOneTimeSubView(APIView):
             if transaction_id:
                 subscribed_plan.transaction_id = transaction_id
             subscribed_plan.save(update_fields=["state_id", "transaction_id"])
+            try_refund_discovery_credit(user)
         logger.info(
             "authenticate-one-time-sub success: user_id=%s plan_id=%s sub_id=%s state_id=%s",
             getattr(user, "id", None),
@@ -774,6 +777,8 @@ class BuyVideoPlanView(APIView):
                         state_id=CouponUser.STATE_ACTIVE,
                         created_by=user,
                     )
+
+                try_refund_discovery_credit(user)
 
             logger.info(
                 "buy-video-plan success: user_id=%s plan_id=%s purchase_id=%s",
@@ -1385,6 +1390,8 @@ class RazorpayWebhookView(APIView):
         renewal_dt = datetime.fromtimestamp(charge_at, tz=dt_timezone.utc) if charge_at else None
 
         subscribed_plan.activate(start_date=start_dt, end_date=end_dt, renewal_date=renewal_dt, plan=plan)
+        if subscribed_plan.created_by_id:
+            try_refund_discovery_credit(subscribed_plan.created_by)
 
         # Send invoice email if user email exists
         user = subscribed_plan.created_by

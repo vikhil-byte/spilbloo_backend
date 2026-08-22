@@ -91,6 +91,7 @@ INSTALLED_APPS = [
     "company",
     "doctor_requests",
     "calls",
+    "discover",
 ]
 
 MIDDLEWARE = [
