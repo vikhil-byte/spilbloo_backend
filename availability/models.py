@@ -34,6 +34,11 @@ class SlotBooking(models.Model):
     UPCOMING_BOOKING = 1
     COMPLETED_BOOKING = 2
 
+    # type_id values: 0=default, 1=TYPE_BY_VIDEO_PLAN, 2=TYPE_BY_TEXT_SUBSCRIPTION,
+    # 3=TYPE_DISCOVERY (prepaid one-time discovery call from the discover app;
+    # still goes through the normal STATE_REQUEST -> doctor accept flow).
+    TYPE_DISCOVERY = 3
+
     slot_id = models.IntegerField()
     start_time = models.DateTimeField()
     end_time = models.DateTimeField()

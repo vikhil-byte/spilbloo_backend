@@ -119,4 +119,8 @@ app.conf.beat_schedule = {
         'task': 'core.tasks.purge_pending_account_deletions',
         'schedule': crontab(hour=5, minute=0),
     },
+    'expire_stale_discovery_bookings_every_10_mins': {
+        'task': 'discover.tasks.expire_stale_discovery_bookings',
+        'schedule': crontab(minute='*/10'),
+    },
 }
