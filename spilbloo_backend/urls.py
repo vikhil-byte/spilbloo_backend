@@ -17,17 +17,23 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import path, include
-from django.http import HttpResponse
-from accounts.views import LogoutView, CardDeleteView, UserImageView
+from django.http import HttpResponse, JsonResponse
+from accounts.views import LogoutView, CardDeleteView, UserImageView, FaqView
+
+def api_root(request):
+    response = JsonResponse({
+        "status": "ok",
+        "service": "Spilbloo API",
+        "message": "Welcome to Spilbloo Backend API"
+    })
+    response["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    return response
 
 def robots_txt(request):
-    host = request.get_host().lower()
-    if 'dev.' in host or 'staging' in host:
-        response = HttpResponse("User-agent: *\nDisallow: /\n", content_type="text/plain")
-        response['X-Robots-Tag'] = 'noindex, nofollow'
-        return response
-    content = "User-agent: *\nDisallow: /admin/\nDisallow: /api/\nSitemap: https://spilbloo.com/sitemap.xml\n"
-    return HttpResponse(content, content_type="text/plain")
+    # api.spilbloo.com is purely an API backend; disallow all crawlers and prevent indexing.
+    response = HttpResponse("User-agent: *\nDisallow: /\n", content_type="text/plain")
+    response["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    return response
 
 def sitemap_xml(request):
     try:
@@ -51,10 +57,17 @@ def sitemap_xml(request):
     return HttpResponse(content, content_type="application/xml")
 
 urlpatterns = [
+    path("", api_root, name="api_root"),
     path("admin/", admin.site.urls),
     path("robots.txt", robots_txt),
     path("sitemap.xml", sitemap_xml),
     path("user/image/<int:pk>", UserImageView.as_view(), name="user_image"),
+
+    # Legacy & root compatibility aliases
+    path("faqs/", FaqView.as_view(), name="faqs_slash"),
+    path("faqs", FaqView.as_view(), name="faqs"),
+    path("faq/", FaqView.as_view(), name="faq_slash"),
+    path("faq", FaqView.as_view(), name="faq"),
 
     # iOS legacy compatibility alias (historical typo in client path).
     path("api/users/logout/", LogoutView.as_view()),
