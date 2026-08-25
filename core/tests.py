@@ -260,6 +260,7 @@ class PushNotificationTokenResolutionTests(TestCase):
         )
         
         from firebase_admin._messaging_utils import UnregisteredError
+        from unittest.mock import MagicMock
         with patch("firebase_admin.messaging.send", side_effect=UnregisteredError("NotRegistered")):
             with patch("firebase_admin.get_app", return_value=MagicMock()):
                 from core.firebase import _send_fcm
@@ -267,5 +268,60 @@ class PushNotificationTokenResolutionTests(TestCase):
                 self.assertFalse(result)
                 self.assertFalse(ApiAccessToken.objects.filter(device_token="expired_mock_token_789").exists())
 
+class TherapistOnboardingTests(APITestCase):
+    def setUp(self):
+        import uuid
+        from core.models import Language, TherapistInvite
+        from django.utils import timezone
+        self.language = Language.objects.create(name="English", state_id=Language.STATE_ACTIVE)
+        self.invite = TherapistInvite.objects.create(
+            email="newtherapist@example.com",
+            token=uuid.uuid4(),
+            expires_at=timezone.now() + timezone.timedelta(days=7),
+            used=False
+        )
 
+    def test_onboarding_requires_profile_image(self):
+        payload = {
+            "token": str(self.invite.token),
+            "email": "newtherapist@example.com",
+            "password": "Password@123",
+            "full_name": "Dr. Sarah Test",
+            "contact_no": "9876543210",
+            "date_of_birth": "1990-01-01",
+            "experience": 5,
+            "sessions_completed": 100,
+            "qualification": "M.Phil. in Clinical Psychology",
+            "language_ids": [self.language.id],
+            "symptoms": []
+        }
+        response = self.client.post("/api/core/therapist-onboarding/", data=payload, format="multipart")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("profile_image", str(response.data))
 
+    @patch('core.s3_utils.upload_to_s3', return_value='profile-avatar.jpg')
+    def test_onboarding_saves_qualification_and_image_to_user(self, mock_s3):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        fake_image = SimpleUploadedFile("avatar.jpg", b"fake_image_content", content_type="image/jpeg")
+        payload = {
+            "token": str(self.invite.token),
+            "email": "newtherapist@example.com",
+            "password": "Password@123",
+            "full_name": "Dr. Sarah Test",
+            "contact_no": "9876543210",
+            "date_of_birth": "1990-01-01",
+            "experience": 5,
+            "sessions_completed": 100,
+            "qualification": "M.Phil. in Clinical Psychology",
+            "language_ids": [self.language.id],
+            "symptoms": [],
+            "profile_image": fake_image,
+        }
+        response = self.client.post("/api/core/therapist-onboarding/", data=payload, format="multipart")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+
+        User = get_user_model()
+        created_user = User.objects.get(email="newtherapist@example.com")
+        self.assertEqual(created_user.qualification, "M.Phil. in Clinical Psychology")
+        self.assertEqual(created_user.profile_file, "profile-avatar.jpg")
+        self.assertEqual(created_user.role_id, User.ROLE_DOCTER)
