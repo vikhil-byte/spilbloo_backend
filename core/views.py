@@ -515,6 +515,7 @@ class TherapistOnboardingView(APIView):
                     about_me=data.get('about_me', ''),
                     experience=data['experience'],
                     sessions_completed=data['sessions_completed'],
+                    qualification=data.get('qualification', ''),
                     email_verified=1,
                 )
 
@@ -544,15 +545,23 @@ class TherapistOnboardingView(APIView):
                 government_id_key = ""
                 rci_key = ""
                 allowed_doc_exts = {'.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'}
+                allowed_img_exts = {'.jpg', '.jpeg', '.png', '.webp'}
 
                 profile_file = request.FILES.get('profile_image')
-                if profile_file:
-                    filename = f"profile-{int(time.time())}-{profile_file.name}"
-                    s3_key = upload_to_s3(profile_file, filename)
-                    if s3_key:
-                        profile_key = s3_key
-                    user.profile_file = profile_key
-                    user.save(update_fields=['profile_file'])
+                if not profile_file:
+                    raise ValidationError(
+                        {"profile_image": ["Profile photo is required."]}
+                    )
+                prof_ext = os.path.splitext(profile_file.name)[1].lower()
+                if prof_ext not in allowed_img_exts:
+                    raise ValidationError(
+                        {"profile_image": ["Allowed image types: .jpg, .jpeg, .png, .webp"]}
+                    )
+                filename = f"profile-{int(time.time())}-{profile_file.name}"
+                s3_key = upload_to_s3(profile_file, filename)
+                profile_key = s3_key or filename
+                user.profile_file = profile_key
+                user.save(update_fields=['profile_file'])
 
                 qualification_file = request.FILES.get('qualification_file')
                 if qualification_file:
@@ -598,7 +607,7 @@ class TherapistOnboardingView(APIView):
                     qualification=data['qualification'],
                     symptoms=json.dumps(data.get('symptoms', [])),
                     language_id=data.get('language_ids', [None])[0],
-                    resume_file=qualification_key or None,
+                    resume_file=qualification_key or "",
                     certifications_file=government_id_key or None,
                     consent_given=True,
                     consent_date_time=timezone.now(),
