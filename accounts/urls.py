@@ -1,6 +1,7 @@
 from django.urls import path
 from .views import (
     RegisterView, CustomTokenObtainPairView, CustomTokenRefreshView, UserProfileView,
+    TherapistDocumentsUpdateView,
     VerifyOtpView, ResendOtpView, DoctorContactView,
     CheckView, LogoutView, ChangePasswordView, DetailView, GetPageView,
     ForgotPasswordView, SymptomListView, MatchesListView, FaqView, AssignDoctorView,
@@ -44,6 +45,7 @@ urlpatterns = [
     path('login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('login/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),
     path('update-profile/', UserProfileView.as_view(), name='user_profile'),
+    path('update-documents/', TherapistDocumentsUpdateView.as_view(), name='therapist_documents_update'),
     path('request-account-deletion/', RequestAccountDeletionView.as_view(), name='request_account_deletion'),
     path('confirm-account-deletion/', ConfirmAccountDeletionView.as_view(), name='confirm_account_deletion'),
     path('request-cancel-account-deletion/', RequestCancelAccountDeletionView.as_view(), name='request_cancel_account_deletion'),
