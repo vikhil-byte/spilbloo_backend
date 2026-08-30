@@ -358,3 +358,89 @@ class VerifyOtpStagingTests(APITestCase):
         new_access_token = response.data["access-token"]
         self.user.refresh_from_db()
         self.assertEqual(self.user.activation_key, new_access_token)
+
+
+class TherapistDocumentsUpdateTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.therapist = User.objects.create_user(
+            email="therapist_doc_test@spilbloo.local",
+            password="Password@123",
+            full_name="Dr. Test Therapist",
+            role_id=User.ROLE_DOCTER,
+            state_id=User.STATE_ACTIVE,
+        )
+        self.patient = User.objects.create_user(
+            email="patient_doc_test@spilbloo.local",
+            password="Password@123",
+            full_name="Patient Test",
+            role_id=User.ROLE_PATIENT,
+            state_id=User.STATE_ACTIVE,
+        )
+        self.url = reverse("therapist_documents_update")
+
+    def test_unauthenticated_request_rejected(self):
+        response = self.client.get(self.url)
+        self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])
+
+    def test_non_therapist_forbidden(self):
+        self.client.force_authenticate(user=self.patient)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        response = self.client.post(self.url, {})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_therapist_upload_profile_image_and_documents(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from core.models import TherapistApplication
+
+        self.client.force_authenticate(user=self.therapist)
+
+        photo = SimpleUploadedFile("avatar.jpg", b"fake photo bytes", content_type="image/jpeg")
+        qualification = SimpleUploadedFile("degree.pdf", b"fake pdf bytes", content_type="application/pdf")
+        govid = SimpleUploadedFile("id_card.png", b"fake image bytes", content_type="image/png")
+        rci = SimpleUploadedFile("rci.pdf", b"fake rci bytes", content_type="application/pdf")
+
+        response = self.client.post(
+            self.url,
+            {
+                "profile_file": photo,
+                "qualification_file": qualification,
+                "government_id_file": govid,
+                "rci_file": rci,
+            },
+            format="multipart"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("message", response.data)
+        self.assertIn("documents", response.data)
+
+        self.therapist.refresh_from_db()
+        self.assertTrue(self.therapist.profile_file)
+
+        app = TherapistApplication.objects.filter(created_by=self.therapist).first()
+        self.assertIsNotNone(app)
+        self.assertTrue(app.resume_file)
+        self.assertTrue(app.certifications_file)
+        self.assertTrue(app.rci_file)
+
+        # Verify GET returns the document info
+        get_res = self.client.get(self.url)
+        self.assertEqual(get_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(get_res.data["email"], self.therapist.email)
+        self.assertIsNotNone(get_res.data["documents"]["qualification_file"])
+
+    def test_invalid_file_extension_rejected(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        self.client.force_authenticate(user=self.therapist)
+        bad_file = SimpleUploadedFile("malicious.exe", b"fake exe", content_type="application/x-msdownload")
+
+        response = self.client.post(
+            self.url,
+            {"qualification_file": bad_file},
+            format="multipart"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+

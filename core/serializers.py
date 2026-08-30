@@ -296,6 +296,13 @@ class TherapistOnboardingSerializer(serializers.Serializer):
         default=list
     )
 
+    def validate_email(self, value):
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        if User.objects.filter(email__iexact=value.strip()).exists():
+            raise serializers.ValidationError("An account with this email address already exists. Please log in.")
+        return value.strip().lower()
+
     def validate_password(self, value):
         """Enforce strong password: uppercase, lowercase, digit, special char."""
         if not any(c.isupper() for c in value):

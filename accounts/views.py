@@ -1,6 +1,7 @@
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated
 from django.contrib.auth import get_user_model
 from django.http import Http404
@@ -1381,6 +1382,196 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
     def post(self, request, *args, **kwargs):
         kwargs['partial'] = True
         return self.update(request, *args, **kwargs)
+
+
+class TherapistDocumentsUpdateView(APIView):
+    """
+    API endpoint for authenticated therapists to upload/update their profile image
+    and credentials/documents (qualification file, government ID, RCI certificate).
+    """
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        user = request.user
+        if user.role_id != User.ROLE_DOCTER and not user.is_staff and not user.is_superuser:
+            return Response(
+                {"error": "Only therapists can view therapist documents."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        from core.models import TherapistApplication
+        from core.s3_utils import get_file_url
+
+        app = TherapistApplication.objects.filter(created_by=user).order_by('-created_on').first()
+        if not app:
+            app = TherapistApplication.objects.filter(email__iexact=user.email).order_by('-created_on').first()
+
+        profile_url = get_file_url(user.profile_file) if user.profile_file else None
+        resume_url = get_file_url(app.resume_file) if (app and app.resume_file) else None
+        certs_url = get_file_url(app.certifications_file) if (app and app.certifications_file) else None
+        rci_url = get_file_url(app.rci_file) if (app and app.rci_file) else None
+
+        return Response({
+            "user_id": user.id,
+            "email": user.email,
+            "full_name": user.full_name,
+            "profile_file": user.profile_file,
+            "profile_image_url": profile_url,
+            "documents": {
+                "qualification_file": app.resume_file if app else None,
+                "qualification_file_url": resume_url,
+                "government_id_file": app.certifications_file if app else None,
+                "government_id_file_url": certs_url,
+                "rci_file": app.rci_file if app else None,
+                "rci_file_url": rci_url,
+            }
+        }, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        user = request.user
+        if user.role_id != User.ROLE_DOCTER and not user.is_staff and not user.is_superuser:
+            return Response(
+                {"error": "Only therapists can update therapist documents."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        from core.views import validate_file_extension
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+        from core.s3_utils import upload_to_s3, get_file_url
+        from core.models import TherapistApplication
+        import time
+
+        timestamp = int(time.time())
+        allowed_img_exts = {'.jpg', '.jpeg', '.png', '.webp'}
+        allowed_doc_exts = {'.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'}
+
+        profile_file = request.FILES.get('profile_file') or request.FILES.get('profile_image') or request.FILES.get('User[profile_file]')
+        qualification_file = request.FILES.get('qualification_file') or request.FILES.get('resume_file') or request.FILES.get('TherapistApplication[resume_file]')
+        government_id_file = request.FILES.get('government_id_file') or request.FILES.get('certifications_file') or request.FILES.get('TherapistApplication[certifications_file]')
+        rci_file = request.FILES.get('rci_file') or request.FILES.get('TherapistApplication[rci_file]')
+
+        if not any([profile_file, qualification_file, government_id_file, rci_file]):
+            return Response(
+                {"error": "No file provided. Please provide at least one of: profile_file, qualification_file, government_id_file, rci_file."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        def _save_file(file_obj, filename, folder):
+            try:
+                file_obj.seek(0)
+                raw_bytes = file_obj.read()
+            except Exception:
+                raw_bytes = getattr(file_obj, 'file', None)
+                if hasattr(raw_bytes, 'getvalue'):
+                    raw_bytes = raw_bytes.getvalue()
+                elif hasattr(raw_bytes, 'read'):
+                    try:
+                        raw_bytes.seek(0)
+                    except Exception:
+                        pass
+                    raw_bytes = raw_bytes.read()
+                else:
+                    raw_bytes = b""
+            if isinstance(raw_bytes, str):
+                raw_bytes = raw_bytes.encode('utf-8')
+            if not isinstance(raw_bytes, (bytes, bytearray)):
+                raw_bytes = bytes(raw_bytes or b"")
+
+            from django.core.files.base import ContentFile
+            s3_key = upload_to_s3(ContentFile(raw_bytes), filename)
+            if not s3_key:
+                from django.core.files.storage import default_storage
+                s3_key = default_storage.save(f"{folder}/{filename}", ContentFile(raw_bytes))
+            return s3_key
+
+        # 1. Update Profile Photo on User model
+        if profile_file:
+            try:
+                validate_file_extension(profile_file, allowed_img_exts)
+            except DRFValidationError as ve:
+                return Response({"error": ve.detail}, status=status.HTTP_400_BAD_REQUEST)
+
+            filename = f"user-{user.id}-profile-{timestamp}-{profile_file.name}"
+            user.profile_file = _save_file(profile_file, filename, "profiles")
+            user.save(update_fields=['profile_file'])
+
+        # 2. Update Documents on TherapistApplication model
+        needs_app_update = any([qualification_file, government_id_file, rci_file])
+        app = None
+        if needs_app_update:
+            app = TherapistApplication.objects.filter(created_by=user).order_by('-created_on').first()
+            if not app:
+                app = TherapistApplication.objects.filter(email__iexact=user.email).order_by('-created_on').first()
+            if not app:
+                app = TherapistApplication.objects.create(
+                    name=user.full_name or user.email,
+                    email=user.email,
+                    contact_no=user.contact_no or '',
+                    created_by=user,
+                    state_id=TherapistApplication.STATE_ADD,
+                )
+
+            app_update_fields = []
+            if qualification_file:
+                try:
+                    validate_file_extension(qualification_file, allowed_doc_exts)
+                except DRFValidationError as ve:
+                    return Response({"error": ve.detail}, status=status.HTTP_400_BAD_REQUEST)
+
+                filename = f"qualification-{timestamp}-{qualification_file.name}"
+                app.resume_file = _save_file(qualification_file, filename, "qualifications")
+                app_update_fields.append('resume_file')
+
+            if government_id_file:
+                try:
+                    validate_file_extension(government_id_file, allowed_doc_exts)
+                except DRFValidationError as ve:
+                    return Response({"error": ve.detail}, status=status.HTTP_400_BAD_REQUEST)
+
+                filename = f"govid-{timestamp}-{government_id_file.name}"
+                app.certifications_file = _save_file(government_id_file, filename, "certifications")
+                app_update_fields.append('certifications_file')
+
+            if rci_file:
+                try:
+                    validate_file_extension(rci_file, allowed_doc_exts)
+                except DRFValidationError as ve:
+                    return Response({"error": ve.detail}, status=status.HTTP_400_BAD_REQUEST)
+
+                filename = f"rci-{timestamp}-{rci_file.name}"
+                app.rci_file = _save_file(rci_file, filename, "rci")
+                app_update_fields.append('rci_file')
+
+            if app_update_fields:
+                app.save(update_fields=app_update_fields)
+        else:
+            app = TherapistApplication.objects.filter(created_by=user).order_by('-created_on').first()
+            if not app:
+                app = TherapistApplication.objects.filter(email__iexact=user.email).order_by('-created_on').first()
+
+        profile_url = get_file_url(user.profile_file) if user.profile_file else None
+        resume_url = get_file_url(app.resume_file) if (app and app.resume_file) else None
+        certs_url = get_file_url(app.certifications_file) if (app and app.certifications_file) else None
+        rci_url = get_file_url(app.rci_file) if (app and app.rci_file) else None
+
+        return Response({
+            "message": "Therapist image and documents updated successfully.",
+            "user_id": user.id,
+            "profile_file": user.profile_file,
+            "profile_image_url": profile_url,
+            "documents": {
+                "qualification_file": app.resume_file if app else None,
+                "qualification_file_url": resume_url,
+                "government_id_file": app.certifications_file if app else None,
+                "government_id_file_url": certs_url,
+                "rci_file": app.rci_file if app else None,
+                "rci_file_url": rci_url,
+            }
+        }, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        return self.post(request)
 
 
 
