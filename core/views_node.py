@@ -347,7 +347,15 @@ class FetchUserAppReviewView(NodeBaseAPIView):
 class FetchTherapistsView(NodeBaseAPIView):
     def get(self, request):
         try:
-            results = list(User.objects.filter(role_id=5, is_available=True, is_hidden_from_directory=False).values())
+            results = list(
+                User.objects.filter(
+                    role_id=5,
+                    state_id=User.STATE_ACTIVE,
+                    is_active=True,
+                    is_available=True,
+                    is_hidden_from_directory=False,
+                ).values()
+            )
             logger.info(
                 "node.fetch_therapists raw_rows=%s user_id=%s auth=%s",
                 len(results),
@@ -419,7 +427,7 @@ class SelectTherapistAndPlanView(NodeBaseAPIView):
         therapist_id = request.data.get("therapist_id")
         plan_id = request.data.get("plan_id")
         try:
-            if not User.objects.filter(id=therapist_id, role_id=5).exists():
+            if not User.objects.filter(id=therapist_id, role_id=5, state_id=User.STATE_ACTIVE, is_active=True).exists():
                 return Response({"error": True, "message": "Therapist not found !"}, status=400)
 
             from django.utils import timezone
