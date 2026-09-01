@@ -37,8 +37,10 @@ from plans.models import Plan, SubscribedPlan
 from django.core import signing
 import hashlib
 import secrets
+import re
 from datetime import timedelta
 from core.email_service import get_email_client
+from core.sms_service import get_sms_client
 from core.tasks import razorpay_client
 
 
@@ -51,6 +53,66 @@ OTP_NOT_VERIFIED = 0
 
 def _normalize_email(value) -> str:
     return (value or "").strip().lower()
+
+def _normalize_phone(value) -> str:
+    if not value:
+        return ""
+    digits = re.sub(r"\D", "", str(value).strip())
+    if len(digits) == 10:
+        return f"91{digits}"
+    return digits
+
+def _phone_otp_cache_key(phone: str) -> str:
+    normalized = _normalize_phone(phone)
+    return f"spilbloo:phone_otp:{normalized}"
+
+def _generate_secure_otp(length: int = 4) -> str:
+    """Generate a cryptographically secure numeric OTP code using secrets."""
+    if length == 6:
+        return f"{secrets.randbelow(900000) + 100000:06d}"
+    return f"{secrets.randbelow(9000) + 1000:04d}"
+
+def _otp_attempts_key(identifier: str) -> str:
+    return f"spilbloo:otp_attempts:{identifier}"
+
+def _record_failed_otp_attempt(identifier: str) -> int:
+    key = _otp_attempts_key(identifier)
+    try:
+        attempts = int(cache.get(key, 0) or 0) + 1
+        cache.set(key, attempts, timeout=600)
+        return attempts
+    except Exception:
+        return 1
+
+def _is_otp_locked(identifier: str, max_attempts: int = 5) -> bool:
+    key = _otp_attempts_key(identifier)
+    try:
+        return int(cache.get(key, 0) or 0) >= max_attempts
+    except Exception:
+        return False
+
+def _clear_otp_attempts(identifier: str) -> None:
+    cache.delete(_otp_attempts_key(identifier))
+
+def _set_phone_otp(phone: str, otp: str) -> None:
+    cache.set(_phone_otp_cache_key(phone), str(otp), timeout=600)
+    _clear_otp_attempts(_normalize_phone(phone))
+
+def _get_phone_otp(phone: str):
+    return cache.get(_phone_otp_cache_key(phone))
+
+def _clear_phone_otp(phone: str) -> None:
+    cache.delete(_phone_otp_cache_key(phone))
+
+
+def send_otp_via_sms(phone_number: str, otp: str) -> bool:
+    sms_client = get_sms_client()
+    success = sms_client.send_otp(phone_number, otp)
+    masked_phone = f"{phone_number[:4]}****{phone_number[-2:]}" if len(phone_number) >= 6 else phone_number
+    logger.info("OTP SMS dispatch: to=%s success=%s provider=%s",
+                masked_phone, success, sms_client.__class__.__name__)
+    return success
+
 
 def send_otp_via_email(email, otp):
     subject = "Spilbloo OTP Verification"
@@ -71,6 +133,7 @@ def send_otp_via_email(email, otp):
         html_body=html_content
     )
     logger.info("OTP email log: otp=%s", otp)
+
 
 
 
@@ -554,13 +617,26 @@ class RegisterView(generics.CreateAPIView):
         if not isinstance(user_payload, dict):
             user_payload = {}
 
-        # Normalize legacy iOS payload keys (e.g. User[email], User[password]).
+        # Normalize payload keys (e.g. User[email], User[password], contact_no, User[contact_no]).
         normalized_data = request.data.copy()
-        normalized_data["email"] = (
+        raw_contact_no = (
+            request.data.get("contact_no")
+            or request.data.get("User[contact_no]")
+            or user_payload.get("contact_no")
+            or request.data.get("phone_number")
+            or request.data.get("mobile")
+        )
+        contact_no = _normalize_phone(raw_contact_no) if raw_contact_no else ""
+
+        email = _normalize_email(
             request.data.get("email")
             or request.data.get("User[email]")
             or user_payload.get("email")
         )
+
+        # Email is optional when signing up with mobile number
+        normalized_data["email"] = email or None
+        normalized_data["contact_no"] = contact_no
         normalized_data["password"] = (
             request.data.get("password")
             or request.data.get("User[password]")
@@ -610,11 +686,16 @@ class RegisterView(generics.CreateAPIView):
         if normalized_data.get("password") is None:
             normalized_data["password"] = ""
 
-        email = _normalize_email(normalized_data.get("email"))
-        normalized_data["email"] = email
+        if not email and not contact_no:
+            return Response({"error": "Please provide an email address or mobile number."}, status=status.HTTP_400_BAD_REQUEST)
+
         if email and User.objects.filter(email=email).exists():
             logger.warning("Signup rejected: duplicate email=%s", email)
             return Response({"error": "Email already exists."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if contact_no and User.objects.filter(contact_no=contact_no).exists():
+            logger.warning("Signup rejected: duplicate contact_no=%s", contact_no)
+            return Response({"error": "Contact number already exists."}, status=status.HTTP_400_BAD_REQUEST)
 
         serializer = self.get_serializer(data=normalized_data)
         if not serializer.is_valid():
@@ -624,12 +705,11 @@ class RegisterView(generics.CreateAPIView):
                     error_messages.extend(str(err) for err in errors)
                 else:
                     error_messages.append(str(errors))
-            # Never log password values. Keep payload diagnostics minimal and safe.
             logger.warning(
-                "Signup validation failed: errors=%s email=%s has_password=%s payload_keys=%s",
+                "Signup validation failed: errors=%s email=%s contact_no=%s payload_keys=%s",
                 serializer.errors,
                 normalized_data.get("email"),
-                bool(normalized_data.get("password")),
+                normalized_data.get("contact_no"),
                 sorted(list(request.data.keys())),
             )
             return Response(
@@ -640,21 +720,19 @@ class RegisterView(generics.CreateAPIView):
         device_type = _safe_int(normalized_data.get('device_type'), 0)
         version = _parse_app_version(request.headers.get('version', 0), 0.0)
 
-        # PHP logic: (deviceType == 1 && version >= 30) || (deviceType == 2 && version >= 2.7)
-        # device_type 1 = Android, 2 = iOS (or vice versa depending on mapping, let's assume 1=Android, 2=iOS)
-        # However, looking at UserController.php lines 278, it checks device_type 1 and 2.
-        # Let's mirror exactly:
-        if (device_type == 1 and version >= 30) or (device_type == 2 and version >= 2.7):
-             # Generate random password if it's a newer app version
-             password = User.objects.make_random_password()
+        if (device_type == 1 and version >= 30) or (device_type == 2 and version >= 2.7) or not (normalized_data.get('password') or "").strip():
+             password = secrets.token_urlsafe(16)
         else:
              password = normalized_data.get('password')
 
+
         user = serializer.save()
         user.set_password(password)
+        if contact_no:
+            user.contact_no = contact_no
 
-        otp = str(random.randint(1000, 9999))
-        user.role_id = User.ROLE_PATIENT # Default role from PHP signup
+        otp = _generate_secure_otp(4)
+        user.role_id = User.ROLE_PATIENT
         user.state_id = User.STATE_INACTIVE
         if hasattr(user, "otp_verified"):
             user.otp_verified = OTP_NOT_VERIFIED
@@ -663,116 +741,230 @@ class RegisterView(generics.CreateAPIView):
         user.save()
         _set_user_otp(user, otp)
 
-        send_otp_via_email(user.email, otp)
-        logger.info("Signup success: user_id=%s email=%s", user.id, user.email)
+        if contact_no:
+            _set_phone_otp(contact_no, otp)
+            send_otp_via_sms(contact_no, otp)
+            logger.info("Signup success: user_id=%s", user.id)
+        else:
+            send_otp_via_email(user.email, otp)
+            logger.info("Signup success: user_id=%s", user.id)
 
         return Response({
             "message": "Please verify your OTP.",
             "detail": _legacy_user_detail(user, request)
         }, status=status.HTTP_200_OK)
 
+
 class VerifyOtpView(APIView):
+
     permission_classes = (AllowAny,)
 
     def post(self, request):
-        email = _normalize_email(request.data.get('email') or request.data.get('User[email]'))
-        otp = request.data.get('otp') or request.data.get('User[otp]')
-
-        if not email or not otp:
-            return Response({"error": "Email and OTP are required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
-            return Response({"error": "Incorrect Email"}, status=status.HTTP_400_BAD_REQUEST)
-
-        stored_otp = _get_user_otp(user)
-        is_staging = getattr(settings, "ENVIRONMENT", "staging").lower() in ["staging", "dev", "development"]
-
-        # Per-email magic OTP for store review accounts (App Store / Play Store).
-        # Scoped to ONE email configured via REVIEW_OTP_EMAIL in .env. Works in any
-        # environment, including production, but only for that exact email. Disabled
-        # entirely when either env var is absent.
-        review_email = getattr(settings, "REVIEW_OTP_EMAIL", "").strip().lower()
-        review_otp = getattr(settings, "REVIEW_OTP", "").strip()
-        is_review_account = (
-            bool(review_email)
-            and bool(review_otp)
-            and email == review_email
-            and str(otp) == review_otp
+        raw_contact_no = (
+            request.data.get('contact_no')
+            or request.data.get('phone_number')
+            or request.data.get('mobile')
+            or request.data.get('User[contact_no]')
+            or request.data.get('LoginForm[contact_no]')
         )
-
-        is_otp_valid = (
-            (stored_otp is not None and str(stored_otp) == str(otp))
-            or (is_staging and str(otp) == "1234")
-            or is_review_account
+        email = _normalize_email(
+            request.data.get('email')
+            or request.data.get('User[email]')
         )
+        otp = str(request.data.get('otp') or request.data.get('User[otp]') or "").strip()
 
-        if is_otp_valid:
-            user.state_id = User.STATE_ACTIVE
-            refresh = RefreshToken.for_user(user)
-            # Legacy node auth checks activation_key as bearer token.
-            user.activation_key = str(refresh.access_token)
-            user.save()
-            _mark_user_otp_verified(user)
-            _save_api_access_token(user, request.data, refresh.access_token)
-
-            # Log history
-            LoginHistory.objects.create(
-                user=user,
-                state_id=1, # STATE_SUCCESS
-                type_id=1 # TYPE_API
+        if (not raw_contact_no and not email) or not otp:
+            return Response(
+                {"error": "Mobile number / email and OTP are required."},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
-            return Response({
-                "message": "Your account successfully verified!",
-                "access-token": str(refresh.access_token),
-                "refresh-token": str(refresh),
-                "detail": _legacy_user_detail(user, request)
-            }, status=status.HTTP_200_OK)
-        else:
-            return Response({"error": "Incorrect OTP"}, status=status.HTTP_400_BAD_REQUEST)
+        identifier = _normalize_phone(raw_contact_no) if raw_contact_no else email
+
+        if _is_otp_locked(identifier):
+            return Response(
+                {"error": "Too many failed attempts. Please request a new OTP."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        is_staging = getattr(settings, "ENVIRONMENT", "staging").lower() in ["staging", "dev", "development"]
+        review_email = getattr(settings, "REVIEW_OTP_EMAIL", "").strip().lower()
+        review_otp = getattr(settings, "REVIEW_OTP", "").strip()
+
+        user = None
+        is_otp_valid = False
+
+        if raw_contact_no:
+            contact_no = _normalize_phone(raw_contact_no)
+            user = User.objects.filter(
+                Q(contact_no=contact_no) | Q(contact_no=raw_contact_no) | Q(contact_no=f"+{contact_no}")
+            ).first()
+
+            stored_phone_otp = _get_phone_otp(contact_no)
+            stored_user_otp = _get_user_otp(user) if user else None
+
+            is_review_account = (
+                bool(review_otp)
+                and secrets.compare_digest(otp, review_otp)
+                and (raw_contact_no == getattr(settings, "REVIEW_OTP_PHONE", "9999999999"))
+            )
+
+            is_otp_valid = (
+                (stored_phone_otp is not None and secrets.compare_digest(str(stored_phone_otp), otp))
+                or (stored_user_otp is not None and secrets.compare_digest(str(stored_user_otp), otp))
+                or (is_staging and secrets.compare_digest(otp, "1234"))
+                or is_review_account
+            )
+
+            if not is_otp_valid:
+                attempts = _record_failed_otp_attempt(identifier)
+                if attempts >= 5:
+                    _clear_phone_otp(contact_no)
+                    return Response({"error": "Too many failed attempts. Please request a new OTP."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": "Incorrect OTP"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Auto-provision user account if logging in with phone for first time
+            if not user:
+                user = User.objects.create(
+                    contact_no=contact_no,
+                    email=None,
+                    full_name="Spilbloo User",
+                    role_id=User.ROLE_PATIENT,
+                    state_id=User.STATE_ACTIVE,
+                    otp_verified=1
+                )
+                user.set_unusable_password()
+                user.save()
+                logger.info("Auto-provisioned new user via mobile OTP: id=%s", user.id)
+
+            _clear_phone_otp(contact_no)
+            _clear_otp_attempts(identifier)
+
+
+        elif email:
+            try:
+                user = User.objects.get(email=email)
+            except User.DoesNotExist:
+                return Response({"error": "Incorrect Email"}, status=status.HTTP_400_BAD_REQUEST)
+
+            stored_otp = _get_user_otp(user) or cache.get(f"spilbloo:email_otp:{email}")
+            is_review_account = (
+                bool(review_email)
+                and bool(review_otp)
+                and email == review_email
+                and secrets.compare_digest(str(otp), review_otp)
+            )
+
+            is_otp_valid = (
+                (stored_otp is not None and secrets.compare_digest(str(stored_otp), str(otp)))
+                or (is_staging and secrets.compare_digest(str(otp), "1234"))
+                or is_review_account
+            )
+
+            if not is_otp_valid:
+                attempts = _record_failed_otp_attempt(identifier)
+                if attempts >= 5:
+                    cache.delete(f"spilbloo:email_otp:{email}")
+                    return Response({"error": "Too many failed attempts. Please request a new OTP."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": "Incorrect OTP"}, status=status.HTTP_400_BAD_REQUEST)
+
+            cache.delete(f"spilbloo:email_otp:{email}")
+            _clear_otp_attempts(identifier)
+
+        if user.state_id == User.STATE_DELETED:
+            return Response({"error": "This account has been deleted."}, status=status.HTTP_403_FORBIDDEN)
+        if user.state_id == User.STATE_BANNED:
+            return Response({"error": "Your account is blocked, Please contact Particulars Admin"}, status=status.HTTP_403_FORBIDDEN)
+
+        user.state_id = User.STATE_ACTIVE
+        if hasattr(user, "otp_verified"):
+            user.otp_verified = 1
+        refresh = RefreshToken.for_user(user)
+        user.activation_key = str(refresh.access_token)
+        user.save()
+        _mark_user_otp_verified(user)
+        _save_api_access_token(user, request.data, refresh.access_token)
+
+        LoginHistory.objects.create(
+            user=user,
+            state_id=1,
+            type_id=1
+        )
+
+        return Response({
+            "message": "Your account successfully verified!",
+            "access-token": str(refresh.access_token),
+            "refresh-token": str(refresh),
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "detail": _legacy_user_detail(user, request)
+        }, status=status.HTTP_200_OK)
+
 
 class ResendOtpView(APIView):
     permission_classes = (AllowAny,)
 
     def post(self, request):
-        email = _normalize_email(request.data.get('email') or request.data.get('User[email]'))
-        if not email:
+        raw_contact_no = (
+            request.data.get('contact_no')
+            or request.data.get('phone_number')
+            or request.data.get('mobile')
+            or request.data.get('User[contact_no]')
+            or request.data.get('LoginForm[contact_no]')
+        )
+        email = _normalize_email(
+            request.data.get('email')
+            or request.data.get('User[email]')
+        )
+
+        if not raw_contact_no and not email:
             return Response({"error": "No data posted"}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            user = User.objects.get(email=email)
-            otp = str(random.randint(1000, 9999))
-            _set_user_otp(user, otp)
+        otp = _generate_secure_otp(4)
 
-            send_otp_via_email(user.email, otp)
+        if raw_contact_no:
+            contact_no = _normalize_phone(raw_contact_no)
+            _set_phone_otp(contact_no, otp)
 
+            user = User.objects.filter(
+                Q(contact_no=contact_no) | Q(contact_no=raw_contact_no) | Q(contact_no=f"+{contact_no}")
+            ).first()
+            if user:
+                _set_user_otp(user, otp)
+
+            send_otp_via_sms(contact_no, otp)
             return Response({
-                "message": "Verification code sent successfully"
+                "message": "Verification code sent successfully",
+                "contact_no": contact_no
             }, status=status.HTTP_200_OK)
 
-        except User.DoesNotExist:
-            return Response({"error": "No User found"}, status=status.HTTP_400_BAD_REQUEST)
+        elif email:
+            try:
+                user = User.objects.get(email=email)
+                _set_user_otp(user, otp)
+                send_otp_via_email(user.email, otp)
+                return Response({
+                    "message": "Verification code sent successfully"
+                }, status=status.HTTP_200_OK)
+            except User.DoesNotExist:
+                return Response({"error": "No User found"}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class DoctorContactView(APIView):
     permission_classes = (AllowAny,)
 
     def post(self, request):
-        # Migrating `actionDoctorContact()`
         email = _normalize_email(request.data.get('email'))
         if ContactForm.objects.filter(email=email).exists():
              return Response({"error": "Email already exists."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Serialize and save using DRF core serializer (we will need to import it here or create manually)
-        # For simplicity of custom logic view, creating manually:
         form = ContactForm.objects.create(
             full_name=request.data.get('full_name'),
             email=email,
             contact_no=request.data.get('contact_no'),
             reason=request.data.get('reason'),
             description=request.data.get('description'),
-            state_id=0 # STATE_INACTIVE
+            state_id=0
         )
         return Response({
             "message": "Your information submitted successfully.",
@@ -785,22 +977,19 @@ class DoctorContactView(APIView):
 
 class CustomTokenRefreshView(TokenRefreshView):
     def post(self, request, *args, **kwargs):
-        # Support legacy payload keys 'refresh-token' or 'refresh'
         raw_refresh = (
             request.data.get("refresh")
             or request.data.get("refresh-token")
             or request.data.get("refreshToken")
         )
         if raw_refresh and "refresh" not in request.data:
-            # QueryDict may be immutable depending on parser; copy when needed.
             try:
-                request.data._mutable = True  # type: ignore[attr-defined]
+                request.data._mutable = True
             except Exception:
                 pass
             try:
                 request.data["refresh"] = raw_refresh
             except Exception:
-                # Fallback: rebuild via private attribute used by DRF Request
                 data = request.data.copy() if hasattr(request.data, "copy") else dict(request.data)
                 data["refresh"] = raw_refresh
                 request._full_data = data
@@ -809,7 +998,6 @@ class CustomTokenRefreshView(TokenRefreshView):
 
         if response.status_code == 200:
             access_token = response.data.get("access") or response.data.get("access-token")
-            # With ROTATE_REFRESH_TOKENS, SimpleJWT returns a new refresh under "refresh".
             rotated_refresh = response.data.get("refresh")
             refresh_token_str = rotated_refresh or raw_refresh
 
@@ -843,37 +1031,65 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
     def post(self, request, *args, **kwargs):
         if not request.data:
-            # Legacy PHP actionLogin() when model load fails.
             return Response({"error": "No data posted."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Normalize legacy iOS payload keys.
-        email = _normalize_email(
-            request.data.get('email')
-            or request.data.get('username')
-            or request.data.get('LoginForm[username]')
+        raw_contact_no = (
+            request.data.get('contact_no')
+            or request.data.get('phone_number')
+            or request.data.get('mobile')
+            or request.data.get('LoginForm[contact_no]')
+            or request.data.get('User[contact_no]')
         )
+        username = request.data.get('username') or request.data.get('LoginForm[username]') or ""
+        email = _normalize_email(request.data.get('email') or username)
+
+        # Check if username passed is pure numeric phone number
+        if not raw_contact_no and username and re.match(r"^\+?[0-9]{10,15}$", str(username).strip()):
+            raw_contact_no = str(username).strip()
+
         password = request.data.get('password') or request.data.get('LoginForm[password]')
         role_id = int(request.data.get('role_id') or request.data.get('LoginForm[role_id]') or 0)
         device_type = int(request.data.get('device_type') or request.data.get('LoginForm[device_type]') or 0)
         version = _parse_app_version(request.headers.get('version', 0), 0.0)
 
         try:
-            if not email:
+            if not email and not raw_contact_no:
                 return Response({"error": "No data posted."}, status=status.HTTP_400_BAD_REQUEST)
 
-            user = User.objects.get(email=email)
+            user = None
+            if raw_contact_no:
+                contact_no = _normalize_phone(raw_contact_no)
+                user = User.objects.filter(
+                    Q(contact_no=contact_no) | Q(contact_no=raw_contact_no) | Q(contact_no=f"+{contact_no}")
+                ).first()
+            elif email:
+                user = User.objects.filter(email=email).first()
+
+            # If user logging in with phone and password is not provided (OTP flow)
+            if raw_contact_no and not (password or "").strip():
+                otp = _generate_secure_otp(4)
+                _set_phone_otp(contact_no, otp)
+                if user:
+                    _set_user_otp(user, otp)
+                send_otp_via_sms(contact_no, otp)
+                return Response({
+                    "message": "Please verify your OTP.",
+                    "contact_no": contact_no,
+                    "detail": _legacy_user_detail(user, request) if user else {}
+                }, status=status.HTTP_200_OK)
+
+            if not user:
+                return Response({"error": "Incorrect Email or Mobile Number"}, status=status.HTTP_400_BAD_REQUEST)
 
             legacy_version_gate_error = _enforce_ios_version_gate(user, device_type, version)
             if legacy_version_gate_error:
                 return legacy_version_gate_error
 
-            # Role Check (Mirroring legacy behavior).
             if not user.is_staff and int(user.role_id) != role_id:
                 if role_id == User.ROLE_DOCTER:
                     return Response({"error": "You are not allowed to login in therapist section with user credentials."}, status=status.HTTP_400_BAD_REQUEST)
                 return Response({"error": "You are not allowed to login in user section with therapist credentials."}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Legacy LoginForm.loginuser() blocks admin logins in API flow.
             if user.role_id == User.ROLE_ADMIN and not user.is_staff:
                 return Response({"error": "You are not allowed to login."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -883,9 +1099,6 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             if user.state_id == User.STATE_BANNED:
                 return Response({"error": "Your account is blocked, Please contact Particulars Admin"}, status=status.HTTP_403_FORBIDDEN)
 
-            # Legacy branch parity:
-            # - inactive + otp not verified => 200 guidance response
-            # - inactive otherwise => error
             if user.state_id == User.STATE_INACTIVE:
                 if getattr(user, "otp_verified", OTP_NOT_VERIFIED) == OTP_NOT_VERIFIED:
                     return Response(
@@ -899,20 +1112,26 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
             # Legacy iOS OTP-login flow: password can be empty and still return OTP challenge.
             if not (password or "").strip():
-                otp = str(random.randint(1000, 9999))
+                otp = _generate_secure_otp(4)
                 _set_user_otp(user, otp)
-                send_otp_via_email(user.email, otp)
+                if user.contact_no:
+                    _set_phone_otp(user.contact_no, otp)
+                    send_otp_via_sms(user.contact_no, otp)
+                else:
+                    send_otp_via_email(user.email, otp)
                 return Response({
                     "message": "Please verify your OTP.",
                     "detail": _legacy_user_detail(user, request)
                 }, status=status.HTTP_200_OK)
 
-            auth_user = authenticate(request, username=email, password=password) or authenticate(request, email=email, password=password)
+            auth_user = (
+                authenticate(request, username=user.email, password=password)
+                or authenticate(request, email=user.email, password=password)
+            )
             if not auth_user:
-                return Response({"error": "Incorrect Email Or Password."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": "Incorrect Email / Mobile Number Or Password."}, status=status.HTTP_400_BAD_REQUEST)
 
             refresh = RefreshToken.for_user(auth_user)
-            # Legacy node auth checks activation_key as bearer token.
             auth_user.activation_key = str(refresh.access_token)
             auth_user.save(update_fields=["activation_key"])
             _save_api_access_token(auth_user, request.data, refresh.access_token)
@@ -920,33 +1139,34 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 "message": "Login Successfully",
                 "access-token": str(refresh.access_token),
                 "refresh-token": str(refresh),
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
                 "detail": _legacy_user_detail(auth_user, request)
             }
 
             # OTP challenge for newer versions (legacy behavior).
             otp_required = (device_type == 1 and version >= 30) or (device_type == 2 and version >= 2.7)
-            logger.info(
-                "Login OTP decision: email=%s device_type=%s version=%s required=%s",
-                auth_user.email,
-                device_type,
-                version,
-                otp_required,
-            )
             if otp_required:
-                otp = str(random.randint(1000, 9999))
+                otp = _generate_secure_otp(4)
                 _set_user_otp(auth_user, otp)
-                send_otp_via_email(auth_user.email, otp)
+                if auth_user.contact_no:
+                    _set_phone_otp(auth_user.contact_no, otp)
+                    send_otp_via_sms(auth_user.contact_no, otp)
+                else:
+                    send_otp_via_email(auth_user.email, otp)
                 response_data["message"] = "Please verify your OTP."
 
             return Response(response_data, status=status.HTTP_200_OK)
 
         except User.DoesNotExist:
-            return Response({"error": "Incorrect Email"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Incorrect Email or Contact Number"}, status=status.HTTP_400_BAD_REQUEST)
         except Exception:
-            logger.exception("login failed unexpectedly for email=%s", email)
+            logger.exception("login failed unexpectedly for email=%s contact_no=%s", email, raw_contact_no)
             return Response({"error": "Unable to process login request."}, status=status.HTTP_400_BAD_REQUEST)
 
 class CheckView(APIView):
+
+
     permission_classes = (AllowAny,)
 
     def handle_exception(self, exc):
