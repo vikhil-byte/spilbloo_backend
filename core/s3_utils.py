@@ -40,7 +40,7 @@ def upload_to_s3(file_obj, object_name):
         return None
 
 
-def get_file_url(file_path):
+def get_file_url(file_path, expires_in=86400):
     if not file_path:
         return None
 
@@ -55,11 +55,11 @@ def get_file_url(file_path):
     if bucket_name:
         try:
             s3_client = get_s3_client()
-            # Generate a secure pre-signed URL valid for 1 hour (3600 seconds)
+            # Generate a secure pre-signed URL (default 24 hours)
             presigned_url = s3_client.generate_presigned_url(
                 'get_object',
                 Params={'Bucket': bucket_name, 'Key': file_path},
-                ExpiresIn=3600
+                ExpiresIn=expires_in
             )
             return presigned_url
         except Exception as e:

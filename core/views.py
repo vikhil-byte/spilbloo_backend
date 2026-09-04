@@ -645,6 +645,8 @@ class PublicTherapistListView(APIView):
 
     def get(self, request):
         from core.models import UserSymptom
+        from core.s3_utils import get_file_url
+
         doctors = User.objects.filter(
             role_id=User.ROLE_DOCTER,
             state_id=User.STATE_ACTIVE,
@@ -659,6 +661,9 @@ class PublicTherapistListView(APIView):
                 .values_list('symptom__title', flat=True)
             )
 
+            # Generate direct S3 URL for profile image
+            image_url = get_file_url(doc.profile_file) if doc.profile_file else ""
+
             data.append({
                 "id": doc.id,
                 "full_name": doc.full_name or doc.first_name or f"Therapist #{doc.id}",
@@ -670,6 +675,8 @@ class PublicTherapistListView(APIView):
                 "language": doc.language or "",
                 "specialties": symptom_names,
                 "gender": doc.gender,
+                "image_url": image_url or "",
+                "profile_image_url": image_url or "",
             })
         return Response({"results": data, "count": len(data)}, status=status.HTTP_200_OK)
 
