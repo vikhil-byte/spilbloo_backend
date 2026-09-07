@@ -106,33 +106,54 @@ def _clear_phone_otp(phone: str) -> None:
 
 
 def send_otp_via_sms(phone_number: str, otp: str) -> bool:
-    sms_client = get_sms_client()
-    success = sms_client.send_otp(phone_number, otp)
-    masked_phone = f"{phone_number[:4]}****{phone_number[-2:]}" if len(phone_number) >= 6 else phone_number
-    logger.info("OTP SMS dispatch: to=%s success=%s provider=%s",
-                masked_phone, success, sms_client.__class__.__name__)
-    return success
+    try:
+        from communication.services import send_communication
+        from communication.models import CommunicationGateway
+        return send_communication(
+            event_code="AUTH_OTP",
+            recipient=phone_number,
+            context={"otp": str(otp), "number": str(otp)},
+            channel=CommunicationGateway.CHANNEL_SMS
+        )
+    except Exception as e:
+        logger.exception("CommunicationHub SMS dispatch error: %s", e)
+        sms_client = get_sms_client()
+        success = sms_client.send_otp(phone_number, otp)
+        masked_phone = f"{phone_number[:4]}****{phone_number[-2:]}" if len(phone_number) >= 6 else phone_number
+        logger.info("Fallback OTP SMS dispatch: to=%s success=%s provider=%s",
+                    masked_phone, success, sms_client.__class__.__name__)
+        return success
 
 
 def send_otp_via_email(email, otp):
-    subject = "Spilbloo OTP Verification"
-    message = f"Your OTP is {otp}. It is valid for 10 minutes."
-    
     context = {
-        "subject": subject,
+        "subject": "Spilbloo OTP Verification",
         "otp": otp
     }
     html_content = render_to_string("emails/otp_email.html", context)
-    
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
-    get_email_client().send_email(
-        subject=subject,
-        body=message,
-        to_email=email,
-        from_email=from_email,
-        html_body=html_content
-    )
-    logger.info("OTP email log: otp=%s", otp)
+    try:
+        from communication.services import send_communication
+        from communication.models import CommunicationGateway
+        return send_communication(
+            event_code="AUTH_EMAIL_OTP",
+            recipient=email,
+            context=context,
+            channel=CommunicationGateway.CHANNEL_EMAIL,
+            html_body=html_content
+        )
+    except Exception as e:
+        logger.exception("CommunicationHub Email dispatch error: %s", e)
+        subject = "Spilbloo OTP Verification"
+        message = f"Your OTP is {otp}. It is valid for 10 minutes."
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@spilbloo.com")
+        get_email_client().send_email(
+            subject=subject,
+            body=message,
+            to_email=email,
+            from_email=from_email,
+            html_body=html_content
+        )
+        logger.info("Fallback OTP email log: otp=%s", otp)
 
 
 

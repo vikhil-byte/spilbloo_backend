@@ -21,7 +21,7 @@ class MSG91SMSAdapter(BaseSMSAdapter):
             or getattr(settings, "MSG91_OTP_TEMPLATE_ID", None)
             or getattr(settings, "MSG91_DLT_TE_ID", "")
         )
-        self.sender_id = sender_id or getattr(settings, "MSG91_SENDER_ID", "SPLBLO")
+        self.sender_id = sender_id or getattr(settings, "MSG91_SENDER_ID", "SPBLOO")
         self.timeout = getattr(settings, "MSG91_HTTP_TIMEOUT", 10)
 
     def send_otp(self, phone_number: str, otp: str, **kwargs) -> bool:
@@ -39,26 +39,37 @@ class MSG91SMSAdapter(BaseSMSAdapter):
             return True
 
         params = {
-            "template_id": self.otp_template_id,
             "mobile": normalized_mobile,
             "authkey": self.auth_key,
             "otp": str(otp),
             "otp_expiry": kwargs.get("otp_expiry", 10),
         }
+        if self.otp_template_id:
+            params["template_id"] = self.otp_template_id
+        if self.sender_id:
+            params["sender"] = self.sender_id
+
         headers = {
             "Content-Type": "application/json",
             "authkey": self.auth_key,
+        }
+        payload = {
+            "otp": str(otp),
+            "number": str(otp),
+            **kwargs.get("extra_variables", {})
         }
 
         try:
             response = requests.post(
                 self.OTP_API_URL,
                 params=params,
+                json=payload,
                 headers=headers,
                 timeout=self.timeout
             )
             response_json = response.json() if response.content else {}
 
+            self.last_response = response_json
             if response.status_code == 200 and response_json.get("type") != "error":
                 logger.info("[MSG91] OTP sent successfully to %s: %s", normalized_mobile, response_json)
                 return True
