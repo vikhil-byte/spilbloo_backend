@@ -92,6 +92,7 @@ INSTALLED_APPS = [
     "doctor_requests",
     "calls",
     "discover",
+    "communication",
 ]
 
 MIDDLEWARE = [
@@ -335,6 +336,14 @@ AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME', '')
 AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME', 'us-east-1')
 AWS_S3_ENDPOINT_URL = os.environ.get('AWS_S3_ENDPOINT_URL', None)
 AWS_S3_PUBLIC_URL = os.environ.get('AWS_S3_PUBLIC_URL', None)
+
+# SMS & OTP Service Configuration (Adapter Pattern)
+SMS_SERVICE_PROVIDER = os.environ.get('SMS_SERVICE_PROVIDER', os.environ.get('SMS_PROVIDER', 'msg91'))  # options: msg91, sns, console
+MSG91_AUTH_KEY = os.environ.get('MSG91_AUTH_KEY', '')
+MSG91_OTP_TEMPLATE_ID = os.environ.get('MSG91_OTP_TEMPLATE_ID', os.environ.get('MSG91_DLT_TE_ID', ''))
+MSG91_SENDER_ID = os.environ.get('MSG91_SENDER_ID', 'SPBLOO')
+MSG91_HTTP_TIMEOUT = int(os.environ.get('MSG91_HTTP_TIMEOUT', '10'))
+
 
 
 

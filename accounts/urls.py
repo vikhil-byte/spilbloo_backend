@@ -16,6 +16,8 @@ urlpatterns = [
     path('signup/', RegisterView.as_view(), name='auth_register'),
     path('verify-otp/', VerifyOtpView.as_view(), name='verify_otp'),
     path('resend-otp/', ResendOtpView.as_view(), name='resend_otp'),
+
+
     path('doctor-contact/', DoctorContactView.as_view(), name='doctor_contact'),
     # iOS legacy compatibility alias.
     path('contact-us/', DoctorContactView.as_view(), name='contact_us_legacy'),

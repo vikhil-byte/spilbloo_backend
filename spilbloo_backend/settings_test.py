@@ -14,3 +14,7 @@ PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.MD5PasswordHasher",
 ]
 
+# Use console adapter for fast offline testing
+SMS_SERVICE_PROVIDER = "console"
+
+
