@@ -92,6 +92,7 @@ INSTALLED_APPS = [
     "doctor_requests",
     "calls",
     "discover",
+    "communication",
 ]
 
 MIDDLEWARE = [
@@ -340,7 +341,7 @@ AWS_S3_PUBLIC_URL = os.environ.get('AWS_S3_PUBLIC_URL', None)
 SMS_SERVICE_PROVIDER = os.environ.get('SMS_SERVICE_PROVIDER', os.environ.get('SMS_PROVIDER', 'msg91'))  # options: msg91, sns, console
 MSG91_AUTH_KEY = os.environ.get('MSG91_AUTH_KEY', '')
 MSG91_OTP_TEMPLATE_ID = os.environ.get('MSG91_OTP_TEMPLATE_ID', os.environ.get('MSG91_DLT_TE_ID', ''))
-MSG91_SENDER_ID = os.environ.get('MSG91_SENDER_ID', 'SPLBLO')
+MSG91_SENDER_ID = os.environ.get('MSG91_SENDER_ID', 'SPBLOO')
 MSG91_HTTP_TIMEOUT = int(os.environ.get('MSG91_HTTP_TIMEOUT', '10'))
 
 
