@@ -77,6 +77,27 @@ class SMSAdapterPatternTests(TestCase):
 
         self.assertFalse(result)
 
+    @patch("requests.post")
+    def test_msg91_adapter_send_otp_flow_template(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'{"type": "success", "message": "366969766a6a6c6934394d69"}'
+        mock_response.json.return_value = {"type": "success", "message": "366969766a6a6c6934394d69"}
+        mock_post.return_value = mock_response
+
+        # 24-character hex template ID
+        adapter = MSG91SMSAdapter(auth_key="test_auth_key", otp_template_id="6a9d6a75b3e1cb31640825e3")
+        result = adapter.send_otp("7506229401", "4819")
+
+        self.assertTrue(result)
+        mock_post.assert_called_once()
+        self.assertEqual(mock_post.call_args[0][0], adapter.FLOW_API_URL)
+        call_kwargs = mock_post.call_args[1]
+        self.assertEqual(call_kwargs["json"]["template_id"], "6a9d6a75b3e1cb31640825e3")
+        self.assertEqual(call_kwargs["json"]["recipients"][0]["mobiles"], "917506229401")
+        self.assertEqual(call_kwargs["json"]["recipients"][0]["otp"], "4819")
+        self.assertEqual(adapter.last_response.get("request_id"), "366969766a6a6c6934394d69")
+
 
 class MobileOTPAuthAPITests(APITestCase):
     def setUp(self):
@@ -211,3 +232,46 @@ class MobileOTPAuthAPITests(APITestCase):
 
         stored_otp = _get_phone_otp("919876533334")
         self.assertIsNotNone(stored_otp)
+
+    def test_resend_and_verify_with_international_country_code(self):
+        # US phone number with +1
+        response = self.client.post(
+            self.resend_otp_url,
+            {"contact_no": "4155552671", "country_code": "+1"},
+            format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["contact_no"], "14155552671")
+
+        stored_otp = _get_phone_otp("14155552671")
+        self.assertIsNotNone(stored_otp)
+
+        # Verify OTP
+        verify_res = self.client.post(
+            self.verify_otp_url,
+            {"contact_no": "4155552671", "country_code": "+1", "otp": stored_otp},
+            format="json"
+        )
+        self.assertEqual(verify_res.status_code, status.HTTP_200_OK)
+        self.assertIn("access-token", verify_res.data)
+        self.assertEqual(verify_res.data["detail"]["country_code"], "+1")
+        self.assertEqual(verify_res.data["detail"]["contact_no"], "14155552671")
+
+        user = User.objects.get(contact_no="14155552671")
+        self.assertEqual(user.country_code, "+1")
+
+    def test_default_country_code_for_10_digit_number(self):
+        phone = "9876544445"
+        stored_otp = "8899"
+        _set_phone_otp("919876544445", stored_otp)
+
+        verify_res = self.client.post(
+            self.verify_otp_url,
+            {"contact_no": phone, "otp": stored_otp},
+            format="json"
+        )
+        self.assertEqual(verify_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(verify_res.data["detail"]["country_code"], "+91")
+
+        user = User.objects.get(contact_no="919876544445")
+        self.assertEqual(user.country_code, "+91")

@@ -64,6 +64,7 @@ class User(AbstractUser):
     gender = models.SmallIntegerField(blank=True, null=True)
     about_me = models.TextField(blank=True, null=True)
     contact_no = models.CharField(max_length=50, blank=True, null=True)
+    country_code = models.CharField(max_length=16, default='+91', blank=True, null=True, help_text="Phone dial code e.g. +91, +1, +44")
     address = models.TextField(blank=True, null=True)
     latitude = models.CharField(max_length=50, blank=True, null=True)
     longitude = models.CharField(max_length=50, blank=True, null=True)
