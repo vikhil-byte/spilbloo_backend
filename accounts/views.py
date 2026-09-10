@@ -876,22 +876,37 @@ class VerifyOtpView(APIView):
                 return Response({"error": "Incorrect OTP"}, status=status.HTTP_400_BAD_REQUEST)
 
             # Auto-provision user account if logging in with phone for first time
+            raw_full_name = (
+                request.data.get('full_name')
+                or request.data.get('name')
+                or request.data.get('User[full_name]')
+                or request.data.get('LoginForm[full_name]')
+            )
+            fallback_name = str(raw_full_name).strip() if raw_full_name else "Spilbloo User"
+
             if not user:
                 user = User.objects.create(
                     contact_no=contact_no,
                     country_code=_format_country_code(raw_country_code),
                     email=None,
-                    full_name="Spilbloo User",
+                    full_name=fallback_name,
                     role_id=User.ROLE_PATIENT,
                     state_id=User.STATE_ACTIVE,
                     otp_verified=1
                 )
                 user.set_unusable_password()
                 user.save()
-                logger.info("Auto-provisioned new user via mobile OTP: id=%s", user.id)
-            elif raw_country_code:
-                user.country_code = _format_country_code(raw_country_code)
-                user.save(update_fields=["country_code"])
+                logger.info("Auto-provisioned new user via mobile OTP: id=%s (full_name=%s)", user.id, user.full_name)
+            else:
+                updated = False
+                if raw_country_code:
+                    user.country_code = _format_country_code(raw_country_code)
+                    updated = True
+                if raw_full_name and (not user.full_name or user.full_name == "Spilbloo User"):
+                    user.full_name = str(raw_full_name).strip()
+                    updated = True
+                if updated:
+                    user.save()
 
             _clear_phone_otp(contact_no)
             _clear_otp_attempts(identifier)
@@ -1621,7 +1636,11 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
                 else:
                     instance.date_of_birth = None
             if email is not None:
-                instance.email = _normalize_email(email)
+                cleaned_email = _normalize_email(email)
+                if cleaned_email:
+                    instance.email = cleaned_email
+                elif not instance.email:
+                    instance.email = None
             if country_code is not None:
                 instance.country_code = _format_country_code(country_code)
             if contact_no is not None:
