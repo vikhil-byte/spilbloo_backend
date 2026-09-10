@@ -125,7 +125,7 @@ curl -X POST "$BASE_URL/api/user/verify-otp/" \
     "id": 193,
     "contact_no": "7506229401",
     "country_code": "+91",
-    "full_name": "Spilbloo User",
+    "full_name": "",
     "email": null,
     "role_id": 4,
     "state_id": 1
@@ -161,7 +161,7 @@ curl -X GET "$BASE_URL/api/user/update-profile/" \
 ```json
 {
   "id": 193,
-  "full_name": "Spilbloo User",
+  "full_name": "",
   "contact_no": "7506229401",
   "country_code": "+91",
   "email": "user@example.com",

@@ -22,6 +22,18 @@ class CustomUserCreationForm(forms.ModelForm):
         model = User
         fields = ("country_code", "contact_no", "email", "full_name", "role_id", "state_id")
 
+    def clean_contact_no(self):
+        contact_no = self.cleaned_data.get("contact_no")
+        if not contact_no:
+            return contact_no
+        country_code = self.cleaned_data.get("country_code") or "+91"
+        from accounts.phone_utils import normalize_phone_e164, resolve_country_hint
+        hint = resolve_country_hint(country_code)
+        normalized = normalize_phone_e164(contact_no, hint)
+        if not normalized:
+            raise forms.ValidationError("Enter a valid phone number.")
+        return normalized
+
     def clean(self):
         cleaned_data = super().clean()
         email = cleaned_data.get("email")
@@ -53,6 +65,18 @@ class CustomUserChangeForm(UserChangeForm):
     class Meta:
         model = User
         fields = "__all__"
+
+    def clean_contact_no(self):
+        contact_no = self.cleaned_data.get("contact_no")
+        if not contact_no:
+            return contact_no
+        country_code = self.cleaned_data.get("country_code") or getattr(self.instance, "country_code", "+91")
+        from accounts.phone_utils import normalize_phone_e164, resolve_country_hint
+        hint = resolve_country_hint(country_code)
+        normalized = normalize_phone_e164(contact_no, hint)
+        if not normalized:
+            raise forms.ValidationError("Enter a valid phone number.")
+        return normalized
 
 
 @admin.register(User)
