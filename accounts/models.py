@@ -2,19 +2,16 @@ from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 
 class UserManager(BaseUserManager):
-    def create_user(self, email=None, password=None, **extra_fields):
-        if email:
-            email = str(email).strip().lower()
-        else:
-            email = None
+    def create_user(self, email, password=None, **extra_fields):
+        if not email:
+            raise ValueError('The Email field must be set')
+        email = str(email).strip().lower()
         user = self.model(email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
         return user
 
     def create_superuser(self, email, password=None, **extra_fields):
-        if not email:
-            raise ValueError('Superusers must have an email address')
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
         # 0 is ROLE_ADMIN
@@ -55,8 +52,7 @@ class User(AbstractUser):
 
     # Let's remove username and use email as the primary identifying field
     username = None
-    email = models.EmailField(unique=True, blank=True, null=True)
-
+    email = models.EmailField(unique=True)
 
     # Fields mapped from PHP
     full_name = models.CharField(max_length=255, blank=True, null=True)
