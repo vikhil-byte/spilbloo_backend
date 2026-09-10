@@ -7,16 +7,28 @@ from django.contrib.auth.forms import UserChangeForm
 
 
 class CustomUserCreationForm(forms.ModelForm):
-    password = forms.CharField(widget=forms.PasswordInput, label="Password")
+    email = forms.EmailField(required=False, label="Email address")
+    contact_no = forms.CharField(required=False, label="Mobile number", help_text="e.g. 9876543210")
+    country_code = forms.CharField(required=False, initial="+91", label="Country code", help_text="e.g. +91")
+    password = forms.CharField(widget=forms.PasswordInput, label="Password", required=False)
     password_2 = forms.CharField(
         widget=forms.PasswordInput,
         label="Password confirmation",
         help_text="Enter the same password as above, for verification.",
+        required=False,
     )
 
     class Meta:
         model = User
-        fields = ("email",)
+        fields = ("country_code", "contact_no", "email", "full_name", "role_id", "state_id")
+
+    def clean(self):
+        cleaned_data = super().clean()
+        email = cleaned_data.get("email")
+        contact_no = cleaned_data.get("contact_no")
+        if not email and not contact_no:
+            raise forms.ValidationError("Please provide at least a mobile number or an email address.")
+        return cleaned_data
 
     def clean_password_2(self):
         password = self.cleaned_data.get("password")
@@ -27,7 +39,11 @@ class CustomUserCreationForm(forms.ModelForm):
 
     def save(self, commit=True):
         user = super().save(commit=False)
-        user.set_password(self.cleaned_data["password"])
+        password = self.cleaned_data.get("password")
+        if password:
+            user.set_password(password)
+        else:
+            user.set_unusable_password()
         if commit:
             user.save()
         return user
@@ -48,6 +64,8 @@ class UserAdmin(BaseUserAdmin):
     list_display = (
         "id",
         "email",
+        "contact_no",
+        "country_code",
         "full_name",
         "role_id",
         "state_id",
@@ -131,6 +149,7 @@ class UserAdmin(BaseUserAdmin):
             "Contact & Location",
             {
                 "fields": (
+                    "country_code",
                     "contact_no",
                     "address",
                     "city",
@@ -238,7 +257,16 @@ class UserAdmin(BaseUserAdmin):
             None,
             {
                 "classes": ("wide",),
-                "fields": ("email", "password", "password_2", "full_name", "role_id", "state_id"),
+                "fields": (
+                    "country_code",
+                    "contact_no",
+                    "email",
+                    "full_name",
+                    "password",
+                    "password_2",
+                    "role_id",
+                    "state_id",
+                ),
             },
         ),
     )
