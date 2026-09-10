@@ -275,3 +275,54 @@ class MobileOTPAuthAPITests(APITestCase):
 
         user = User.objects.get(contact_no="919876544445")
         self.assertEqual(user.country_code, "+91")
+
+    def test_autoprovision_with_custom_name(self):
+        phone = "9876599991"
+        stored_otp = "1122"
+        _set_phone_otp("919876599991", stored_otp)
+
+        verify_res = self.client.post(
+            self.verify_otp_url,
+            {"contact_no": phone, "otp": stored_otp, "full_name": "Rohan Sharma"},
+            format="json"
+        )
+        self.assertEqual(verify_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(verify_res.data["detail"]["full_name"], "Rohan Sharma")
+
+        user = User.objects.get(contact_no="919876599991")
+        self.assertEqual(user.full_name, "Rohan Sharma")
+        self.assertIsNone(user.email)
+
+    def test_autoprovision_fallback_name_when_not_provided(self):
+        phone = "9876599992"
+        stored_otp = "3344"
+        _set_phone_otp("919876599992", stored_otp)
+
+        verify_res = self.client.post(
+            self.verify_otp_url,
+            {"contact_no": phone, "otp": stored_otp},
+            format="json"
+        )
+        self.assertEqual(verify_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(verify_res.data["detail"]["full_name"], "Spilbloo User")
+
+        user = User.objects.get(contact_no="919876599992")
+        self.assertEqual(user.full_name, "Spilbloo User")
+        self.assertIsNone(user.email)
+
+    def test_autoprovision_multiple_users_empty_email_no_integrity_error(self):
+        # Verify that auto-provisioning multiple users without email never causes
+        # IntegrityError: Key (email)=() already exists
+        for idx, phone in enumerate(["9876599993", "9876599994"], start=5):
+            otp = f"{idx}{idx}{idx}{idx}"
+            _set_phone_otp(f"91{phone}", otp)
+            res = self.client.post(
+                self.verify_otp_url,
+                {"contact_no": phone, "otp": otp, "email": ""},
+                format="json"
+            )
+            self.assertEqual(res.status_code, status.HTTP_200_OK)
+            self.assertEqual(res.data["detail"]["email"], "")
+            u = User.objects.get(contact_no=f"91{phone}")
+            self.assertIsNone(u.email)
+
