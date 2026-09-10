@@ -64,6 +64,7 @@ class User(AbstractUser):
     gender = models.SmallIntegerField(blank=True, null=True)
     about_me = models.TextField(blank=True, null=True)
     contact_no = models.CharField(max_length=50, blank=True, null=True)
+    country_code = models.CharField(max_length=16, default='+91', blank=True, null=True, help_text="Phone dial code e.g. +91, +1, +44")
     address = models.TextField(blank=True, null=True)
     latitude = models.CharField(max_length=50, blank=True, null=True)
     longitude = models.CharField(max_length=50, blank=True, null=True)
@@ -133,9 +134,15 @@ class User(AbstractUser):
         db_table = 'tbl_user'
 
     def __str__(self):
-        return self.full_name or self.email
+        return self.full_name or self.email or self.contact_no or f"User {self.id or ''}".strip() or "User"
 
     def save(self, *args, **kwargs):
+        # Ensure email is None instead of empty string to satisfy PostgreSQL UNIQUE constraint
+        if self.email is not None and not str(self.email).strip():
+            self.email = None
+        elif self.email is not None:
+            self.email = str(self.email).strip().lower()
+
         # Normalize/sync name fields
         if self.full_name:
             self.full_name = self.full_name.strip()

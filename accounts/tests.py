@@ -310,10 +310,12 @@ class VerifyOtpStagingTests(APITestCase):
         )
         self.verify_url = reverse("verify_otp")
 
-    def test_staging_bypasses_otp_with_1234(self):
+    def test_verify_otp_with_actual_otp(self):
+        from accounts.views import _set_user_otp
+        _set_user_otp(self.user, "8921")
         response = self.client.post(
             self.verify_url,
-            {"email": self.user.email, "otp": "1234"},
+            {"email": self.user.email, "otp": "8921"},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -321,13 +323,25 @@ class VerifyOtpStagingTests(APITestCase):
         self.assertEqual(self.user.state_id, User.STATE_ACTIVE)
         self.assertIn("access-token", response.data)
 
+    def test_staging_does_not_bypass_otp_with_1234(self):
+        # 1234 must be rejected if it is not the actual OTP
+        response = self.client.post(
+            self.verify_url,
+            {"email": self.user.email, "otp": "1234"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data.get("error"), "Incorrect OTP")
+
     def test_verify_otp_saves_api_access_token(self):
         from core.models import ApiAccessToken
+        from accounts.views import _set_user_otp
+        _set_user_otp(self.user, "7412")
         response = self.client.post(
             self.verify_url,
             {
                 "email": self.user.email,
-                "otp": "1234",
+                "otp": "7412",
                 "device_token": "my_mobile_fcm_token_9999",
                 "device_type": "1"
             },

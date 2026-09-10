@@ -30,11 +30,10 @@ jobs:
             git fetch origin dev
             git reset --hard origin/dev
 
-            # Write environment variables from dev environment secret
-            echo "${{ secrets.ENV_FILE }}" > .env
+            # Make scripts executable
+            chmod +x deploy_ec2.sh scripts/*.sh 2>/dev/null || true
 
-            # Deploy
-            chmod +x deploy_ec2.sh
+            # Deploy (fetches secrets automatically from AWS Secrets Manager)
             ./deploy_ec2.sh
 
   deploy_prod:
@@ -60,9 +59,8 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            # Write environment variables from production environment secret
-            echo "${{ secrets.ENV_FILE }}" > .env
+            # Make scripts executable
+            chmod +x deploy_ec2.sh scripts/*.sh 2>/dev/null || true
 
-            # Deploy using production compose file
-            chmod +x deploy_ec2.sh
+            # Deploy using production compose file (fetches production secrets automatically)
             ./deploy_ec2.sh --prod

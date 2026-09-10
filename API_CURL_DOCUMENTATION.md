@@ -45,22 +45,24 @@ curl -X POST "$BASE_URL/api/user/login/refresh/" \
   -d "{\"refresh\":\"$REFRESH_TOKEN\"}"
 ```
 
-### Verify OTP
+### Verify OTP (Mobile or Email)
 ```bash
 curl -X POST "$BASE_URL/api/user/verify-otp/" \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "user@example.com",
-    "otp": "1234"
+    "country_code": "+91",
+    "contact_no": "7506229401",
+    "otp": "<OTP_FROM_SMS>"
   }'
 ```
 
-### Resend OTP
+### Resend OTP (SMS or Email)
 ```bash
 curl -X POST "$BASE_URL/api/user/resend-otp/" \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "user@example.com"
+    "country_code": "+91",
+    "contact_no": "7506229401"
   }'
 ```
 

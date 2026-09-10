@@ -13,7 +13,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id', 'email', 'full_name', 'first_name', 'last_name', 'role_id', 'contact_no', 'address', 'city', 'country', 'profile_file', 'language', 'is_superuser', 'is_staff', 'permissions', 'affirmation_for_the_day')
+        fields = ('id', 'email', 'full_name', 'first_name', 'last_name', 'role_id', 'contact_no', 'country_code', 'address', 'city', 'country', 'profile_file', 'language', 'is_superuser', 'is_staff', 'permissions', 'affirmation_for_the_day')
 
     def get_permissions(self, obj):
         if obj.is_superuser:
@@ -38,7 +38,7 @@ class UserSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
         # Prevent iOS/Swift force-unwrap crashes by turning null string values into empty strings
-        for key in ('email', 'full_name', 'first_name', 'last_name', 'contact_no', 'address', 'city', 'country', 'profile_file', 'language', 'affirmation_for_the_day'):
+        for key in ('email', 'full_name', 'first_name', 'last_name', 'contact_no', 'country_code', 'address', 'city', 'country', 'profile_file', 'language', 'affirmation_for_the_day'):
             if key in data and data[key] is None:
                 data[key] = ""
         return data
@@ -50,10 +50,11 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id', 'email', 'password', 'full_name', 'first_name', 'last_name', 'role_id', 'contact_no')
+        fields = ('id', 'email', 'password', 'full_name', 'first_name', 'last_name', 'role_id', 'contact_no', 'country_code')
         extra_kwargs = {
             'email': {'required': False, 'allow_null': True, 'allow_blank': True},
             'contact_no': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'country_code': {'required': False, 'allow_null': True, 'allow_blank': True},
             'full_name': {'required': False, 'allow_blank': True},
             'first_name': {'required': False, 'allow_blank': True},
             'last_name': {'required': False, 'allow_blank': True}
@@ -64,6 +65,7 @@ class RegisterSerializer(serializers.ModelSerializer):
             email=validated_data.get('email') or None,
             password=validated_data.get('password') or None,
             contact_no=validated_data.get('contact_no') or None,
+            country_code=validated_data.get('country_code') or '+91',
             full_name=validated_data.get('full_name', ''),
             first_name=validated_data.get('first_name', ''),
             last_name=validated_data.get('last_name', ''),
