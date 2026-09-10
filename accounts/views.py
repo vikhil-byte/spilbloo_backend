@@ -42,6 +42,7 @@ from datetime import timedelta
 from core.email_service import get_email_client
 from core.sms_service import get_sms_client
 from core.tasks import razorpay_client
+from accounts.phone_utils import normalize_phone_e164, resolve_country_hint, extract_country_code
 
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ def _normalize_email(value) -> str:
     return (value or "").strip().lower()
 
 def _format_country_code(country_code, default="+91") -> str:
+    """Format a raw country code input into display format (+91, +1, etc.)."""
     if not country_code:
         return default
     cc = str(country_code).strip()
@@ -63,26 +65,10 @@ def _format_country_code(country_code, default="+91") -> str:
         return default
     return f"+{digits}"
 
-def _normalize_phone(value, country_code=None) -> str:
-    if not value:
-        return ""
-    digits = re.sub(r"\D", "", str(value).strip())
-    
-    # If explicit country_code is provided (e.g. "+1", "1", "+44")
-    cc_digits = re.sub(r"\D", "", str(country_code).strip()) if country_code else ""
-    if cc_digits:
-        if not digits.startswith(cc_digits):
-            return f"{cc_digits}{digits}"
-        return digits
-
-    # Default fallback: 10-digit number without country code defaults to India (91)
-    if len(digits) == 10:
-        return f"91{digits}"
-    return digits
-
 def _phone_otp_cache_key(phone: str, country_code=None) -> str:
-    normalized = _normalize_phone(phone, country_code)
-    return f"spilbloo:phone_otp:{normalized}"
+    hint = resolve_country_hint(country_code)
+    e164 = normalize_phone_e164(phone, hint)
+    return f"spilbloo:phone_otp:{e164 or phone}"
 
 def _generate_secure_otp(length: int = 4) -> str:
     """Generate a cryptographically secure numeric OTP code using secrets."""
@@ -114,7 +100,9 @@ def _clear_otp_attempts(identifier: str) -> None:
 
 def _set_phone_otp(phone: str, otp: str, country_code=None) -> None:
     cache.set(_phone_otp_cache_key(phone, country_code), str(otp), timeout=600)
-    _clear_otp_attempts(_normalize_phone(phone, country_code))
+    hint = resolve_country_hint(country_code)
+    e164 = normalize_phone_e164(phone, hint)
+    _clear_otp_attempts(e164 or phone)
 
 def _get_phone_otp(phone: str, country_code=None):
     return cache.get(_phone_otp_cache_key(phone, country_code))
@@ -672,7 +660,8 @@ class RegisterView(generics.CreateAPIView):
             or user_payload.get("country_code")
             or "+91"
         )
-        contact_no = _normalize_phone(raw_contact_no, raw_country_code) if raw_contact_no else ""
+        country_hint = resolve_country_hint(raw_country_code)
+        contact_no = normalize_phone_e164(raw_contact_no, country_hint) or "" if raw_contact_no else ""
 
         email = _normalize_email(
             request.data.get("email")
@@ -832,7 +821,9 @@ class VerifyOtpView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        identifier = _normalize_phone(raw_contact_no, raw_country_code) if raw_contact_no else email
+        country_hint = resolve_country_hint(raw_country_code)
+        contact_no = normalize_phone_e164(raw_contact_no, country_hint) if raw_contact_no else None
+        identifier = contact_no or email
 
         if _is_otp_locked(identifier):
             return Response(
@@ -848,10 +839,7 @@ class VerifyOtpView(APIView):
         is_otp_valid = False
 
         if raw_contact_no:
-            contact_no = _normalize_phone(raw_contact_no, raw_country_code)
-            user = User.objects.filter(
-                Q(contact_no=contact_no) | Q(contact_no=raw_contact_no) | Q(contact_no=f"+{contact_no}")
-            ).first()
+            user = User.objects.filter(contact_no=contact_no).first() if contact_no else None
 
             stored_phone_otp = _get_phone_otp(contact_no)
             stored_user_otp = _get_user_otp(user) if user else None
@@ -882,27 +870,27 @@ class VerifyOtpView(APIView):
                 or request.data.get('User[full_name]')
                 or request.data.get('LoginForm[full_name]')
             )
-            fallback_name = str(raw_full_name).strip() if raw_full_name else "Spilbloo User"
+            full_name = str(raw_full_name).strip() if raw_full_name else ""
 
             if not user:
                 user = User.objects.create(
                     contact_no=contact_no,
                     country_code=_format_country_code(raw_country_code),
                     email=None,
-                    full_name=fallback_name,
+                    full_name=full_name,
                     role_id=User.ROLE_PATIENT,
                     state_id=User.STATE_ACTIVE,
                     otp_verified=1
                 )
                 user.set_unusable_password()
                 user.save()
-                logger.info("Auto-provisioned new user via mobile OTP: id=%s (full_name=%s)", user.id, user.full_name)
+                logger.info("Auto-provisioned new user via mobile OTP: id=%s", user.id)
             else:
                 updated = False
-                if raw_country_code:
+                if raw_country_code and not user.country_code:
                     user.country_code = _format_country_code(raw_country_code)
                     updated = True
-                if raw_full_name and (not user.full_name or user.full_name == "Spilbloo User"):
+                if raw_full_name and not user.full_name:
                     user.full_name = str(raw_full_name).strip()
                     updated = True
                 if updated:
@@ -998,15 +986,16 @@ class ResendOtpView(APIView):
         otp = _generate_secure_otp(4)
 
         if raw_contact_no:
-            contact_no = _normalize_phone(raw_contact_no, raw_country_code)
+            country_hint = resolve_country_hint(raw_country_code)
+            contact_no = normalize_phone_e164(raw_contact_no, country_hint)
+            if not contact_no:
+                return Response({"error": "Invalid phone number"}, status=status.HTTP_400_BAD_REQUEST)
+            user = User.objects.filter(contact_no=contact_no).first()
             _set_phone_otp(contact_no, otp)
 
-            user = User.objects.filter(
-                Q(contact_no=contact_no) | Q(contact_no=raw_contact_no) | Q(contact_no=f"+{contact_no}")
-            ).first()
             if user:
                 _set_user_otp(user, otp)
-                if raw_country_code:
+                if raw_country_code and not user.country_code:
                     user.country_code = _format_country_code(raw_country_code)
                     user.save(update_fields=["country_code"])
 
@@ -1140,11 +1129,11 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 return Response({"error": "No data posted."}, status=status.HTTP_400_BAD_REQUEST)
 
             user = None
+            contact_no = None
             if raw_contact_no:
-                contact_no = _normalize_phone(raw_contact_no, raw_country_code)
-                user = User.objects.filter(
-                    Q(contact_no=contact_no) | Q(contact_no=raw_contact_no) | Q(contact_no=f"+{contact_no}")
-                ).first()
+                country_hint = resolve_country_hint(raw_country_code)
+                contact_no = normalize_phone_e164(raw_contact_no, country_hint)
+                user = User.objects.filter(contact_no=contact_no).first() if contact_no else None
             elif email:
                 user = User.objects.filter(email=email).first()
 
@@ -1644,7 +1633,8 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
             if country_code is not None:
                 instance.country_code = _format_country_code(country_code)
             if contact_no is not None:
-                instance.contact_no = _normalize_phone(contact_no, instance.country_code or country_code)
+                hint = resolve_country_hint(instance.country_code or country_code)
+                instance.contact_no = normalize_phone_e164(contact_no, hint) or contact_no
             if longitude is not None:
                 instance.longitude = longitude
             if latitude is not None:

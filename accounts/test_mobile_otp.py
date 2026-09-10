@@ -12,8 +12,58 @@ from core.sms_service.msg91_adapter import MSG91SMSAdapter
 from core.sms_service.console_adapter import ConsoleSMSAdapter
 from core.sms_service.factory import get_sms_client
 from accounts.views import _set_phone_otp, _get_phone_otp
+from accounts.phone_utils import normalize_phone_e164, resolve_country_hint, extract_country_code
 
 User = get_user_model()
+
+
+class PhoneUtilsTests(TestCase):
+    """Tests for the phonenumbers-based phone_utils module."""
+
+    def test_10_digit_indian_number(self):
+        self.assertEqual(normalize_phone_e164("9876543210"), "+919876543210")
+
+    def test_10_digit_starting_with_91(self):
+        """Regression: 9187299381 is a 10-digit Indian number, not 91 + 87299381."""
+        self.assertEqual(normalize_phone_e164("9187299381", "IN"), "+919187299381")
+
+    def test_12_digit_with_country_code(self):
+        self.assertEqual(normalize_phone_e164("919876543210"), "+919876543210")
+
+    def test_e164_passthrough(self):
+        self.assertEqual(normalize_phone_e164("+919876543210"), "+919876543210")
+
+    def test_us_number(self):
+        self.assertEqual(normalize_phone_e164("4155552671", "US"), "+14155552671")
+
+    def test_us_number_with_country_code(self):
+        self.assertEqual(normalize_phone_e164("14155552671"), "+14155552671")
+
+    def test_empty_returns_none(self):
+        self.assertIsNone(normalize_phone_e164(""))
+        self.assertIsNone(normalize_phone_e164(None))
+
+    def test_invalid_number_returns_none(self):
+        self.assertIsNone(normalize_phone_e164("123"))
+
+    def test_resolve_country_hint_dial_code(self):
+        self.assertEqual(resolve_country_hint("+91"), "IN")
+        self.assertEqual(resolve_country_hint("91"), "IN")
+        self.assertEqual(resolve_country_hint("+1"), "US")
+        self.assertEqual(resolve_country_hint("44"), "GB")
+
+    def test_resolve_country_hint_iso_code(self):
+        self.assertEqual(resolve_country_hint("IN"), "IN")
+        self.assertEqual(resolve_country_hint("US"), "US")
+
+    def test_resolve_country_hint_default(self):
+        self.assertEqual(resolve_country_hint(None), "IN")
+        self.assertEqual(resolve_country_hint(""), "IN")
+
+    def test_extract_country_code(self):
+        self.assertEqual(extract_country_code("+919876543210"), "+91")
+        self.assertEqual(extract_country_code("4155552671", "US"), "+1")
+        self.assertEqual(extract_country_code(""), "+91")
 
 
 class SMSAdapterPatternTests(TestCase):
@@ -116,14 +166,14 @@ class MobileOTPAuthAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["message"], "Please verify your OTP.")
 
-        # Verify cached OTP exists
-        stored_otp = _get_phone_otp("919876543210")
+        # Verify cached OTP exists (E.164 format)
+        stored_otp = _get_phone_otp("+919876543210")
         self.assertIsNotNone(stored_otp)
         self.assertEqual(len(str(stored_otp)), 4)
 
     def test_login_otp_challenge_via_mobile_number(self):
         phone = "9876544445"
-        normalized_phone = "919876544445"
+        e164_phone = "+919876544445"
 
         # Calling existing /api/user/login/ with contact_no initiates OTP challenge
         response = self.client.post(
@@ -133,16 +183,16 @@ class MobileOTPAuthAPITests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["message"], "Please verify your OTP.")
-        self.assertEqual(response.data["contact_no"], normalized_phone)
+        self.assertEqual(response.data["contact_no"], e164_phone)
 
         # Confirm OTP was set in cache
-        stored_otp = _get_phone_otp(normalized_phone)
+        stored_otp = _get_phone_otp(e164_phone)
         self.assertIsNotNone(stored_otp)
 
     def test_verify_otp_auto_provisions_new_user_and_issues_jwt(self):
         phone = "9876500001"
-        normalized_phone = "919876500001"
-        _set_phone_otp(normalized_phone, "8899")
+        e164_phone = "+919876500001"
+        _set_phone_otp(e164_phone, "8899")
 
         response = self.client.post(
             self.verify_otp_url,
@@ -152,10 +202,10 @@ class MobileOTPAuthAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("access-token", response.data)
         self.assertIn("refresh-token", response.data)
-        self.assertEqual(response.data["detail"]["contact_no"], normalized_phone)
+        self.assertEqual(response.data["detail"]["contact_no"], e164_phone)
 
-        # Verify user created in DB without placeholder email
-        created_user = User.objects.filter(contact_no=normalized_phone).first()
+        # Verify user created in DB with E.164 contact_no
+        created_user = User.objects.filter(contact_no=e164_phone).first()
         self.assertIsNotNone(created_user)
         self.assertIsNone(created_user.email)
         self.assertEqual(created_user.state_id, User.STATE_ACTIVE)
@@ -164,15 +214,15 @@ class MobileOTPAuthAPITests(APITestCase):
 
     def test_verify_otp_existing_user_login(self):
         phone = "9876511112"
-        normalized_phone = "919876511112"
+        e164_phone = "+919876511112"
         existing_user = User.objects.create_user(
             email="existing_mobile_user@spilbloo.com",
             full_name="Existing Mobile User",
-            contact_no=normalized_phone,
+            contact_no=e164_phone,
             role_id=User.ROLE_PATIENT,
             state_id=User.STATE_ACTIVE
         )
-        _set_phone_otp(normalized_phone, "4455")
+        _set_phone_otp(e164_phone, "4455")
 
         response = self.client.post(
             self.verify_otp_url,
@@ -186,8 +236,8 @@ class MobileOTPAuthAPITests(APITestCase):
 
     def test_verify_otp_rejects_incorrect_otp(self):
         phone = "9876522223"
-        normalized_phone = "919876522223"
-        _set_phone_otp(normalized_phone, "9999")
+        e164_phone = "+919876522223"
+        _set_phone_otp(e164_phone, "9999")
 
         response = self.client.post(
             self.verify_otp_url,
@@ -199,8 +249,8 @@ class MobileOTPAuthAPITests(APITestCase):
 
     def test_verify_otp_brute_force_lockout(self):
         phone = "9876599999"
-        normalized_phone = "919876599999"
-        _set_phone_otp(normalized_phone, "8888")
+        e164_phone = "+919876599999"
+        _set_phone_otp(e164_phone, "8888")
 
         for _ in range(5):
             self.client.post(
@@ -228,9 +278,9 @@ class MobileOTPAuthAPITests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["message"], "Verification code sent successfully")
-        self.assertEqual(response.data["contact_no"], "919876533334")
+        self.assertEqual(response.data["contact_no"], "+919876533334")
 
-        stored_otp = _get_phone_otp("919876533334")
+        stored_otp = _get_phone_otp("+919876533334")
         self.assertIsNotNone(stored_otp)
 
     def test_resend_and_verify_with_international_country_code(self):
@@ -241,9 +291,9 @@ class MobileOTPAuthAPITests(APITestCase):
             format="json"
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["contact_no"], "14155552671")
+        self.assertEqual(response.data["contact_no"], "+14155552671")
 
-        stored_otp = _get_phone_otp("14155552671")
+        stored_otp = _get_phone_otp("+14155552671")
         self.assertIsNotNone(stored_otp)
 
         # Verify OTP
@@ -255,15 +305,15 @@ class MobileOTPAuthAPITests(APITestCase):
         self.assertEqual(verify_res.status_code, status.HTTP_200_OK)
         self.assertIn("access-token", verify_res.data)
         self.assertEqual(verify_res.data["detail"]["country_code"], "+1")
-        self.assertEqual(verify_res.data["detail"]["contact_no"], "14155552671")
+        self.assertEqual(verify_res.data["detail"]["contact_no"], "+14155552671")
 
-        user = User.objects.get(contact_no="14155552671")
+        user = User.objects.get(contact_no="+14155552671")
         self.assertEqual(user.country_code, "+1")
 
     def test_default_country_code_for_10_digit_number(self):
         phone = "9876544445"
         stored_otp = "8899"
-        _set_phone_otp("919876544445", stored_otp)
+        _set_phone_otp("+919876544445", stored_otp)
 
         verify_res = self.client.post(
             self.verify_otp_url,
@@ -273,13 +323,13 @@ class MobileOTPAuthAPITests(APITestCase):
         self.assertEqual(verify_res.status_code, status.HTTP_200_OK)
         self.assertEqual(verify_res.data["detail"]["country_code"], "+91")
 
-        user = User.objects.get(contact_no="919876544445")
+        user = User.objects.get(contact_no="+919876544445")
         self.assertEqual(user.country_code, "+91")
 
     def test_autoprovision_with_custom_name(self):
         phone = "9876599991"
         stored_otp = "1122"
-        _set_phone_otp("919876599991", stored_otp)
+        _set_phone_otp("+919876599991", stored_otp)
 
         verify_res = self.client.post(
             self.verify_otp_url,
@@ -289,14 +339,14 @@ class MobileOTPAuthAPITests(APITestCase):
         self.assertEqual(verify_res.status_code, status.HTTP_200_OK)
         self.assertEqual(verify_res.data["detail"]["full_name"], "Rohan Sharma")
 
-        user = User.objects.get(contact_no="919876599991")
+        user = User.objects.get(contact_no="+919876599991")
         self.assertEqual(user.full_name, "Rohan Sharma")
         self.assertIsNone(user.email)
 
     def test_autoprovision_fallback_name_when_not_provided(self):
         phone = "9876599992"
         stored_otp = "3344"
-        _set_phone_otp("919876599992", stored_otp)
+        _set_phone_otp("+919876599992", stored_otp)
 
         verify_res = self.client.post(
             self.verify_otp_url,
@@ -304,18 +354,44 @@ class MobileOTPAuthAPITests(APITestCase):
             format="json"
         )
         self.assertEqual(verify_res.status_code, status.HTTP_200_OK)
-        self.assertEqual(verify_res.data["detail"]["full_name"], "Spilbloo User")
+        self.assertEqual(verify_res.data["detail"]["full_name"], "")
 
-        user = User.objects.get(contact_no="919876599992")
-        self.assertEqual(user.full_name, "Spilbloo User")
+        user = User.objects.get(contact_no="+919876599992")
+        self.assertEqual(user.full_name, "")
         self.assertIsNone(user.email)
+
+    def test_10_digit_phone_starting_with_91_does_not_create_duplicate(self):
+        # Specific regression test for Indian mobile numbers starting with '91' (e.g. 9187299381)
+        phone = "9187299381"
+        stored_otp = "7711"
+        _set_phone_otp("+919187299381", stored_otp)
+
+        verify_res = self.client.post(
+            self.verify_otp_url,
+            {"contact_no": phone, "country_code": "+91", "otp": stored_otp},
+            format="json"
+        )
+        self.assertEqual(verify_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(verify_res.data["detail"]["contact_no"], "+919187299381")
+        self.assertEqual(verify_res.data["detail"]["full_name"], "")
+
+        # Verify second login with same number returns same user without creating duplicate
+        _set_phone_otp("+919187299381", stored_otp)
+        verify_res2 = self.client.post(
+            self.verify_otp_url,
+            {"contact_no": "919187299381", "country_code": "+91", "otp": stored_otp},
+            format="json"
+        )
+        # Account should be found (not duplicated)
+        matching_users = User.objects.filter(contact_no="+919187299381")
+        self.assertEqual(matching_users.count(), 1)
 
     def test_autoprovision_multiple_users_empty_email_no_integrity_error(self):
         # Verify that auto-provisioning multiple users without email never causes
         # IntegrityError: Key (email)=() already exists
         for idx, phone in enumerate(["9876599993", "9876599994"], start=5):
             otp = f"{idx}{idx}{idx}{idx}"
-            _set_phone_otp(f"91{phone}", otp)
+            _set_phone_otp(f"+91{phone}", otp)
             res = self.client.post(
                 self.verify_otp_url,
                 {"contact_no": phone, "otp": otp, "email": ""},
@@ -323,6 +399,5 @@ class MobileOTPAuthAPITests(APITestCase):
             )
             self.assertEqual(res.status_code, status.HTTP_200_OK)
             self.assertEqual(res.data["detail"]["email"], "")
-            u = User.objects.get(contact_no=f"91{phone}")
+            u = User.objects.get(contact_no=f"+91{phone}")
             self.assertIsNone(u.email)
-
