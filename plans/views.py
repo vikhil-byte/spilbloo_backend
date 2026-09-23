@@ -317,15 +317,52 @@ class CreateSubscriptionView(APIView):
                          status=status.HTTP_400_BAD_REQUEST,
                      )
 
-                # 1. Address Persistence (actionCreateSubscription 441-461)
-                # If user doesn't have address, save it. Otherwise use user's address.
-                user_address = request.data.get('address')
-                if user_address:
-                     user.address = user_address
-                     user.city = request.data.get('city', user.city)
-                     user.country = request.data.get('country', user.country)
-                     user.contact_no = request.data.get('contact', user.contact_no)
-                     user.save()
+                # 1. Address Persistence (actionCreateSubscription 441-461 parity)
+                raw_sub_plan = request.data.get('SubscribedPlan') if isinstance(request.data.get('SubscribedPlan'), dict) else {}
+                address = request.data.get('address') or request.data.get('SubscribedPlan[address]') or raw_sub_plan.get('address')
+                country = request.data.get('country') or request.data.get('SubscribedPlan[country]') or raw_sub_plan.get('country')
+                state = request.data.get('state') or request.data.get('SubscribedPlan[state]') or raw_sub_plan.get('state')
+                city = request.data.get('city') or request.data.get('SubscribedPlan[city]') or raw_sub_plan.get('city')
+                contact = request.data.get('contact') or request.data.get('SubscribedPlan[contact]') or raw_sub_plan.get('contact') or request.data.get('contact_no')
+
+                has_address_payload = bool(address or country or state or city or contact or raw_sub_plan)
+
+                # Check if user has prior subscription (PHP $user->checkIsPlanSubscribed())
+                is_plan_subscribed = SubscribedPlan.objects.filter(
+                    created_by=user
+                ).exclude(state_id=SubscribedPlan.STATE_CREATED).exists()
+
+                if has_address_payload and not is_plan_subscribed:
+                    effective_state = state or getattr(user, 'state', None)
+                    if not effective_state:
+                        return Response({"error": "Please provide address details."}, status=status.HTTP_400_BAD_REQUEST)
+
+                    # Save billing address to user table (PHP $user->saveUserAddress())
+                    update_fields = []
+                    if address:
+                        user.address = address
+                        update_fields.append("address")
+                    if country:
+                        user.country = country
+                        update_fields.append("country")
+                    if state:
+                        user.state = state
+                        update_fields.append("state")
+                    if city:
+                        user.city = city
+                        update_fields.append("city")
+                    if contact:
+                        user.contact_no = contact
+                        update_fields.append("contact_no")
+                    if update_fields:
+                        user.save(update_fields=update_fields)
+
+                # Fallback to existing user profile attributes for subscription snapshot
+                address = address or getattr(user, 'address', None)
+                country = country or getattr(user, 'country', None)
+                state = state or getattr(user, 'state', None)
+                city = city or getattr(user, 'city', None)
+                contact = contact or getattr(user, 'contact_no', None)
 
                 # 2. Trial Day Calculation (actionCreateSubscription 480-500)
                 trial_days = plan_obj.no_of_free_trial_days or 0
@@ -384,6 +421,11 @@ class CreateSubscriptionView(APIView):
                     plan_price=plan_obj.total_price,
                     gst_price=plan_obj.tax_price,
                     final_price=plan_obj.final_price,
+                    address=address,
+                    city=city,
+                    state=state,
+                    country=country,
+                    contact=contact,
                 )
 
 

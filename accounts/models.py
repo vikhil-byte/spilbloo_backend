@@ -69,6 +69,7 @@ class User(AbstractUser):
     latitude = models.CharField(max_length=50, blank=True, null=True)
     longitude = models.CharField(max_length=50, blank=True, null=True)
     city = models.CharField(max_length=100, blank=True, null=True)
+    state = models.CharField(max_length=128, blank=True, null=True)
     country = models.CharField(max_length=100, blank=True, null=True)
     zipcode = models.CharField(max_length=20, blank=True, null=True)
     language = models.CharField(max_length=50, blank=True, null=True)
