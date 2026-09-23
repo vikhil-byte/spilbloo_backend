@@ -1,117 +1,140 @@
-# Spilbloo Mobile OTP & Authentication API - cURL Documentation
+# Spilbloo Frontend Developer API Documentation
 
-This document provides copy-pasteable `curl` commands and request/response specifications for the Spilbloo Mobile OTP login, registration, country code handling, and verification flows.
-
----
-
-## 1. Environment Setup
-
-Set these environment variables in your terminal to streamline testing:
-
-```bash
-# Local testing:
-BASE_URL="http://127.0.0.1:8000"
-
-# Staging/Production testing:
-# BASE_URL="https://dev.api.spilbloo.com"
-```
+This document provides complete API contracts, curl commands, and frontend implementation logic for:
+1. **Unified Authentication OTP Flow** (Mobile SMS & Email)
+2. **Therapist Directory & Filtration API** (Filtering by Symptoms, Language, Gender, Search, Availability)
 
 ---
 
-## 2. Request / Resend OTP (`POST /api/user/resend-otp/`)
+# PART 1: Unified Authentication OTP API
 
-Generates a secure 4-digit OTP and dispatches it directly to the user's phone via MSG91 SMS (or email).
+Spilbloo uses a **single unified endpoint** for both Login and Signup. The frontend client does not need separate screens for logging in vs. creating an account.
 
-### A. Indian Mobile Number (`+91`)
-```bash
-curl -X POST "$BASE_URL/api/user/resend-otp/" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "country_code": "+91",
-    "contact_no": "7506229401"
-  }'
+### Base URLs
+- **Local Dev**: `http://127.0.0.1:8000`
+- **Staging**: `https://dev.api.spilbloo.com`
+- **Production**: `https://api.spilbloo.com`
+
+> **Note for QA & Frontend Devs (Staging / Local Testing):**
+> On staging and local environments, the OTP is **hardcoded to `1234`**. You can enter `1234` on the verification screen without waiting for real SMS delivery.
+> In Production (`ENVIRONMENT=production`), secure random OTPs are always generated and dispatched.
+
+---
+
+## 1. Request OTP (Login / Signup)
+
+- **Method**: `POST`
+- **Endpoints**:
+  - `POST /api/accounts/request-otp/` *(Recommended)*
+  - `POST /api/user/send-otp/` *(Backward-compatible alias)*
+  - `POST /api/user/login/` *(Omitting the `password` field initiates OTP challenge)*
+
+### Request Headers
+```http
+Content-Type: application/json
 ```
 
-*(Note: Passing `"contact_no": "7506229401"` without `country_code` will automatically format and default to `+91`)*
+### Request Payloads
 
-### B. International Mobile Number (e.g., USA `+1`)
-```bash
-curl -X POST "$BASE_URL/api/user/resend-otp/" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "country_code": "+1",
-    "contact_no": "4155552671"
-  }'
-```
-
-### C. Email-Based OTP Request
-```bash
-curl -X POST "$BASE_URL/api/user/resend-otp/" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "user@example.com"
-  }'
-```
-
-### Success Response (`200 OK`)
+#### A. Mobile Number (Default Indian `+91`)
 ```json
 {
-  "message": "Verification code sent successfully",
-  "contact_no": "917506229401"
+  "contact_no": "9876543210"
 }
 ```
-*(The OTP is never exposed in the response for security.)*
+*(If `country_code` is omitted, the backend automatically normalizes to `+919876543210`)*
 
-### Error Response (`400 Bad Request`)
+#### B. International Mobile Number
 ```json
 {
-  "error": "No data posted"
+  "country_code": "+1",
+  "contact_no": "4155552671"
+}
+```
+
+#### C. Email Address
+```json
+{
+  "email": "user@example.com"
 }
 ```
 
 ---
 
-## 3. Verify OTP & Obtain Tokens (`POST /api/user/verify-otp/`)
+### Response Payloads
 
-Submits the 4-digit code received via SMS. Returns JWT tokens (`access` and `refresh`).
-If the phone number is logging in for the first time, an active user account is automatically provisioned.
-
-### A. Verify Mobile OTP
-```bash
-curl -X POST "$BASE_URL/api/user/verify-otp/" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "country_code": "+91",
-    "contact_no": "7506229401",
-    "otp": "ENTER_SMS_OTP"
-  }'
+#### Scenario 1: New User (`Signup`)
+When the identifier is not yet registered in Spilbloo:
+```json
+{
+  "message": "Verification code sent successfully.",
+  "flag": "signup",
+  "is_new_user": true,
+  "show_consent": true,
+  "is_consent_accepted": false,
+  "is_consent_accept": 0,
+  "channel": "sms",
+  "identifier": "+919876543210",
+  "contact_no": "+919876543210",
+  "detail": {}
+}
 ```
 
-*(Note: Name and email are NOT required during OTP verification. The account is auto-provisioned, and the user's real name is set in the subsequent profile update API.)*
-
-### B. Verify Mobile OTP with Mobile Device Push Token (FCM / APNS)
-```bash
-curl -X POST "$BASE_URL/api/user/verify-otp/" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "country_code": "+91",
-    "contact_no": "7506229401",
-    "otp": "ENTER_SMS_OTP",
-    "device_token": "fcm_token_example_abc123",
-    "device_type": "1",
-    "device_name": "Google Pixel 8"
-  }'
+#### Scenario 2: Existing User (`Login`)
+When the user is already registered and has previously accepted consent:
+```json
+{
+  "message": "Verification code sent successfully.",
+  "flag": "login",
+  "is_new_user": false,
+  "show_consent": false,
+  "is_consent_accepted": true,
+  "is_consent_accept": 1,
+  "channel": "sms",
+  "identifier": "+919876543210",
+  "contact_no": "+919876543210",
+  "detail": {
+    "id": 193,
+    "contact_no": "+919876543210",
+    "full_name": "Pooja Sharma",
+    "is_consent_accept": 1
+  }
+}
 ```
 
-### C. Verify Email OTP
-```bash
-curl -X POST "$BASE_URL/api/user/verify-otp/" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "user@example.com",
-    "otp": "ENTER_EMAIL_OTP"
-  }'
+---
+
+### Frontend UI Logic for the OTP Verification Screen
+
+| Response Field | Meaning | Frontend Action |
+| :--- | :--- | :--- |
+| `flag === "signup"` or `is_new_user === true` | User is new | Header: *"Create your account"* |
+| `flag === "login"` or `is_new_user === false` | User exists | Header: *"Welcome back, please verify"* |
+| `show_consent === true` | Consent has not been accepted yet | **Show the Terms & Consent Checkbox** ("I agree to Spilbloo Terms & Consent Policy") |
+| `show_consent === false` | User already consented on a previous login | **Hide the Consent Checkbox** |
+
+---
+
+## 2. Verify OTP & Obtain Tokens
+
+- **Method**: `POST`
+- **Endpoints**:
+  - `POST /api/accounts/verify-otp/` *(Recommended)*
+  - `POST /api/user/verify-otp/`
+
+Submits the 4-digit code. Validates OTP, auto-provisions the user if new, persists consent timestamp, and returns JWT access & refresh tokens.
+
+### Request Body
+```json
+{
+  "contact_no": "+919876543210",
+  "otp": "4819",
+  "is_consent_accept": 1,
+  "device_token": "optional_fcm_or_apns_token",
+  "device_type": "1"
+}
 ```
+*(For email verification, replace `"contact_no"` with `"email": "user@example.com"`)*
 
 ### Success Response (`200 OK`)
 ```json
@@ -121,121 +144,159 @@ curl -X POST "$BASE_URL/api/user/verify-otp/" \
   "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "access-token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "refresh-token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "flag": "signup",
+  "is_new_user": true,
+  "is_consent_accepted": true,
+  "is_consent_accept": 1,
   "detail": {
-    "id": 193,
-    "contact_no": "7506229401",
-    "country_code": "+91",
-    "full_name": "",
+    "id": 204,
+    "contact_no": "+919876543210",
     "email": null,
-    "role_id": 4,
-    "state_id": 1
+    "full_name": "",
+    "role_id": 1,
+    "state_id": 1,
+    "is_consent_accept": 1
   }
 }
 ```
 
 ### Error Responses
-- **Incorrect OTP (`400 Bad Request`):**
-  ```json
-  { "error": "Incorrect OTP" }
-  ```
-- **Brute-Force Lockout (5 Failed Attempts):**
-  ```json
-  { "error": "Too many failed attempts. Please request a new OTP." }
-  ```
-- **Banned or Inactive Account (`403 Forbidden`):**
-  ```json
-  { "error": "Your account is blocked, Please contact Particulars Admin" }
-  ```
+- **Incorrect Code (`400 Bad Request`)**: `{"error": "Incorrect OTP"}`
+- **Brute-Force Lockout (5 attempts) (`400 Bad Request`)**: `{"error": "Too many failed attempts. Please request a new OTP."}`
+- **Blocked/Banned User (`403 Forbidden`)**: `{"error": "Your account is blocked, Please contact Particulars Admin"}`
 
 ---
 
-## 4. Check & Update User Profile (`/api/user/update-profile/`)
+## 3. Resend OTP
 
-### A. Get Current Profile (Inspect Saved `country_code`)
-```bash
-curl -X GET "$BASE_URL/api/user/update-profile/" \
-  -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>"
-```
-
-**Response (`200 OK`):**
+- **Method**: `POST`
+- **Endpoint**: `POST /api/accounts/resend-otp/` (or `POST /api/user/resend-otp/`)
+- **Body**:
 ```json
 {
-  "id": 193,
-  "full_name": "",
-  "contact_no": "7506229401",
-  "country_code": "+91",
-  "email": "user@example.com",
-  "role_id": 4
+  "contact_no": "+919876543210"
+}
+```
+- **Response (`200 OK`)**: Same schema as `request-otp/`.
+
+---
+---
+
+# PART 2: Therapist Directory & Filtration API
+
+Spilbloo provides a high-performance, multi-attribute server-side filtering endpoint for listing verified therapists.
+
+### Endpoints
+- `GET /api/core/public-therapists/` (Query params — Recommended for web, Next.js, SEO)
+- `POST /api/core/public-therapists/` (JSON body — Recommended for mobile apps)
+
+---
+
+## 1. Supported Filter Parameters
+
+| Parameter | Type | Example | Description |
+| :--- | :--- | :--- | :--- |
+| **`symptom`** or **`specialty`** | String | `?symptom=Anxiety` or `?specialty=Anxiety,Depression` | Case-insensitive search by symptom title/slug |
+| **`symptom_id`** or **`symptoms`** | Int / CSV / Array | `?symptom_id=1` or `?symptoms=1,2,5` | Filter by master symptom IDs in `tbl_symptom` |
+| **`match_mode`** | String (`any` \| `all`) | `?symptoms=1,2&match_mode=all` | `any` *(default)*: matches if therapist specializes in **at least one** symptom.<br>`all`: therapist must specialize in **all** specified symptoms. |
+| **`language`** | String | `?language=Hindi` | Case-insensitive substring match on therapist's spoken languages |
+| **`gender`** | String / Int | `?gender=2` or `?gender=female` | Gender filter (`1` or `male` = Male, `2` or `female` = Female, `3` = Other) |
+| **`search`** or **`q`** | String | `?search=CBT` | Full-text keyword search across therapist's name, bio, qualification |
+| **`is_available`** | Boolean / Int | `?is_available=1` | Filter by current availability (`1` / `true` / `0` / `false`) |
+
+---
+
+## 2. cURL Examples
+
+### A. Filter by Symptom Title
+```bash
+curl -X GET "$BASE_URL/api/core/public-therapists/?symptom=Anxiety"
+```
+
+### B. Filter by Multiple Symptom IDs (Match ANY)
+```bash
+curl -X GET "$BASE_URL/api/core/public-therapists/?symptoms=1,3&match_mode=any"
+```
+
+### C. Filter by Multiple Symptoms (Match ALL)
+Find therapists specializing in **both** Anxiety and Depression:
+```bash
+curl -X GET "$BASE_URL/api/core/public-therapists/?symptoms=1,2&match_mode=all"
+```
+
+### D. Multi-Filter (Symptom + Language + Gender)
+Find female therapists treating Anxiety who speak Hindi:
+```bash
+curl -X GET "$BASE_URL/api/core/public-therapists/?symptom=Anxiety&language=Hindi&gender=2"
+```
+
+### E. Free-text Search
+Find therapists mentioning "CBT" or "Mindfulness":
+```bash
+curl -X GET "$BASE_URL/api/core/public-therapists/?search=mindfulness"
+```
+
+### F. POST Request with JSON Body (Mobile Client)
+```bash
+curl -X POST "$BASE_URL/api/core/public-therapists/" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symptoms": [1, 2],
+    "match_mode": "any",
+    "language": "Hindi",
+    "gender": "female"
+  }'
+```
+
+---
+
+## 3. Response Schema (`200 OK`)
+
+```json
+{
+  "count": 1,
+  "results": [
+    {
+      "id": 42,
+      "full_name": "Dr. Pooja Sharma",
+      "title": "Ph.D. Clinical Psychology",
+      "qualification": "Ph.D. Clinical Psychology",
+      "experience": "8+ Years Experience",
+      "sessions_completed": "450+",
+      "about_me": "Licensed clinical psychologist specializing in cognitive behavioral therapy, anxiety disorders, and mindfulness-based interventions.",
+      "language": "English, Hindi",
+      "specialties": [
+        "Anxiety Disorder",
+        "Depression",
+        "Stress Management"
+      ],
+      "gender": 2,
+      "image_url": "https://spilbloo-prod.s3.ap-south-1.amazonaws.com/profile-images/pooja-sharma.jpg",
+      "profile_image_url": "https://spilbloo-prod.s3.ap-south-1.amazonaws.com/profile-images/pooja-sharma.jpg"
+    }
+  ]
 }
 ```
 
-### B. Update Full Name & Profile Info (Post-OTP Onboarding)
-Once verified, the frontend sends the user's real name and details here:
-```bash
-curl -X PATCH "$BASE_URL/api/user/update-profile/" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>" \
-  -d '{
-    "full_name": "Jane Doe",
-    "email": "jane.doe@example.com",
-    "date_of_birth": "1995-08-15"
-  }'
-```
-
-### C. Update Country Code or Phone Number
-```bash
-curl -X PATCH "$BASE_URL/api/user/update-profile/" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>" \
-  -d '{
-    "country_code": "+1",
-    "contact_no": "4155552671"
-  }'
-```
-
 ---
 
-## 5. Register New User with Country Code (`POST /api/user/register/`)
+## 4. Frontend Integration Example (React / Next.js)
 
-Creates a new account with email, country code, contact number, and password:
+```javascript
+// Fetch filtered therapists dynamically
+export async function fetchFilteredTherapists({ symptom, language, gender, search, matchMode = 'any' }) {
+  const params = new URLSearchParams();
+  
+  if (symptom) params.append('symptom', symptom);
+  if (language && language !== 'All') params.append('language', language);
+  if (gender) params.append('gender', gender);
+  if (search) params.append('search', search);
+  if (matchMode) params.append('match_mode', matchMode);
 
-```bash
-curl -X POST "$BASE_URL/api/user/register/" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "full_name": "Jane Doe",
-    "email": "jane.doe@example.com",
-    "country_code": "+91",
-    "contact_no": "9876543210",
-    "password": "StrongPassword123!"
-  }'
-```
-
----
-
-## 6. Refresh Access Token (`POST /api/user/login/refresh/`)
-
-```bash
-curl -X POST "$BASE_URL/api/user/login/refresh/" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "refresh": "<YOUR_REFRESH_TOKEN>"
-  }'
-```
-
-**Response (`200 OK`):**
-```json
-{
-  "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  const res = await fetch(`/api/core/public-therapists/?${params.toString()}`);
+  if (!res.ok) throw new Error('Failed to load therapists');
+  
+  const data = await res.json();
+  return data.results; // Array of therapist objects
 }
 ```
-
----
-
-## Security Specifications
-
-1. **Cryptographic Randomness:** OTPs are generated using Python's `secrets.randbelow(9000) + 1000`.
-2. **TTL (Expiration):** OTPs expire in cache after 10 minutes (600 seconds).
-3. **Brute Force Protection:** Tracked failed attempts max out at 5. On the 5th failed attempt, the cache key is purged and locked.
-4. **Single-Use Only:** The OTP is deleted immediately from cache upon successful verification (`_clear_phone_otp()`).
-5. **No Response Leaks:** The backend never sends the OTP in HTTP responses. It is sent exclusively through MSG91 SMS infrastructure.

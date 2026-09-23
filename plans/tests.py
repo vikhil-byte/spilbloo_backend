@@ -98,6 +98,65 @@ class CreateSubscriptionViewTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"], "You are already on a plan.")
 
+    def test_create_subscription_first_time_requires_state_when_address_provided(self):
+        plan = self._create_plan("seed_plan_address_001")
+        payload = {
+            "address": "123 Marine Drive",
+            "city": "Mumbai",
+            "country": "India",
+            "contact": "+919876543210"
+            # "state" omitted intentionally
+        }
+        response = self.client.post(f"{self.url}?plan_id={plan.plan_id}", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["error"], "Please provide address details.")
+
+    def test_create_subscription_first_time_persists_address_state_city_contact_to_user(self):
+        plan = self._create_plan("seed_plan_address_002")
+        payload = {
+            "address": "Flat 4B, Hill Road",
+            "city": "Bandra",
+            "state": "Maharashtra",
+            "country": "India",
+            "contact": "+919876543210"
+        }
+        response = self.client.post(f"{self.url}?plan_id={plan.plan_id}", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Verify User table was updated (PHP $user->saveUserAddress parity)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.address, "Flat 4B, Hill Road")
+        self.assertEqual(self.user.city, "Bandra")
+        self.assertEqual(self.user.state, "Maharashtra")
+        self.assertEqual(self.user.country, "India")
+        self.assertEqual(self.user.contact_no, "+919876543210")
+
+        # Verify SubscribedPlan row stores billing snapshot
+        sub = SubscribedPlan.objects.get(subscription_id=response.data["subscription_id"])
+        self.assertEqual(sub.address, "Flat 4B, Hill Road")
+        self.assertEqual(sub.city, "Bandra")
+        self.assertEqual(sub.state, "Maharashtra")
+        self.assertEqual(sub.country, "India")
+        self.assertEqual(sub.contact, "+919876543210")
+
+    def test_create_subscription_supports_legacy_subscribed_plan_keys(self):
+        plan = self._create_plan("seed_plan_address_003")
+        payload = {
+            "SubscribedPlan[address]": "Sector 17",
+            "SubscribedPlan[city]": "Chandigarh",
+            "SubscribedPlan[state]": "Chandigarh",
+            "SubscribedPlan[country]": "India",
+            "SubscribedPlan[contact]": "+919815098150"
+        }
+        response = self.client.post(f"{self.url}?plan_id={plan.plan_id}", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.address, "Sector 17")
+        self.assertEqual(self.user.city, "Chandigarh")
+        self.assertEqual(self.user.state, "Chandigarh")
+        self.assertEqual(self.user.contact_no, "+919815098150")
+
 
 class AuthenticateSubscriptionSecurityTests(APITestCase):
     def setUp(self):

@@ -70,8 +70,20 @@ def _phone_otp_cache_key(phone: str, country_code=None) -> str:
     e164 = normalize_phone_e164(phone, hint)
     return f"spilbloo:phone_otp:{e164 or phone}"
 
+def _is_staging_environment() -> bool:
+    env = getattr(settings, "ENVIRONMENT", "staging").lower()
+    return env in ["staging", "dev", "development"]
+
+
 def _generate_secure_otp(length: int = 4) -> str:
-    """Generate a cryptographically secure numeric OTP code using secrets."""
+    """
+    Generate numeric OTP.
+    In staging/dev environments, returns '1234' for fast developer and QA testing.
+    In production, generates a cryptographically secure random code using secrets.
+    """
+    if _is_staging_environment():
+        return "1234" if length == 4 else "123456"
+
     if length == 6:
         return f"{secrets.randbelow(900000) + 100000:06d}"
     return f"{secrets.randbelow(9000) + 1000:04d}"
@@ -204,6 +216,8 @@ def _otp_cache_key(user_id: int) -> str:
 
 
 def _set_user_otp(user, otp: str) -> None:
+    if not user:
+        return
     otp_str = str(otp)
     if hasattr(user, "otp"):
         user.otp = otp_str
@@ -215,6 +229,8 @@ def _set_user_otp(user, otp: str) -> None:
 
 
 def _get_user_otp(user):
+    if not user:
+        return None
     if hasattr(user, "otp"):
         return getattr(user, "otp", None)
     return cache.get(_otp_cache_key(user.id))
@@ -850,10 +866,13 @@ class VerifyOtpView(APIView):
                 and (raw_contact_no == getattr(settings, "REVIEW_OTP_PHONE", "9999999999"))
             )
 
+            is_staging_bypass = is_staging and otp == "1234"
+
             is_otp_valid = (
                 (stored_phone_otp is not None and secrets.compare_digest(str(stored_phone_otp), otp))
                 or (stored_user_otp is not None and secrets.compare_digest(str(stored_user_otp), otp))
                 or is_review_account
+                or is_staging_bypass
             )
 
             if not is_otp_valid:
@@ -872,6 +891,7 @@ class VerifyOtpView(APIView):
             )
             full_name = str(raw_full_name).strip() if raw_full_name else ""
 
+            is_new_user = user is None
             if not user:
                 user = User.objects.create(
                     contact_no=contact_no,
@@ -901,10 +921,8 @@ class VerifyOtpView(APIView):
 
 
         elif email:
-            try:
-                user = User.objects.get(email=email)
-            except User.DoesNotExist:
-                return Response({"error": "Incorrect Email"}, status=status.HTTP_400_BAD_REQUEST)
+            user = User.objects.filter(email=email).first()
+            is_new_user = user is None
 
             stored_otp = _get_user_otp(user) or cache.get(f"spilbloo:email_otp:{email}")
             is_review_account = (
@@ -913,10 +931,12 @@ class VerifyOtpView(APIView):
                 and email == review_email
                 and secrets.compare_digest(str(otp), review_otp)
             )
+            is_staging_bypass = is_staging and otp == "1234"
 
             is_otp_valid = (
                 (stored_otp is not None and secrets.compare_digest(str(stored_otp), str(otp)))
                 or is_review_account
+                or is_staging_bypass
             )
 
             if not is_otp_valid:
@@ -929,10 +949,46 @@ class VerifyOtpView(APIView):
             cache.delete(f"spilbloo:email_otp:{email}")
             _clear_otp_attempts(identifier)
 
+            raw_full_name = (
+                request.data.get('full_name')
+                or request.data.get('name')
+                or request.data.get('User[full_name]')
+                or request.data.get('LoginForm[full_name]')
+            )
+            full_name = str(raw_full_name).strip() if raw_full_name else ""
+
+            if not user:
+                user = User.objects.create(
+                    email=email,
+                    full_name=full_name,
+                    role_id=User.ROLE_PATIENT,
+                    state_id=User.STATE_ACTIVE,
+                    otp_verified=1
+                )
+                user.set_unusable_password()
+                user.save()
+                logger.info("Auto-provisioned new user via email OTP: id=%s", user.id)
+            elif raw_full_name and not user.full_name:
+                user.full_name = full_name
+                user.save(update_fields=["full_name"])
+
         if user.state_id == User.STATE_DELETED:
             return Response({"error": "This account has been deleted."}, status=status.HTTP_403_FORBIDDEN)
         if user.state_id == User.STATE_BANNED:
             return Response({"error": "Your account is blocked, Please contact Particulars Admin"}, status=status.HTTP_403_FORBIDDEN)
+
+        # Record consent acceptance if passed in payload
+        raw_consent = (
+            request.data.get('is_consent_accept')
+            or request.data.get('consent')
+            or request.data.get('consent_accepted')
+            or request.data.get('User[is_consent_accept]')
+        )
+        if raw_consent in (1, '1', True, 'true', 'True'):
+            if hasattr(user, 'is_consent_accept'):
+                user.is_consent_accept = 1
+            if hasattr(user, 'consent_accepted_on'):
+                user.consent_accepted_on = timezone.now()
 
         user.state_id = User.STATE_ACTIVE
         if hasattr(user, "otp_verified"):
@@ -955,66 +1011,144 @@ class VerifyOtpView(APIView):
             "refresh-token": str(refresh),
             "access": str(refresh.access_token),
             "refresh": str(refresh),
+            "flag": "signup" if is_new_user else "login",
+            "is_new_user": is_new_user,
+            "is_consent_accepted": bool(getattr(user, "is_consent_accept", 0)),
+            "is_consent_accept": getattr(user, "is_consent_accept", 0) or 0,
             "detail": _legacy_user_detail(user, request)
         }, status=status.HTTP_200_OK)
+
+
+def dispatch_auth_otp(request, default_message="Verification code sent successfully."):
+    """
+    Unified authentication handler for Login / Signup via OTP.
+    Supports both mobile numbers (SMS) and email addresses.
+    Returns:
+    - flag: 'login' | 'signup'
+    - is_new_user: bool
+    - show_consent: bool
+    - is_consent_accepted: bool
+    - channel: 'sms' | 'email'
+    - identifier: str
+    """
+    if not request.data:
+        return Response({"error": "No data posted."}, status=status.HTTP_400_BAD_REQUEST)
+
+    raw_contact_no = (
+        request.data.get('contact_no')
+        or request.data.get('phone_number')
+        or request.data.get('mobile')
+        or request.data.get('LoginForm[contact_no]')
+        or request.data.get('User[contact_no]')
+    )
+    raw_country_code = (
+        request.data.get('country_code')
+        or request.data.get('LoginForm[country_code]')
+        or request.data.get('User[country_code]')
+    )
+    username = request.data.get('username') or request.data.get('LoginForm[username]') or ""
+    email = _normalize_email(
+        request.data.get('email')
+        or request.data.get('User[email]')
+        or username
+    )
+
+    if not raw_contact_no and username and re.match(r"^\+?[0-9]{10,15}$", str(username).strip()):
+        raw_contact_no = str(username).strip()
+        email = ""
+
+    if not email and not raw_contact_no:
+        return Response({"error": "Please provide an email address or mobile number."}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = None
+    contact_no = None
+
+    if raw_contact_no:
+        channel = "sms"
+        country_hint = resolve_country_hint(raw_country_code)
+        contact_no = normalize_phone_e164(raw_contact_no, country_hint)
+        if not contact_no:
+            return Response({"error": "Invalid phone number"}, status=status.HTTP_400_BAD_REQUEST)
+        identifier = contact_no
+        user = User.objects.filter(contact_no=contact_no).first()
+    else:
+        channel = "email"
+        identifier = email
+        user = User.objects.filter(email=email).first()
+
+    if user:
+        if user.state_id == User.STATE_DELETED:
+            return Response({"error": "This account has been deleted."}, status=status.HTTP_400_BAD_REQUEST)
+        if user.state_id == User.STATE_BANNED:
+            return Response({"error": "Your account is blocked, Please contact Particulars Admin"}, status=status.HTTP_403_FORBIDDEN)
+
+    otp = _generate_secure_otp(4)
+    is_new_user = user is None
+    flag = "signup" if is_new_user else "login"
+    consent_accepted = bool(getattr(user, "is_consent_accept", 0)) if user else False
+    show_consent = is_new_user or not consent_accepted
+
+    if channel == "sms":
+        _set_phone_otp(contact_no, otp)
+        if user:
+            _set_user_otp(user, otp)
+            if raw_country_code and not user.country_code:
+                user.country_code = _format_country_code(raw_country_code)
+                user.save(update_fields=["country_code"])
+        send_otp_via_sms(contact_no, otp)
+    else:
+        cache.set(f"spilbloo:email_otp:{email}", str(otp), timeout=600)
+        if user:
+            _set_user_otp(user, otp)
+        send_otp_via_email(email, otp)
+
+    response_data = {
+        "message": default_message,
+        "flag": flag,
+        "is_new_user": is_new_user,
+        "show_consent": show_consent,
+        "is_consent_accepted": consent_accepted,
+        "is_consent_accept": 1 if consent_accepted else 0,
+        "channel": channel,
+        "identifier": identifier,
+        "detail": _legacy_user_detail(user, request) if user else {}
+    }
+    if contact_no:
+        response_data["contact_no"] = contact_no
+    if email:
+        response_data["email"] = email
+
+    return Response(response_data, status=status.HTTP_200_OK)
+
+
+class RequestOtpView(APIView):
+    """
+    Unified API for Login / Signup via OTP.
+    Supports both mobile numbers (SMS) and email addresses.
+    Returns:
+    - flag: 'login' | 'signup'
+    - is_new_user: bool
+    - show_consent: bool
+    - is_consent_accepted: bool
+    - channel: 'sms' | 'email'
+    - identifier: str
+    """
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        return dispatch_auth_otp(request)
+
+
+# Backward compatible alias for SendOtpView
+SendOtpView = RequestOtpView
+process_send_otp = dispatch_auth_otp
 
 
 class ResendOtpView(APIView):
     permission_classes = (AllowAny,)
 
     def post(self, request):
-        raw_contact_no = (
-            request.data.get('contact_no')
-            or request.data.get('phone_number')
-            or request.data.get('mobile')
-            or request.data.get('User[contact_no]')
-            or request.data.get('LoginForm[contact_no]')
-        )
-        raw_country_code = (
-            request.data.get('country_code')
-            or request.data.get('User[country_code]')
-            or request.data.get('LoginForm[country_code]')
-        )
-        email = _normalize_email(
-            request.data.get('email')
-            or request.data.get('User[email]')
-        )
-
-        if not raw_contact_no and not email:
-            return Response({"error": "No data posted"}, status=status.HTTP_400_BAD_REQUEST)
-
-        otp = _generate_secure_otp(4)
-
-        if raw_contact_no:
-            country_hint = resolve_country_hint(raw_country_code)
-            contact_no = normalize_phone_e164(raw_contact_no, country_hint)
-            if not contact_no:
-                return Response({"error": "Invalid phone number"}, status=status.HTTP_400_BAD_REQUEST)
-            user = User.objects.filter(contact_no=contact_no).first()
-            _set_phone_otp(contact_no, otp)
-
-            if user:
-                _set_user_otp(user, otp)
-                if raw_country_code and not user.country_code:
-                    user.country_code = _format_country_code(raw_country_code)
-                    user.save(update_fields=["country_code"])
-
-            send_otp_via_sms(contact_no, otp)
-            return Response({
-                "message": "Verification code sent successfully",
-                "contact_no": contact_no
-            }, status=status.HTTP_200_OK)
-
-        elif email:
-            try:
-                user = User.objects.get(email=email)
-                _set_user_otp(user, otp)
-                send_otp_via_email(user.email, otp)
-                return Response({
-                    "message": "Verification code sent successfully"
-                }, status=status.HTTP_200_OK)
-            except User.DoesNotExist:
-                return Response({"error": "No User found"}, status=status.HTTP_400_BAD_REQUEST)
+        return dispatch_auth_otp(request, default_message="Verification code sent successfully")
 
 
 class DoctorContactView(APIView):
@@ -1128,6 +1262,10 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             if not email and not raw_contact_no:
                 return Response({"error": "No data posted."}, status=status.HTTP_400_BAD_REQUEST)
 
+            # If password is not provided, this is an OTP Login or Signup request.
+            if not (password or "").strip():
+                return dispatch_auth_otp(request, default_message="Please verify your OTP.")
+
             user = None
             contact_no = None
             if raw_contact_no:
@@ -1136,22 +1274,6 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 user = User.objects.filter(contact_no=contact_no).first() if contact_no else None
             elif email:
                 user = User.objects.filter(email=email).first()
-
-            # If user logging in with phone and password is not provided (OTP flow)
-            if raw_contact_no and not (password or "").strip():
-                otp = _generate_secure_otp(4)
-                _set_phone_otp(contact_no, otp)
-                if user:
-                    _set_user_otp(user, otp)
-                    if raw_country_code:
-                        user.country_code = _format_country_code(raw_country_code)
-                        user.save(update_fields=["country_code"])
-                send_otp_via_sms(contact_no, otp)
-                return Response({
-                    "message": "Please verify your OTP.",
-                    "contact_no": contact_no,
-                    "detail": _legacy_user_detail(user, request) if user else {}
-                }, status=status.HTTP_200_OK)
 
             if not user:
                 return Response({"error": "Incorrect Email or Mobile Number"}, status=status.HTTP_400_BAD_REQUEST)
@@ -1184,20 +1306,6 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                         status=status.HTTP_200_OK,
                     )
                 return Response({"error": " User is not active"}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Legacy iOS OTP-login flow: password can be empty and still return OTP challenge.
-            if not (password or "").strip():
-                otp = _generate_secure_otp(4)
-                _set_user_otp(user, otp)
-                if user.contact_no:
-                    _set_phone_otp(user.contact_no, otp)
-                    send_otp_via_sms(user.contact_no, otp)
-                else:
-                    send_otp_via_email(user.email, otp)
-                return Response({
-                    "message": "Please verify your OTP.",
-                    "detail": _legacy_user_detail(user, request)
-                }, status=status.HTTP_200_OK)
 
             auth_user = (
                 authenticate(request, username=user.email, password=password)

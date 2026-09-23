@@ -401,3 +401,195 @@ class MobileOTPAuthAPITests(APITestCase):
             self.assertEqual(res.data["detail"]["email"], "")
             u = User.objects.get(contact_no=f"+91{phone}")
             self.assertIsNone(u.email)
+
+    def test_unified_login_signup_phone_flags(self):
+        send_otp_url = reverse("send_otp")
+        new_phone = "9876599101"
+        e164_new = "+919876599101"
+
+        # 1. New user requesting OTP -> flag="signup", is_new_user=True, show_consent=True
+        res_signup = self.client.post(send_otp_url, {"contact_no": new_phone}, format="json")
+        self.assertEqual(res_signup.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_signup.data["flag"], "signup")
+        self.assertTrue(res_signup.data["is_new_user"])
+        self.assertTrue(res_signup.data["show_consent"])
+        self.assertFalse(res_signup.data["is_consent_accepted"])
+        self.assertEqual(res_signup.data["is_consent_accept"], 0)
+        self.assertEqual(res_signup.data["channel"], "sms")
+        self.assertEqual(res_signup.data["contact_no"], e164_new)
+        self.assertEqual(res_signup.data["identifier"], e164_new)
+
+        # 2. Existing user with consent accepted -> flag="login", is_new_user=False, show_consent=False
+        existing_phone = "9876599102"
+        e164_existing = "+919876599102"
+        User.objects.create(
+            contact_no=e164_existing,
+            full_name="Consented User",
+            is_consent_accept=1,
+            role_id=User.ROLE_PATIENT,
+            state_id=User.STATE_ACTIVE
+        )
+        res_login = self.client.post(send_otp_url, {"contact_no": existing_phone}, format="json")
+        self.assertEqual(res_login.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_login.data["flag"], "login")
+        self.assertFalse(res_login.data["is_new_user"])
+        self.assertFalse(res_login.data["show_consent"])
+        self.assertTrue(res_login.data["is_consent_accepted"])
+        self.assertEqual(res_login.data["is_consent_accept"], 1)
+
+        # 3. Existing user who has NOT accepted consent yet -> flag="login", is_new_user=False, show_consent=True
+        unconsented_phone = "9876599103"
+        e164_unconsented = "+919876599103"
+        User.objects.create(
+            contact_no=e164_unconsented,
+            full_name="Unconsented User",
+            is_consent_accept=0,
+            role_id=User.ROLE_PATIENT,
+            state_id=User.STATE_ACTIVE
+        )
+        res_unconsented = self.client.post(send_otp_url, {"contact_no": unconsented_phone}, format="json")
+        self.assertEqual(res_unconsented.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_unconsented.data["flag"], "login")
+        self.assertFalse(res_unconsented.data["is_new_user"])
+        self.assertTrue(res_unconsented.data["show_consent"])
+        self.assertFalse(res_unconsented.data["is_consent_accepted"])
+        self.assertEqual(res_unconsented.data["is_consent_accept"], 0)
+
+    def test_login_url_without_password_returns_flag_and_consent(self):
+        new_phone = "9876599201"
+        res = self.client.post(self.login_url, {"contact_no": new_phone}, format="json")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["flag"], "signup")
+        self.assertTrue(res.data["is_new_user"])
+        self.assertTrue(res.data["show_consent"])
+        self.assertFalse(res.data["is_consent_accepted"])
+
+    def test_resend_otp_returns_flag_and_consent(self):
+        new_phone = "9876599301"
+        res = self.client.post(self.resend_otp_url, {"contact_no": new_phone}, format="json")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["flag"], "signup")
+        self.assertTrue(res.data["is_new_user"])
+        self.assertTrue(res.data["show_consent"])
+        self.assertFalse(res.data["is_consent_accepted"])
+
+    def test_verify_otp_persists_consent_from_otp_page(self):
+        phone = "9876599401"
+        e164_phone = "+919876599401"
+        _set_phone_otp(e164_phone, "5544")
+
+        # Verify with is_consent_accept=1
+        res = self.client.post(
+            self.verify_otp_url,
+            {"contact_no": phone, "otp": "5544", "is_consent_accept": 1},
+            format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["flag"], "signup")
+        self.assertTrue(res.data["is_new_user"])
+        self.assertTrue(res.data["is_consent_accepted"])
+        self.assertEqual(res.data["is_consent_accept"], 1)
+
+        user = User.objects.get(contact_no=e164_phone)
+        self.assertEqual(user.is_consent_accept, 1)
+        self.assertIsNotNone(user.consent_accepted_on)
+
+    def test_unified_login_signup_email_flow(self):
+        send_otp_url = reverse("send_otp")
+        email = "new_signup_test@spilbloo.local"
+
+        # 1. New user email request -> flag="signup"
+        res_signup = self.client.post(send_otp_url, {"email": email}, format="json")
+        self.assertEqual(res_signup.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_signup.data["flag"], "signup")
+        self.assertTrue(res_signup.data["is_new_user"])
+        self.assertTrue(res_signup.data["show_consent"])
+        self.assertFalse(res_signup.data["is_consent_accepted"])
+        self.assertEqual(res_signup.data["channel"], "email")
+        self.assertEqual(res_signup.data["identifier"], email)
+
+        # 2. Verify email OTP auto-provisions user
+        cached_otp = cache.get(f"spilbloo:email_otp:{email}")
+        self.assertIsNotNone(cached_otp)
+
+        verify_res = self.client.post(
+            self.verify_otp_url,
+            {"email": email, "otp": cached_otp, "is_consent_accept": 1, "full_name": "Email Signup User"},
+            format="json"
+        )
+        self.assertEqual(verify_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(verify_res.data["flag"], "signup")
+        self.assertTrue(verify_res.data["is_new_user"])
+        self.assertTrue(verify_res.data["is_consent_accepted"])
+        self.assertEqual(verify_res.data["is_consent_accept"], 1)
+
+        user = User.objects.get(email=email)
+        self.assertEqual(user.full_name, "Email Signup User")
+        self.assertEqual(user.is_consent_accept, 1)
+        self.assertIsNotNone(user.consent_accepted_on)
+
+        # 3. Existing email request -> flag="login"
+        res_login = self.client.post(send_otp_url, {"email": email}, format="json")
+        self.assertEqual(res_login.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_login.data["flag"], "login")
+        self.assertFalse(res_login.data["is_new_user"])
+        self.assertFalse(res_login.data["show_consent"])
+        self.assertTrue(res_login.data["is_consent_accepted"])
+        self.assertEqual(res_login.data["is_consent_accept"], 1)
+
+    def test_request_and_send_otp_endpoint_aliases(self):
+        phone = "9876599501"
+        for endpoint_name in ["request_otp", "send_otp"]:
+            url = reverse(endpoint_name)
+            res = self.client.post(url, {"contact_no": phone}, format="json")
+            self.assertEqual(res.status_code, status.HTTP_200_OK)
+            self.assertEqual(res.data["flag"], "signup")
+            self.assertTrue(res.data["is_new_user"])
+
+    @override_settings(ENVIRONMENT="staging")
+    def test_staging_hardcoded_otp_is_1234(self):
+        phone = "9876588881"
+        e164_phone = "+919876588881"
+
+        # 1. Request OTP on staging
+        send_res = self.client.post(reverse("request_otp"), {"contact_no": phone}, format="json")
+        self.assertEqual(send_res.status_code, status.HTTP_200_OK)
+
+        # Cached OTP should be "1234"
+        cached_otp = _get_phone_otp(e164_phone)
+        self.assertEqual(cached_otp, "1234")
+
+        # 2. Verify with "1234" succeeds
+        verify_res = self.client.post(
+            self.verify_otp_url,
+            {"contact_no": phone, "otp": "1234"},
+            format="json"
+        )
+        self.assertEqual(verify_res.status_code, status.HTTP_200_OK)
+        self.assertIn("access-token", verify_res.data)
+
+    @override_settings(ENVIRONMENT="production")
+    def test_production_does_not_hardcode_otp_1234(self):
+        phone = "9876588882"
+        e164_phone = "+919876588882"
+
+        # 1. Request OTP on production
+        send_res = self.client.post(reverse("request_otp"), {"contact_no": phone}, format="json")
+        self.assertEqual(send_res.status_code, status.HTTP_200_OK)
+
+        # Cached OTP is a 4-digit code generated securely
+        cached_otp = _get_phone_otp(e164_phone)
+        self.assertIsNotNone(cached_otp)
+        self.assertEqual(len(str(cached_otp)), 4)
+
+        # 2. Hardcoded "1234" should be rejected unless the generated code happens to be "1234"
+        if cached_otp != "1234":
+            verify_res = self.client.post(
+                self.verify_otp_url,
+                {"contact_no": phone, "otp": "1234"},
+                format="json"
+            )
+            self.assertEqual(verify_res.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertEqual(verify_res.data["error"], "Incorrect OTP")
+
+

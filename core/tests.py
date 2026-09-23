@@ -325,3 +325,137 @@ class TherapistOnboardingTests(APITestCase):
         self.assertEqual(created_user.qualification, "M.Phil. in Clinical Psychology")
         self.assertEqual(created_user.profile_file, "profile-avatar.jpg")
         self.assertEqual(created_user.role_id, User.ROLE_DOCTER)
+
+
+class PublicTherapistFilterAPITests(APITestCase):
+    def setUp(self):
+        User = get_user_model()
+        from core.models import Symptom, UserSymptom
+
+        # Clear existing users to have deterministic count
+        User.objects.filter(role_id=User.ROLE_DOCTER).delete()
+
+        self.symptom_anxiety = Symptom.objects.create(title="Anxiety Disorder", state_id=1)
+        self.symptom_depression = Symptom.objects.create(title="Depression", state_id=1)
+        self.symptom_ocd = Symptom.objects.create(title="OCD", state_id=1)
+
+        # Therapist 1: Anxiety & Depression, Hindi, Female
+        self.doc1 = User.objects.create_user(
+            email="doc1@spilbloo.local",
+            full_name="Dr. Pooja Sharma",
+            role_id=User.ROLE_DOCTER,
+            state_id=User.STATE_ACTIVE,
+            is_active=True,
+            is_hidden_from_directory=False,
+            language="English, Hindi",
+            gender=2,
+            qualification="Ph.D. Clinical Psychology",
+            about_me="Expert in CBT and mindfulness for anxiety.",
+            is_available=1
+        )
+        UserSymptom.objects.create(created_by=self.doc1, symptom=self.symptom_anxiety)
+        UserSymptom.objects.create(created_by=self.doc1, symptom=self.symptom_depression)
+
+        # Therapist 2: Depression & OCD, Tamil, Male
+        self.doc2 = User.objects.create_user(
+            email="doc2@spilbloo.local",
+            full_name="Dr. Karthik Raman",
+            role_id=User.ROLE_DOCTER,
+            state_id=User.STATE_ACTIVE,
+            is_active=True,
+            is_hidden_from_directory=False,
+            language="English, Tamil",
+            gender=1,
+            qualification="M.Phil. Psychology",
+            about_me="Specialized in exposure and response prevention.",
+            is_available=1
+        )
+        UserSymptom.objects.create(created_by=self.doc2, symptom=self.symptom_depression)
+        UserSymptom.objects.create(created_by=self.doc2, symptom=self.symptom_ocd)
+
+        # Therapist 3: Inactive / Hidden
+        self.doc3 = User.objects.create_user(
+            email="doc3@spilbloo.local",
+            full_name="Dr. Hidden User",
+            role_id=User.ROLE_DOCTER,
+            state_id=User.STATE_ACTIVE,
+            is_active=True,
+            is_hidden_from_directory=True,
+            language="Hindi",
+            gender=1,
+            is_available=1
+        )
+        UserSymptom.objects.create(created_by=self.doc3, symptom=self.symptom_anxiety)
+
+        self.url = "/api/core/public-therapists/"
+
+    def test_unfiltered_returns_only_visible_active_therapists(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 2)
+        doc_ids = [d["id"] for d in response.data["results"]]
+        self.assertIn(self.doc1.id, doc_ids)
+        self.assertIn(self.doc2.id, doc_ids)
+        self.assertNotIn(self.doc3.id, doc_ids)
+
+    def test_filter_by_symptom_title(self):
+        # Filtering for Anxiety should only return Dr. Pooja
+        response = self.client.get(f"{self.url}?symptom=Anxiety")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], self.doc1.id)
+        self.assertIn("Anxiety Disorder", response.data["results"][0]["specialties"])
+
+    def test_filter_by_symptom_id(self):
+        # Filtering for OCD ID should only return Dr. Karthik
+        response = self.client.get(f"{self.url}?symptom_id={self.symptom_ocd.id}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], self.doc2.id)
+
+    def test_filter_by_multiple_symptoms_match_mode_any(self):
+        # Anxiety OR OCD -> both doc1 and doc2
+        response = self.client.get(f"{self.url}?symptoms={self.symptom_anxiety.id},{self.symptom_ocd.id}&match_mode=any")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 2)
+
+    def test_filter_by_multiple_symptoms_match_mode_all(self):
+        # Anxiety AND OCD -> none of them has both
+        response = self.client.get(f"{self.url}?symptoms={self.symptom_anxiety.id},{self.symptom_ocd.id}&match_mode=all")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 0)
+
+        # Anxiety AND Depression -> only doc1
+        response = self.client.get(f"{self.url}?symptoms={self.symptom_anxiety.id},{self.symptom_depression.id}&match_mode=all")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], self.doc1.id)
+
+    def test_filter_by_language(self):
+        response = self.client.get(f"{self.url}?language=Tamil")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], self.doc2.id)
+
+    def test_filter_by_gender(self):
+        response = self.client.get(f"{self.url}?gender=2")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], self.doc1.id)
+
+    def test_filter_by_search_query(self):
+        response = self.client.get(f"{self.url}?search=mindfulness")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], self.doc1.id)
+
+    def test_post_json_payload_filtering(self):
+        response = self.client.post(
+            self.url,
+            {"symptoms": [self.symptom_ocd.id]},
+            format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], self.doc2.id)
+
