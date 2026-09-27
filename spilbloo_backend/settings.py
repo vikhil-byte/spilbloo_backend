@@ -53,7 +53,9 @@ if not SECRET_KEY:
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "*").split(",")
 
 CSRF_TRUSTED_ORIGINS = [
-    f"https://{host.strip()}" for host in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if host.strip()
+    f"https://{host.strip().replace('https://', '').replace('http://', '')}"
+    for host in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",")
+    if host.strip()
 ]
 # Fallback using DOMAIN_NAME environment variable
 domain_name = os.environ.get("DOMAIN_NAME")
