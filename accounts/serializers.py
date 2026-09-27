@@ -46,12 +46,14 @@ class UserSerializer(serializers.ModelSerializer):
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_null=True, allow_blank=True)
 
     class Meta:
         model = User
-        fields = ('id', 'email', 'password', 'full_name', 'first_name', 'last_name', 'role_id')
+        fields = ('id', 'email', 'password', 'full_name', 'first_name', 'last_name', 'role_id', 'contact_no')
         extra_kwargs = {
-            'email': {'required': True},
+            'email': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'contact_no': {'required': False, 'allow_null': True, 'allow_blank': True},
             'full_name': {'required': False, 'allow_blank': True},
             'first_name': {'required': False, 'allow_blank': True},
             'last_name': {'required': False, 'allow_blank': True}
@@ -59,14 +61,16 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         user = User.objects.create_user(
-            email=validated_data['email'],
+            email=validated_data.get('email') or None,
             password=validated_data.get('password') or None,
+            contact_no=validated_data.get('contact_no') or None,
             full_name=validated_data.get('full_name', ''),
             first_name=validated_data.get('first_name', ''),
             last_name=validated_data.get('last_name', ''),
             role_id=validated_data.get('role_id', User.ROLE_USER)
         )
         return user
+
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
