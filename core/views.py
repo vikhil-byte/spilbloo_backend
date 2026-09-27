@@ -641,27 +641,171 @@ class TherapistOnboardingView(APIView):
 
 
 class PublicTherapistListView(APIView):
+    """
+    Public directory of verified therapists with multi-attribute filtering.
+    Supports filtering by:
+    - symptom / specialty: Symptom name/title (e.g. ?symptom=Anxiety or ?specialty=Depression,Stress)
+    - symptom_id / symptoms: Symptom ID (e.g. ?symptom_id=1 or ?symptoms=1,2,3)
+    - match_mode: 'any' (default, matches any symptom) or 'all' (matches all specified symptoms)
+    - language: Language name (e.g. ?language=Hindi)
+    - gender: Gender (1=Male, 2=Female, 3=Other)
+    - search / q: Text search across name, bio, qualification
+    - is_available: Availability flag (1 / true / 0 / false)
+    """
     permission_classes = (AllowAny,)
 
     def get(self, request):
-        from core.models import UserSymptom
-        from core.s3_utils import get_file_url
+        return self._filter_therapists(request)
 
-        doctors = User.objects.filter(
+    def post(self, request):
+        return self._filter_therapists(request)
+
+    def _filter_therapists(self, request):
+        from core.models import UserSymptom, Symptom
+        from core.s3_utils import get_file_url
+        from django.db.models import Count, Q
+
+        def _get_val(key, alt_key=None):
+            val = request.query_params.get(key)
+            if val is None and alt_key:
+                val = request.query_params.get(alt_key)
+            if val is None and hasattr(request, 'data') and isinstance(request.data, dict):
+                val = request.data.get(key)
+                if val is None and alt_key:
+                    val = request.data.get(alt_key)
+            return val
+
+        doctors_qs = User.objects.filter(
             role_id=User.ROLE_DOCTER,
             state_id=User.STATE_ACTIVE,
             is_active=True,
             is_hidden_from_directory=False,
-        ).order_by('-id')
+        )
+
+        # 1. Symptom Filtering
+        raw_symptom_ids = _get_val('symptom_id', 'symptoms')
+        if not raw_symptom_ids:
+            raw_symptom_ids = _get_val('symptom_ids')
+
+        raw_symptom_titles = _get_val('symptom', 'specialty')
+        if not raw_symptom_titles:
+            raw_symptom_titles = _get_val('specialties')
+
+        raw_match_mode = _get_val('match_mode') or 'any'
+        match_mode = str(raw_match_mode).strip().lower()
+
+        target_symptom_ids = set()
+
+        # Parse ID list (supports comma-separated string or list)
+        if raw_symptom_ids:
+            if isinstance(raw_symptom_ids, (list, tuple, set)):
+                for item in raw_symptom_ids:
+                    if str(item).strip().isdigit():
+                        target_symptom_ids.add(int(str(item).strip()))
+            else:
+                for part in str(raw_symptom_ids).split(','):
+                    part = part.strip()
+                    if part.isdigit():
+                        target_symptom_ids.add(int(part))
+
+        # Parse title list (supports comma-separated string or list)
+        if raw_symptom_titles:
+            title_queries = []
+            if isinstance(raw_symptom_titles, (list, tuple, set)):
+                title_queries = [str(t).strip() for t in raw_symptom_titles if str(t).strip()]
+            else:
+                title_queries = [t.strip() for t in str(raw_symptom_titles).split(',') if t.strip()]
+
+            if title_queries:
+                q_titles = Q()
+                for t in title_queries:
+                    q_titles |= Q(title__iexact=t) | Q(title__icontains=t)
+                matching_ids = Symptom.objects.filter(q_titles).values_list('id', flat=True)
+                target_symptom_ids.update(matching_ids)
+
+        # Apply symptom filtering to doctor queryset
+        if target_symptom_ids:
+            if match_mode == 'all':
+                num_required = len(target_symptom_ids)
+                matching_doc_ids = (
+                    UserSymptom.objects.filter(
+                        symptom_id__in=target_symptom_ids,
+                        created_by__in=doctors_qs
+                    )
+                    .values('created_by_id')
+                    .annotate(matched_count=Count('symptom_id', distinct=True))
+                    .filter(matched_count__gte=num_required)
+                    .values_list('created_by_id', flat=True)
+                )
+            else:
+                matching_doc_ids = (
+                    UserSymptom.objects.filter(
+                        symptom_id__in=target_symptom_ids,
+                        created_by__in=doctors_qs
+                    )
+                    .values_list('created_by_id', flat=True)
+                    .distinct()
+                )
+            doctors_qs = doctors_qs.filter(id__in=matching_doc_ids)
+
+        # 2. Language Filtering
+        language = _get_val('language', 'languages')
+        if language:
+            doctors_qs = doctors_qs.filter(language__icontains=str(language).strip())
+
+        # 3. Gender Filtering
+        gender = _get_val('gender')
+        if gender is not None:
+            gender_val = str(gender).strip().lower()
+            if gender_val in ('1', 'male', 'm'):
+                doctors_qs = doctors_qs.filter(gender=1)
+            elif gender_val in ('2', 'female', 'f'):
+                doctors_qs = doctors_qs.filter(gender=2)
+            elif gender_val in ('3', 'other', 'non-binary'):
+                doctors_qs = doctors_qs.filter(gender=3)
+
+        # 4. Search Query Filtering
+        search_query = _get_val('search', 'q')
+        if search_query:
+            sq = str(search_query).strip()
+            doctors_qs = doctors_qs.filter(
+                Q(full_name__icontains=sq)
+                | Q(first_name__icontains=sq)
+                | Q(last_name__icontains=sq)
+                | Q(qualification__icontains=sq)
+                | Q(about_me__icontains=sq)
+            )
+
+        # 5. Availability Filtering
+        is_available = _get_val('is_available')
+        if is_available is not None:
+            val_str = str(is_available).strip().lower()
+            if val_str in ('1', 'true', 'yes'):
+                doctors_qs = doctors_qs.filter(is_available=1)
+            elif val_str in ('0', 'false', 'no'):
+                doctors_qs = doctors_qs.filter(is_available=0)
+
+        # Ordering & Batch Prefetch (eliminates N+1 query problem)
+        doctors = list(doctors_qs.order_by('-id'))
+        total_count = len(doctors)
+
+        doc_ids = [doc.id for doc in doctors]
+        symptom_map = {}
+        if doc_ids:
+            user_symptoms = (
+                UserSymptom.objects.filter(created_by_id__in=doc_ids)
+                .select_related('symptom')
+                .values('created_by_id', 'symptom__title')
+            )
+            for us in user_symptoms:
+                cid = us['created_by_id']
+                stitle = us['symptom__title']
+                if stitle:
+                    symptom_map.setdefault(cid, []).append(stitle)
 
         data = []
         for doc in doctors:
-            symptom_names = list(
-                UserSymptom.objects.filter(created_by=doc)
-                .values_list('symptom__title', flat=True)
-            )
-
-            # Generate direct S3 URL for profile image
+            symptom_names = symptom_map.get(doc.id, [])
             image_url = get_file_url(doc.profile_file) if doc.profile_file else ""
 
             data.append({
@@ -678,7 +822,8 @@ class PublicTherapistListView(APIView):
                 "image_url": image_url or "",
                 "profile_image_url": image_url or "",
             })
-        return Response({"results": data, "count": len(data)}, status=status.HTTP_200_OK)
+
+        return Response({"results": data, "count": total_count}, status=status.HTTP_200_OK)
 
 
 class BlogPostViewSet(viewsets.ModelViewSet):

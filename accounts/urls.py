@@ -1,19 +1,24 @@
+# pyrefly: ignore [missing-import]
 from django.urls import path
+# pyrefly: ignore [missing-import]
 from .views import (
     RegisterView, CustomTokenObtainPairView, CustomTokenRefreshView, UserProfileView,
     TherapistDocumentsUpdateView,
-    VerifyOtpView, ResendOtpView, DoctorContactView,
+    RequestOtpView, SendOtpView, VerifyOtpView, ResendOtpView, DoctorContactView,
     CheckView, LogoutView, ChangePasswordView, DetailView, GetPageView,
     ForgotPasswordView, SymptomListView, MatchesListView, FaqView, AssignDoctorView,
     AssignVideoDoctorView, SocialLoginView, EarningsView, AcceptConsentView, SendMessageView,
-    GetCountryView, GetCityView, UserSearchView, DefaultAddressView, CardDeleteView,
+    GetCountryView, GetCityView, UserSearchView, DefaultAddressView,
     ResetPasswordConfirmView, RequestAccountDeletionView, ConfirmAccountDeletionView,
     RequestCancelAccountDeletionView, CancelAccountDeletionView
 )
+# pyrefly: ignore [missing-import]
 from .views_notification import NotificationOnOffView
 
 urlpatterns = [
     path('signup/', RegisterView.as_view(), name='auth_register'),
+    path('request-otp/', RequestOtpView.as_view(), name='request_otp'),
+    path('send-otp/', SendOtpView.as_view(), name='send_otp'),
     path('verify-otp/', VerifyOtpView.as_view(), name='verify_otp'),
     path('resend-otp/', ResendOtpView.as_view(), name='resend_otp'),
 
