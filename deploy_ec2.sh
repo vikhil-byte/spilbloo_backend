@@ -85,10 +85,13 @@ fi
 echo "[-] Building and launching updated Docker containers ($COMPOSE_FILE)..."
 $DC -f $COMPOSE_FILE up -d --build --remove-orphans
 
-# 5. Apply database migrations. Safe to run on every deploy: Django's migrate
-# is idempotent and no-ops when there's nothing pending.
-echo "[-] Applying database migrations..."
-$DC -f $COMPOSE_FILE exec -T web python manage.py migrate --noinput
+# 5. Apply database migrations if not already handled by container entrypoint
+if ! grep -qi '^RUN_MIGRATIONS=true' .env 2>/dev/null; then
+    echo "[-] Applying database migrations..."
+    $DC -f $COMPOSE_FILE exec -T web python manage.py migrate --noinput
+else
+    echo "[-] Database migrations handled automatically by web container entrypoint."
+fi
 
 # 6. Reload Caddy reverse proxy seamlessly if caddy service is running
 if $DC -f $COMPOSE_FILE ps | grep -q caddy; then
