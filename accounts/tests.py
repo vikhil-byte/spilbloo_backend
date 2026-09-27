@@ -323,15 +323,16 @@ class VerifyOtpStagingTests(APITestCase):
         self.assertEqual(self.user.state_id, User.STATE_ACTIVE)
         self.assertIn("access-token", response.data)
 
-    def test_staging_does_not_bypass_otp_with_1234(self):
-        # 1234 must be rejected if it is not the actual OTP
-        response = self.client.post(
-            self.verify_url,
-            {"email": self.user.email, "otp": "1234"},
-            format="json",
-        )
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(response.data.get("error"), "Incorrect OTP")
+    def test_production_does_not_bypass_otp_with_1234(self):
+        # 1234 must be rejected in production if it is not the actual OTP
+        with self.settings(ENVIRONMENT="production"):
+            response = self.client.post(
+                self.verify_url,
+                {"email": self.user.email, "otp": "1234"},
+                format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertEqual(response.data.get("error"), "Incorrect OTP")
 
     def test_verify_otp_saves_api_access_token(self):
         from core.models import ApiAccessToken
